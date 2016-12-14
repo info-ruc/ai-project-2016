@@ -1,0 +1,64 @@
+ 
+　　　although prolog undoubtedly has its good points  there are some tasks  such as writing a screen editor or network interface controller  for which it is not the language of choice. the most natural computational concepts  for these tasks are hard to reconcile with prolog's declarative nature. just as there is a need for even the most committed prolog programmer to use  conventional  languages for some tasks  so too is there a need for  logic  oriented components in conventional applications programs  such as cad systems  1 and relational databases   1   . at sussex  the problems of integrating logic with procedural programming are being addressed by two projects. one of these  1 involves a distributed ring of processors communicating by message passing. the other project is the poplog system  a mixed language ai programming environment which runs on conventional hardware. this paper describes the way in which we have integrated prolog into poplog. 
+i the poplog environment 
+　　　the poplog system is an ai programming environment developed at sussex university  1d. it supports prolog  pop-1  a dialect of pop-1  1  and a basic lisp. poplog currently runs on the dec vax series of computers under the vms operating system  but other implementations are in progress. 
+　　　in poplog  the link between the programming languages and the underlying machine is the poplog virtual machine. the compilers produce poplog virtual machine instructions  which are then further translated into the machine code for the host machine. at the level of host machine code  it is possible to link in programs written in languages such as fortran. procedures for  planting  instructions for the virtual machine are fully accessible to the user. thus the prolog compiler is just one of the many possible poplog programs that create new pieces of machine code. in particular  it is easy to create procedure closures. for the purposes of this paper  a closure is a structure which contains a pointer to a procedure plus a set of arguments for that procedure. the closure can then be applied as if it were a normal procedure with no arguments. some 
+*steve hardy is now at teknowledge inc  1 university ave  palo alto  ca 1  usa.  syntactic sugar  has been provided in pop-1 to make it easy to create closures; an expression 
+such as: 
+doubled 1 %  
+evaluates to a closure which when later invoked calls the procedure double with argument 1. 
+ii backtracking and continuation passing 
+　　　in this section  we i l l u s t r a t e   using examples written in pop-1  how backtracking programs are implemented in poplog using a technique called continuation passing. although examples are shown in pop-1 for clarity  in practice prolog programs are compiled directly to poplog virtual machine code. 
+　　　continuation passing is a technique in which procedures are given an additional argument  called a continuation. this continuation  which is a procedure closure  describes whatever computation remains to be performed once the called procedure has finished its computation. in conventional programming  the continuation is represented implicitly by the  return address  and code in the calling procedure. suppose  for example that we have a procedure  called prog  that has just two steps: calling the subprocedure f1 and then the subprocedure baz  thus: 
+
+　　　this definition presupposes that f1 and baz do not themselves take continuations. if they do  then we must arrange for baz to be passed continuation and for f1 to be passed an appropriate closure of baz  thus: 
+1 	c. mellish and s. hardy 
+define prog continuation ; foo baz %continuationx   
+enddefine; 
+　　　thus f1 gets as argument a closure. this closure  when applied  will cause baz to be invoked with continuation as its argument. 
+　　　continuations have proved of great significance in studies on the semantics of programming languages c1. this apparently round about way of programming also has an enormous practical advantage - since procedures have explicit continuations there is no need for them to  return  to their invoker. conventionally  sub-procedures returning to their invokers means  i have finished - continue with the computation   with explicit continuations we can assign a different meaning to a sub-procedure returning to its invoker   sorry - i wasn't able to do what you wanted me to do . 
+　　　this can be illustrated if we define a new procedure 	newprog  whose definition is try doing f1 and if that doesn't work then try doing baz  thus: 
+define newprog continuation ; foo cont i nua t i on ; 
+baz continuation ; 
+enddefine; 
+	if 	we 	now 	invoke 	newprog 	 with 	a 
+continuation  then it f i r s t calls f1  giving it the same continuation as i t s e l f   . if f1 is succesful then it will invoke the continuation. if not then the call of f1 will return to newprog which then tries baz. if baz too fails  by returning  then newprog itself fails by returning to its invoker. 
+
+define jogs x  continuation ; unify x  chris  continuation ; unify x  jon  continuation  
+enddefine; 
+　　　unify is a procedure that takes two data structures and a continuation. it attempts to unify  that i s    make equal   the two structures. if it is unsuccessful  unify immediately returns to its invoker. i f   however  it is successful  then it applies the continuation and when that returns  unify undoes any changes it made to the two structures and then itself returns to its invoker. 
+　　　before we can present a definition of unify  we must consider the representation of prolog variables. in prolog  variables start off  uninstantiated  and can be given a value only once  without backtracking ; moreover two  uninstantiated  variables when unified are said to  share   so that as soon as one of them obtains a value  the other one automatically obtains the same value. 
+　　　in poplog  a prolog variable is represented by a single element data structures called a ref. refs are created by the procedure consref and their components are accessed by the procedure cont. an uninstantiated prolog variable is represented by a ref containing the unique word  undef . if a variable is assigned some value  this value is placed into the cont. if two variables come to  share   we make one point to the other. to find the  real  value of a variable  especially one that is sharing  it is necessary to  dereference  it  look for the contents of the  innermost  ref . 
+　　　here now is a simple definition of unify written in pop-1: 
+define unify x y continuation ; 
+if x == y then 
+continuationo 
+elseif isref x  and cont x  =  undef  then 
+y -  cont x ; continuationo; 
+　 undef  -  cont x  elseif isref x  and cont x  /=  undef  then uni f y  cont  x   y  cont i nuat i on  elseif isref y  then 
+unify y x continuation  
+elseif ispair x  and ispair y  then 
+unify front x  front y   
+unify xback x  back y  continuation%   
+end i f 
+enddefine; 
+　　　the procedure f i r s t sees if the two given data structures  x and y  are identical. if so  it immediately applies the continuation. if the structures aren't identical then unify looks to see whether x is a ref and if so whether it is uninstantiated  ie. whether its cont is the word  undef  . if so  unify sets its value to y  by assigning to the cont; assignment works from left to right in pop-1   does the continuation and if this returns  ie fails  unbinds the ref by setting 
+
+the cont back to  undef . the f i n a l case of unify deals with the p o s s i b i l i t y that x and y may be l i s t p a i r s . a complete d e f i n i t i o n of unify must have a case here for each type of datastructure recognised as a prolog complex term. note that there is no else part to the if statement. the default action is simply to return  ie indicate f a i l u r e   . 
+　　　as a more complex example  here is a t r a n s l a t i o n of the prolog member predicate i n t o pop-1. the prolog d e f i n i t i o n i s : 
+member x  x|y1 . member x  y|z1  	:- member x z . 
+　　　when t r a n s l a t e d into pop-1  it w i l l be necessary to make e x p l i c i t the u n i f i c a t i o n s which are i m p l i c i t l y done when a prolog predicate is invoked. it may therefore be easier to understand the pop-1 t r a n s l a t i o n if we rewrite the prolog d e f i n i t i o n to make the various u n i f i c a t i o n s e x p l i c i t : 
+member x y  :- y =  x|m1. member x y  :- y =  l|m1  member x m . 
+       this t r a n s l a t e s into the f o l l o w i n g pop-1 procedure: 
+define member x  y  	c o n t i n u a t i o n   ; vars 	i; 	consref  undef   	-  	i; vars m; consref  undef   -  m; u n i f y   y   	conspair x m   	c o n t i n u a t i o n   ; u n i f y   y   	c o n s p a i r   l   m     member %x/m cont i nuat i on%   
+enddefine; 
+　　　the f i r s t two lines of t h i s d e f i n i t i o n create new prolog variables  refs with contents  undef   l and m. the next line checks if the value of y can be u n i f i e d with a newly created pair whose front is the value of x and whose back is the new v a r i a b l e m; if so  unify w i l l perform the c o n t i n u a t i o n . the last line of the d e f i n i t i o n t r i e s u n i f y i n g y with a pair whose components are the new variables l and m; if successful  unify w i l l invoke i t s continuation which  in t h i s case  is a closure of member i t s e l f . 
+iv conclusions 
+　　　we have presented a s i m p l i f i e d version of how prolog is implemented in the poplog environment. 
+we believe that t h i s system provides a basis for true mixed-language ai programming because: 
+ 1  the pop-1 and prolog compilers are just two of p o t e n t i a l l y many procedures which generate code for the poplog v i r t u a l machine. this means that the two languages are compatible at a low l e v e l   without there being the t r a d i t i o n a l asymmetry between a language and i t s implementation. 
+c. mellish and s. hardy 1 
+ 1  the continuation passing model provides a semantics for communication between these two languages which allows for far more than simple  subroutine calling . 
+ 1  the control facilities available within poplog  not shown here  make it possible to implement a system which is faithful to the theoretical model  but which is nevertheless efficient. 
+acknowledgements 
+　　　we would like to thank john gibson  the main implementer of the poplog virtual machine and the pop-1 compiler  for providing us with a powerful programming environment  without which this work would not have been possible. we would also like to thank aaron sloman and jon cunningham for many useful discussions. 

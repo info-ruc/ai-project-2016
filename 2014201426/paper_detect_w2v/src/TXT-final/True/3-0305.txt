@@ -1,0 +1,202 @@
+
+unlike the case for sequential and conditional planning  much of the work on iterative planning  planning where loops may be needed  leans heavily on theorem-proving. this paper does the following: it proposes a different approach where generating plans is decoupled from verifying them; describes the implementation of an iterative planner based on the situation calculus; presents a few examples illustrating the sorts of plans that can be generated; shows some of the strengths and weaknesses of the approach; and finally sketches the beginnings of a theory  where validation of plans is done offline.
+1 introduction
+the vast majority of the work in ai planning today deals with sequential planning  generating a sequence of actions to achieve a goal. a smaller community is concerned with conditional planning where plans can be tree-like structures  and an even smaller community is concerned with iterative planning  where plans can be graph-like structure with loops. the reason for this is clear: sequential planning admits interesting applications  and yet is already quite difficult  even under the assumption of complete knowledge about the initial state.
+　the bulk of the work on iterative planning is based on theorem-proving  see  biundo  1  for a survey  but see also section 1 below for some exceptions . from this perspective  plans are viewed as programs  and planning as a kind of program synthesis  manna and waldinger  1 . this is a notoriously difficult problem  and reasoning about the correctness of programs with loops  e.g. in terms of partial correctness and termination  requires mathematical induction and non-trivial algebra. the difficulty  in other words  is not at all like the difficulty with sequential planning where the size of the search space for long plans is the main problem; even short iterative programs can be quite difficult to reason
+
+　　this research was done while i was away on sabbatical at york university in toronto  rwth in aachen  universita di roma la sapienza  the university of new south wales in sydney  and simon fraser university in vancouver. i am very grateful to my hosts at these institutions for providing me with a wonderful environment for not doing teaching and administration. sabbaticals rock!about. stephan and biundo  say  plan generation on this level is an interactive process with non-trivial inferences that in our opinion  which is shared by other authors as well  citations omitted   cannot be carried out in a fully automatic way.  as far as we can tell  they would say the same today.
+　so is fully automated iterative planning completely hopeless  perhaps. but faced with an intractable reasoning problem  we can look for compromises. in this paper  we forego the strong guarantees of correctness provided by the theoremproving approach. we consider a new way of generating iterative plans that does not traffic in loop invariants  nonnegative decreasing expressions  or any of the other items associated with proving programs correct. the resulting plans will come with much weaker guarantees; plan validation will need to be done separately.
+　the application we have in mind is the sort of high-level programming typical of cognitive robotics  e.g.  lespe＞rance et al.  1 . here we expect users to provide programs that tell a robot what to do at a very high-level  with considerable nondeterminism left to the robot to deal with at runtime. part of the nondeterminism can be in the form of declarative goals to achieve. theywill requireplanningon the part of the robot  but the plans are expected to be small relative to the overall mission of the robot. the main contribution of this paper is a new way of generating small plans with loops in this setting.
+　in the rest of this section  we describe a motivating example  define the class of plans we are searching for  and present the general approach. in section 1  we discuss the implementation of a system called kplanner and the novel way it generates loops. in section 1  we present three examples of kplanner in use. in section 1  we discuss its limitations and related work. in section 1  we present the beginnings of a theoretical foundation. in section 1  we conclude.
+1 a motivating example
+the problem we wish to consider is that of chopping down a tree and putting away the axe  sardina et al.  1 . we have at our disposal two primitive actions: chop  which hits the tree once with the axe  assuming the tree is up and the axe is available  and store  which puts the axe away  assuming it is available. we observe the following:
+1. with no additional information  the problem is insoluble. there is no way to know when or if the tree will go down  and when to put away the axe.
+1. if we are told that the tree will go down if it is hit 1 times the problem is solved with the following sequential plan:
+chop ; chop ; chop ; store
+1. if we are told that the tree will go down if it is hit at most 1 times  the problem is again insoluble. but if we are given a third action  look  which is a sensing action  reiter  1  telling us whether the tree is down or up  then the problem can be solved with the following conditional plan:
+case look of
+-down: store -up: chop ;
+case look of
+-down: store
+　　-up: chop ; store endc
+endc
+1. if all we are told is that the tree will eventually go down if it is hit repeatedly  and we have the look action  the problem can be solved with the following iterative plan:
+loop
+case look of
+-down: exit
+-up: chop ; next
+　endc endl ; store
+let us call this plan tc  treechop  for reference.
+so in the most general case where the goal is achievable  an iterative plan like tc is necessary to achieve it. moreover tc is general  in that it handles all the cases where a conditional plan would be sufficient too.
+1 robot programs
+once we move beyond simple sequential plans  it becomes necessary to specify exactly what we mean by a plan. it is convenient here to use a variant of the robot programs of  levesque  1  for this purpose. assume we are given a set of primitive actions  some of which may be sensing actions each having a finite set of possible sensing results. robot programs and their execution are defined by the following:
+1. nil is a robot program executed by doing nothing;
+1. for any primitive action and robot program seq is a robot program executed by first performing ignoring any result  and then executing ;
+1. for any primitive action with possible sensing results to and for any robot programs to
+case if if is a robot program executed by first performing and then on obtaining the sensing result continuing by executing ;
+1. if and are robot programs  and is the result of replacing in some of the occurrencesof nil by exit and the rest by next then loop is a robot program  executed by repeatedly executing the body until the execution terminates with exit  rather than next   and then going on by executing the continuation
+a formal definition of the execution of robot programs in the situation calculus is given in  levesque  1 . the example plans shown earlier  including tc are pretty-printed versions of robot programs. although quite limited in form  no recursion  no logical expressions  no fluents  no variables   there is a precise sense in which robot programs  with the inclusion of five special primitive actions  are universal  lin and levesque  1 . so for us  planning is this: given a goal  find a robot program that achieves it.
+1 the planning approach
+we are going to try to solve planning problems like the tree chopping where some unknown quantity must be dealt with. specifically  we assume that among the fluents we are dealing with  there will be a single distinguished one  which we will call the planningparameter  that has the following properties:
+ 1  its value is not known or even bounded at plan time  and  1  no loops would be required to achieve the goal if its value were known. in other words  loops are required  if at all  only to deal with an unknown and unbounded planning parameter. for tree chopping  the planning parameter is the number of chops needed to fell the tree.
+　given an application domain with a planning parameter rather than generating a plan and proving that it works for all values of  e.g. by using partial correctness and termination   we will work with two bounds on and try to find plans with loops using these bounds. in particular  we assume the following:
+the user will provide a constant  called the generating bound  and we generate a plan  possibly containing some number of loops  that is provably correct under the
+	assumption that	;
+the user will provide a second larger constant  called the testing bound  and we test that the plan generated in the first step is also provably correct under the assumption that
+so the only guarantee we get out of this is that the plan we return will be correct assuming that this is far from foolproof. for example  the conditional plan for tree chopping presented above works correctly for and but fails when suppose  however  that the user had specified and then the smallest conditional plan that satisfies both bounds would have actions in it. if we generate plans using
+only  and we consider smaller plans before larger ones  we will generate desired iterative plans well before we encounter undesired conditional ones  and see the theory in section 1 .
+1 the planner
+so the planning setup  then  is the following:
+the user provides a problem specification defined by a list of primitive actions and fluents  and formulas characterizing the initial and goal states  and for each action  its preconditions  effects  and sensing results;
+	the user also identifies the parameter	and supplies the
+	two numbers	and	;
+we generate a plan that is correct for ; because is small  this search can be done reasonably efficiently  as we will see;
+we test the plan to see if it is correct for ; because this involves only testing a given plan  this can also be done reasonably efficiently  even for large
+in practice  and on the examples considered to date  even for very small and for very large almost all of the time is
+spent finding a plan that works for
+　the planner  called kplanner  is written in prolog  and consists of three main modules: a plan tester  a plan generator  and a formula evaluator used by the other two modules.1
+　we will describe the formula evaluator in more detail when we look at some examples below. for now  it suffices to note that we need to be able to handle both the projection task  determining if a formula is true after a sequence of actions  and the legality task  determining if an action can be executed . we use regression for both  reiter  1 . moreover we need to be able to incorporate the putative results of sensing  and use them in the evaluation. so instead of just keeping track of a sequence of actions performed to date  we maintain a history consisting of pairs of actions and sensing results.  for actions without sensing results  we use ok as the result.  finally  we need to be able to determine when a sensing result cannot occur based on the history to date. for example  for tree chopping where we know that the look action cannot produce a sensing result of up in a history that contains two legal chop actions.
+1 testing plans
+given a plan and a testing bound we need to determine if correctly achieves the goal assuming that since we have a bound on we do not need to prove a theorem  but can simulate the execution of for all possible results of the sensing actions and confirm that the goal is satisfied in all cases. we have the following: a plan achieves a goal
+starting in history initially empty  if1.	nil andholds in history	;1.	seq	the precondition of	holds in	andachievesin history	ok ;1.	case	the precondition of	holds in	andfor each if	such that	is a possible sensing	result for	given that	achieves	in history
+;
+1.	is a loop that unwinds to	and	achieves	in history
+the unwinding of loop is but with all occurrencesof exit replaced by and with all occurrences of next replaced by loop itself.1 observe that unwinding a loop produces a plan that executes the same way as the original loop. this will be significant when it comes to generating plans.
+1 generating plans
+given a generating bound we use a variant of progressive planning to produce a plan that correctly achieves the goal assuming that we have the following: to find a plan that achieves a goal starting in history  initially empty   1. if holds in return nil;
+1. otherwise  select a primitive action whose precondition is satisfied in  and maybe other criteria too ;
+1. if	has no sensing results  do the following:
+ a  find a plan that achieves starting in ok ;  b  return the plan seq ;
+	if	has sensing results  then do the following:
+ a  for each sensing result that is possible in given that find a plan that achieves starting in history ;
+ b  return the plan case where is the list of if for the and from the previous step
+ the remaining sensing results are impossible  and so the corresponding are  don't care  ;
+1. if the plan in the previousstep is the unwindingof a loop return the loop as well  as described below .
+1 generating loops
+the key question is this: where are plans with loops going to come from  if not from the proof of a general  universal theorem  as we suggested in the generationprocedureabove  they can comefrom sequentialand conditionalplans that have already been generated.
+　to see how this works  consider two conditional plans that are correct for tree chopping given that	:
+case look ofcase look of-down: store-down: store-up: chop ;-up: chop ;storecase look ofendc-down: store-up: don't care
+endc
+endc
+the one on the right does a sensing action that is not needed since that up sensing result is impossible for moreover  that plan remains correct for for any substitution of the  don't care.  the key observation here is that there is a substitution for which that plan becomes the unwinding of a loop: if we replace the  don't care  by the robot program seq chop tc where tc is the plan above  then the program that obtains is an unwinding of tc 1 the conclusion: tc is also correct for and can be returned as a potential plan to be tested for the larger bound  in this case  successfully .
+　but for this idea to be practical  it must be possible to quickly check if a plan matches the unwinding of a loop  or the unwinding of an unwinding etc. . how can we do this without just guessing at the loop  here is where using prolog as our implementation language pays off: we can write an unwind predicate  so that unwind holds if loop
+　% p is a loop that unwinds to q. unw p q  :- p=loop b c   sub b p c q .
+% sub b x y q  holds when q is the result
+% of replacing in b each 'exit' by y and
+　% each 'next' by an unwinding of x sub       q  :- var q   !. sub exit x y q  :-not x=loop exit     q=y. sub next x   q  :-not x=loop next     unw x q . sub seq a p  x y seq a q   :-sub p x y q . sub case a u  x y case a v   :-subl u x y v . sub loop g p  x y loop g q   :-sub p x y q .
+subl       .
+subl  if r p |u  x y  if r q |v   :sub p x y q   subl u x y v .
+figure 1: prolog code for an unwind predicate
+
+　unwinds to but then call it by passing it a and having it return a simplified code for doing this is in figure 1. it is easy to confirm that when the is the conditional plan on the right above  with a prolog variable as the  don't care    the first it returns is the desired iterative plan tc
+　this method of generating loops has turned out to be significant. the alternative of enumerating all possible plans containing loops is not practical even for very small plans.
+1 the planner in action
+we are now ready to consider kplanner in action on some problem specifications provided by the user. the representation we use is a variant of the one in indigolog  de giacomo and levesque  1; sardina et al.  1  based on the situation calculus  mccarthy and hayes  1; reiter  1 . the user supplies the definition of nine predicates in prolog  which we describe below.1
+　as in indigolog  all fluents in kplanner are functional. unlike indigolog  fluents are interpreted epistemically  in that we take them to have more than one possible value  according to what is currently known  vassos  1 . this allows us to reason about sensing without some of the disadvantages of possible worlds  demolombe and parra  1 .
+　the predicates described below take as their arguments conditions which are logical formulas  closed under boolean operators and quantifiers. the atomic formulas are arbitrary prolog goals  except that they may contain fluents. these are evaluated by replacing the fluents by their values and then calling prolog on the result. we say that a formula is possibly true if the goal succeeds for some possible value of the fluents; the formula is known to be true if the goal succeeds for every possible value of the fluents.
+　the prolog predicates defined by the user are  for action fluent sensing result condition and arbitrary value  : primfluent declares as fluent;
+primaction declares to have the as possible sensing results; when the action is
+considered to provide no sensing information;
+prim fluent axe . prim fluent tree . prim fluent chops max .
+prim action chop  ok  . prim action look  down up  . prim action store  ok  .
+poss chop and axe=out tree=up  . poss look true . poss store axe=out .
+init axe out . init tree up . init tree down .
+causes store axe stored true . causes chop tree down true . causes chop tree up true .
+causes chop chops max x x is chops max-1 .
+settles look x tree x true . rejects look up chops max 1 true . settles look down chops max 1 true .
+parm fluent chops max .
+init parm generate chops max 1 . init parm test chops max 1 .
+figure 1: a problem specification for tree chopping
+
+poss	is the precondition for	; init	is a possible initial value for	;
+causes when holds  causes to get value ; more precisely  any for which is possible becomes a possible value of  the is optional 
+	settles	when	is known  after doing
+	and getting result  	is known to have value
+	rejects	when	is known  after doing
+	and getting result  	is known not to have value
+the final two predicates are not part of the action theory  but are used to specify the planning parameter  and its possible values for generating and for testing:
+parmfluent fluent is the planning parameter; initparm where is generate or test  is a possible initial value for the planning parameter
+1 the tree chopping example
+in its most direct formulation  we would formalize tree chopping using a fluent chops needed as the planning parameter. but then to handle a testing bound of 1 would require us to deal with 1 possible values for this fluent. instead  it is sufficient to keep track of the maximum of these possible values  which we call chops max.
+　the full problem specification in this language for the tree chopping example is in figure 1. since it is not known whether the tree is up or down initially  there are two possible initial values for the tree fluent  and similarly after a chop action.  actions like this are sometimes called nondeterministic
+prim fluent acc n   :- n=1 ; n=1. prim fluent input . % the unknown fluent
+prim action incr acc n   ok   :- n=1 ; n=1. prim action test acc 1   same diff  .
+poss incr acc    true . poss test acc 1  true .
+causes incr acc n  acc n  v v is acc n +1 . settles test acc 1  same input v v=acc 1  . rejects test acc 1  diff input v v=acc 1  .
+init acc    1 . parm fluent input . init parm generate input v  :- v=1 ; v=1. init parm test input v  :- v=1 ; v=1; v=1.
+figure 1: a counting example
+
+in the literature.  the look action is what settles its value. in addition  if look reports up  then chops max cannot be 1. so if we know that chops max is 1  as a result of having performed some chop actions   the up result is impossible. we will show the output of a run of kplanner on the next example. for this one  suffice it to say that it finds tc in .1 seconds.1
+1 a counting example
+we turn now to a very different example involving some simple counting. the problem is this: we have two accumulators and some unknown integer input where . the primitive actions are: incracc increment accumulator  both start at 1 ; and testacc sense if the first accumulator has the same value as the input. the goal is to make the second accumulator have the value 1
+　the complete problem specification is in figure 1. there are three fluents  acc acc and input  the last of which is the planning parameter. a run of kplanner with the output it produces is in figure 1. kplanner works by iterative deepening  and there are numbers in the output to indicate the level. an 'x' indicates a generated plan that was sufficient for the generating bound  but that did not work for the testing bound  many of which were omitted from the figure . note the multiplication in the goal. nothing in the specification said anything about multiplication. although progressive planning has serious disadvantages  one advantage it does have is that all we need to be able to do is test if a goal condition is satisfied; we do not need to reason about the goal in a more analytic way.
+1 a searching example
+we now turn to a much more complex example  that of searching an unbounded binary tree for a target node.1 more precisely the primitive actions are  1  check node type: sense
+the goal: acc 1  is 1 * input - 1 1 1 1xx ... 1xx ... 1xx ...
+a plan is found after 1 seconds.
+------------------------------------------incr acc 1  ;
+loop
+case test acc 1  of -same: exit -diff:
+incr acc 1  ; incr acc 1  ; incr acc 1  ; next
+　endc endl ; incr acc 1 
+figure 1: doing the arithmetic
+
+if the current node is a target node  a non-target leaf node  or a non-target internal node  having left and right children ;  1  push down to : go down from an internal node to the left or right  and  1  pop up from: return from a child node. a few moments thought should convince the reader that this problem cannot be solved without additional storage  and so we assume that push down to pushes the direction onto an internal stack  and that pop up from pops the stack and produces the popped value as a sensing result.
+　the rest of the specification is too large to display here. we use a fluent depth max much like chops max so that we cannot get a node type of internal when depth max is 1.
+but when do we know that we cannot get a node type of
+leaf  this is a bit trickier. the answer is: when there are
+no more nodes left to explore! for example  assuming we search left branches before right ones  then when we are on the rightmost branch of a tree  we can only get node types of internal or target. this is reflected in the following:
+rejects check node type leaf stack s  all x member x s  last dir x   .
+getting a result of leaf rejects any stack of moves whose members are all for the last direction available. without this constraint  the problem is insoluble; with it  we get the very nice plan shown in figure 1. note that kplanner generates a nested loop; we believe that this nesting is required here.
+1 discussion and related work
+because of the loops  the three examples presented here are clearly beyond the scope of existing sequential and conditional planners. as far as we know  no planner based on fully automated theorem-proving can generate the three plans either. two other camps not based on theorem-proving have considered an interesting special case of iterative planning  for what might be called repeated attempt problems.
+	first  with probabilities. consider an action	that has a
+non-zero probability of making some true. if we assume repetitions of have independent outcomes  then an iterative plan like tc will achieve with probability 1. this is just right for trying to pick up a block  ngo and haddawy  1  or to find a good egg  bonet and geffner  1 . however  independence is untenable for tree chopping  and it is not
+the goal: current = target
+1 1 1 1xxxxx
+a plan is found after 1 seconds.
+-------------------------------------------
+loop
+case check node type of -target: exit -leaf:
+loop
+case pop up from of
+-left: exit
+　　　-right: next endc endl ; push down to right  ; next
+-internal: push down to left  ; next
+endc
+endl
+figure 1: searching a binary tree
+
+clear what to replace it with. it is even less clear how to exploit probabilities in the counting or search examples above.
+　a related approachis the model-checkingof  cimatti et al.  1   where planning problems are cast as finite state systems. for tree chopping  if we are willing to ignore the planning parameter  this works out perfectly: they would get four states and generate  the equivalent of  tc almost instantly. however  without that information about the planning parameter  they are forced to conclude that there is no  strong  solution to the problem  only a  strong cyclic  one. indeed they can never generate a strong solution when loops are required. the counting and search examples above  which depend on the planning parameter in a more direct way  would thus appear to be outside their scope as well.
+　kplanner has its own limitations  however. in particular  it does not scale at all well as the search space grows  even for seemingly easy problems. consider the problem of getting some good eggs into a bowl  bonet and geffner  1 . for just one egg  we need a plan with a single loop like in figure 1. to get three good eggs  we would need a plan consisting of three copies of this plan  strung together sequentially. without an additional sensing action to tells us if we have enough good eggs  there is not a more compact solution. so with this we can force kplanner to generate long plans. and how well does it do  here are some timing results:
+number of size of plan number of running time good eggs  unwound  backtracks in seconds
+
+1	1	.1
+1	1	.1
+1	1.1
+1	1.
+1	      	1 weeksas is very clear  unless the search space can be limited in some way  e.g. by forward filtering  bacchus and kabanza  1   kplanner is practical only for small plans  in keep-
+loop break next egg into dish ;
+case sniff dish of -good egg: exit -bad egg: discard dish contents ; next
+　endc endl ; transfer dish contents to bowl
+figure 1: getting one good egg into a bowl
+
+ing with the cognitive robotics application sketched above. we might say that it is better suited for small but difficult problems than for large but easy ones. for example  it quickly finds a nice solution to the more general problem of getting an arbitrary number of good eggs in the bowl  where a second sensing action now determines when there are enough.
+1 towards a theory
+kplanner does a good job of synthesizing small plans with loops  but without a strong guarantee of correctness. while our approach has been to construct a plan in a way that does not require simultaneously proving its correctness  it would of course be very useful to know that the plans were nonetheless correct. are there conditions under which a plan that works for values of the planning parameter up to the testing bound will be guaranteed to work for all values of   without looking too hard for a free lunch  we can sketch a promising direction for further research.1
+　let stand for the proposition that if we start in any initial state where and we perform the action sequence we end up in a goal state. let us call a planning problem simple wrt action if it satisfies the following:
+1. sensing can only tell us whether or not the initial valueof was equal to the number of actions done so far.
+1. if an action sequence is legal starting in one initial statebut not in another  then at some point in the sequence  the sensing results would be different.
+1. if and and where then
+the last condition says that if it was sufficient to add in going from to then that can also be used for any larger this ensures that loops depend only on the
+　both the tree chopping and the counting examples can be shown to be simple  wrt chop and incracc respectively . the search example  on the other hand  is nowhere near simple. we get the following theorem:
+theorem 1 suppose we have a planning problem that is simple with respect to action and a robot program that contains occurrences of . if is a correct plan for all values of   then is correct for all values of .
+this theorem is proved by adapting ideas from the pumping
+lemma of classical automata theory. it suggests a variant of kplanner: instead of having the user specify a testing bound  we compute a testing bound once a plan has been generated by counting the occurrences of in then any plan that passes the test is guaranteed by the theorem to be correct. this applies to simple planning problems only; but we believe that theorems like the above can be found for less restrictive classes of problems. we should not expect to be able to compute testing bounds in this way for all planning problems however  since armed with suitable primitive actions  robot programs have the power of turing machines.
+1 conclusion
+we have presented a new way of generating a plan with loops that is not tied to proving a theorem about its correctness. the method involves generating a plan that is correct for a given bound  determining if the plan is the unwinding of a plan with loops  and testing if another unwinding of the plan with loops would also be correct for a larger bound.
+　other than the handling of loops  these steps reduce to traditional non-iterative planning  and would benefit from being performed by a more efficient conditional planner  such as the one by petrick and bacchus . similarly  the winding and unwinding of loops is performed by kplanner in a fairly obvious way. anything that would reduce the number of legal plans considered would speed things up considerably  since for iterative deepening  all legal plans of one size must be considered before going on to the next.
+　on the more theoretical side  we presented a theorem showing that this method of planning is correct for a certain class of simple planning problems. it remains to be seen whether the theorem can be strengthened to include more complex planning problems for which the planner does appear to work  such as the search example presented here.
+acknowledgements
+thanks to gerhard lakemeyer and fahiem bacchus for helpful comments on an earlier version of the text.
