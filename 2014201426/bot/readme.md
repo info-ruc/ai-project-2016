@@ -4,62 +4,55 @@
 ##2.数据预处理
 ####(一) 获取训练样本
 	样本来源：BOT图片集
-	代码：train.py
+####(二)划分训练集和测试集
+	将BOT数据集的rar压缩包解压，得到预览集和大的数据集，将预览集留作测试，大的数据集用来训练，
+	大数据集划分成了train set和development set（用于调节参数防止过拟合）
+	处理后得到train.txt,test.txt，txt文件每一行包含图片名和标签（代表所属的类别）和picture文件夹中包含所有图片，
+	由于图片包含jpg，jpeg，png，gif格式，在转换为lmdb时会报错（无法打开文件），
+	所以这里将所有的非jpg格式的文件转换成jpg（用imagemagick转换），这里可能会损失图片质量，导致最后准确率无法提升。
+	代码：	
+			python merge.py
+			python getTrain.py
+			mv data/Dog data/dog
+![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/1.png) 
 
-####(二)转换pdf
-	用linux自带的pdftotext将pdf转化为txt
-	在pdf转化为txt已经自动进行了去除图和表格
-####(三)处理txt
-	去除标题和作者信息
-	去除Reference 信息
-	去除论文引用的标号 []
-	将其他括号，标点符号替换为空
-	所有单词转化为小写
-	数字归一化处理
-	去除停顿词且长度小于四的单词后用空格连起来，每篇文章一行，训练和测试各放一个文件夹，真论文和假论文各放文件夹中的一个文件中，每个文章一行。
-	
-***
-	def make_seg(filename,Dir,frequency=0):
-		raw=openfile(filename)
-		tokens = word_tokenize(raw)
-		tokens=[t.lower() for t in tokens if t not in string.punctuation and t.isalpha()]
-		lemmatizer = nltk.WordNetLemmatizer()
-		tokens = [lemmatizer.lemmatize(token) for token in tokens]
-		stopwords1 = stopwords.words('english')
-		tokens = [token for token in tokens if token not in stopwords1]
-		tokens = [token for token in tokens if token not in newstop]
-		fdist = nltk.FreqDist(tokens)
-		tokens = ([w for w in tokens if len(w)> 3 and fdist[w]>frequency])
-		filename = filename.split("/")[-1][:-4]
-		f = open(Dir+filename+".txt","w")
-		f.write(' '.join(tokens)+'\n')
-		f.close()
-		return fdist
-***
-	代码：processTxt.py getSegment.py
-##3.判定
-####word2vec+svm
-	用gensim 自带的word2vec生成文章中词汇的词向量，然后每篇文章的词向量由单词的词向量加起来归一化后所得。
-	    model=word2vec.Word2Vec(size=128,window=6,cbow_mean=0,sample=1e-4,hs=1,negative=0,workers=12)
+####(三)转换成LMDB格式
+	 在转换成lmdb格式时要制定图片resize的width和height，这里对应着prototxt中的cropsize，
+	 最开始的实验中我在这里使用了256×256,而cropsize设成了32，导致每一次都只截取了图片的一小部分进行训练和测试，
+	 导致训练和测试的准确率都只有百分之三十多。
+	 代码：bash con2jpg.sh
+##3.模型训练
+####resnet-20层
+	借用了处理cifar10数据集的参数选择，训练和测试的batchsize都设为100
+![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/2.png) 
+##4.训练结果   
+![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/3.png) 
 
-        for word in line:
-            try:
-                vec=vec+model[word]
-            except:
-                wa+=1
-        fout.write(str(ss)+' ')
-        vec=preprocessing.normalize(vec)[0]
-        for i,num in enumerate(vec):
-            fout.write(str(1+i)+":"+str(num)+' ')
-        fout.write('\n')    
-####结论   
-	然后用svm训练词向量得到模型去预测测试集中的论文，结果100%，比用传统机器学习的方法准确率更高且速度更快。
-	
-![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/233) 
+	可以看到在五万多次左右train set的准确率在不断上升，test set的准确率却在70%左右不变。
+####finetune
+	所以在保持这个训练到64000次迭代的同时，用51500次迭代后保存的model用测试集进行fine-tune
+![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/4.png) 
 
-####得到TXT-final后运行
+	开始finetune使用训练的起始lr=0.1,但是发现loss太大了，于是立刻停止将lr改为0.01![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/5.png)
 
-	python getSegment.py
-	python train_w2v.py
-	python getvec_w2v.py
-	python predict.py
+#####solver2.prototxt![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/6.png)
+![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/7.png)
+
+	然后再用新得到的10000次迭代后的weight去finetune训练集	可以看到在5000次迭代左右测试集准确率稳定在79%左右，测试集在83%到93%![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/8.png)
+
+##5.测试
+	分别用64000次迭代不加finetune所得到最后的模型和51500次迭代加上10000次finetune所得到的模型对预览集进行测试
+	![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/9.png)
+![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/10.png)
+
+	从测试结果中可以看出用development set finetune 所得到的模型更具有普适性，更能准确的描述测试集。##6.反思：	测试集准确率没有达到90%，考虑有以下几点原因	一：在转图片格式为jpg以便处理成lmdb格式时损失了信息（个人认为是主要原因）	二：没有gpu跑起来的速度太慢无法训练更多以尝试不同的参数来达到更高的准确率
+
+####运行
+	python merge.py
+	python getTrain.py
+	mv data/Dog data/dog
+	bash con2jpg.sh
+	python changeTag.py
+	python train.py
+	bash getLMDB.sh
+	bash train.sh
