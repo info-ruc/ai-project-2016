@@ -1,16 +1,16 @@
-#1.任务目标
-##
+#甄别真假论文
+##1.任务目标
 	给定一篇（些）论文，判断其是否为真论文，即非scigen生成的论文。
-#2.数据预处理
-##(一) 获取训练样本
+##2.数据预处理
+####(一) 获取训练样本
 	正样本来源：由老师给定的三千多论文样本
 	负样本来源：于MIT scigen上爬取下来的论文，原打算爬三千多篇论文下来，由于有大量重复，最后只有一千六百多篇。
 	代码：crawelFalse.py
 
-##（二）转换pdf
+####(二)转换pdf
 	用linux自带的pdftotext将pdf转化为txt
 	在pdf转化为txt已经自动进行了去除图和表格
-##（三）处理txt
+####(三)处理txt
 	去除标题和作者信息
 	去除Reference 信息
 	去除论文引用的标号 []
@@ -38,8 +38,8 @@
 		return fdist
 ***
 	代码：processTxt.py getSegment.py
-#3.判定
-##word2vec+svm
+##3.判定
+####word2vec+svm
 	用gensim 自带的word2vec生成文章中词汇的词向量，然后每篇文章的词向量由单词的词向量加起来归一化后所得。
 	    model=word2vec.Word2Vec(size=128,window=6,cbow_mean=0,sample=1e-4,hs=1,negative=0,workers=12)
 
@@ -53,10 +53,14 @@
         for i,num in enumerate(vec):
             fout.write(str(1+i)+":"+str(num)+' ')
         fout.write('\n')    
-        
+####结论   
 	然后用svm训练词向量得到模型去预测测试集中的论文，结果100%，比用传统机器学习的方法准确率更高且速度更快。
-![](/home/victoria/Pictures/233) 
-python getSegment.py
-python train_w2v.py
-python getvec_w2v.py
-python predict.py
+	
+![](https://github.com/Victorianuonuo/ai-project-2016/blob/master/2014201426/pictures/233) 
+
+####得到TXT-final后运行
+
+	python getSegment.py
+	python train_w2v.py
+	python getvec_w2v.py
+	python predict.py
