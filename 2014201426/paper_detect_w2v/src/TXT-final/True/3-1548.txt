@@ -1,0 +1,183 @@
+
+most probabilistic inference algorithms are specified and processed on a propositional level. in the last decade  many proposals for algorithms accepting first-order specifications have been presented  but in the inference stage they still operate on a mostly propositional representation level.  poole  1  presented a method to perform inference directly on the first-order level  but this method is limited to special cases. in this paperwe present the first exact inference algorithm that operates directly on a first-order level  and that can be applied to any first-order model  specified in a language that generalizes undirected graphical models . our experiments show superior performance in comparison with propositional exact inference.
+1 introduction
+probabilistic inference algorithms are widely employed in artificial intelligence. however  most of them do not accept first-order specifications of models  which can abstract over classes of objects  requiring instead propositional ones which are longer and redundant because they must be specified variable by variable.
+¡¡in the last decade  many proposals for algorithms accepting first-order specifications have been presented  ngo and haddawy  1; ng and subrahmanian  1; jaeger  1; kersting and de raedt  1; friedman et al.  1; pfeffer et al.  1; poole  1; anderson et al.  1; richardson and domingos  1; laskey  1   most of which based on the theoretic framework of  halpern  1 . however  these solutions perform inference at a mostly propositional level  that is  dealing with the random variables instantiated from the first-order  parameterized variables in the first-order specification  usually only the relevant random variables will be present in the propositional version . in domains with a large number of objects this may be both costly and essentially unnecessary. for example  a medical application can be about a large population of people infected with a certain disease and have a model of the probability of death of a person  any person  with that disease. to answer the query  what is the probability that someone will die of this disease    an algorithm that depends on propositionalization would have to instantiate a random variable per patient. however this is not necessary since one can reason about individuals on a general level  provided one knows the population size  in order to answer that query in a much shorter time.
+¡¡in such a scenario it would be possible to devise a way of using the available model to answer the query without considering each individual. however  this would require a manual devising of a process specific to the model or query in question. what is missing to date is an algorithm that can receive a general first-order model and automatically answer queries like these without computional waste.
+¡¡a first step in this direction was given by  poole  1   which proposes a generalized version of the variable elimination algorithm   zhang and poole  1   that is lifted  that is  deals with groups of random variables at a first-order level. the algorithm receives a specification in which parameterized random variables stand for all of their instantiations and then eliminates them in a way that is equivalent to  but much cheaper than  eliminating all their instantiations at once.
+¡¡the algorithm in  poole  1   however  works only for a very particular type of model because its only elimination operation is what we call inversion elimination  which requires special conditions explained later. these special conditions may sometimes be met by carefully chosen elimination orderings  but in certain cases no such orderingexists and inversion elimination cannot be applied at all steps. this introduces the need for another type of elimination  counting elimination  which can always be applied but costs more. by putting these two operations together we present the first algorithm capable of dealing with any first-order probabilistic model that operates directly on first-order representations  without resorting to a propositional level. we also show that the algorithm is correct and provide experimental results comparing it to a propositional algorithm.
+1 motivation
+a probabilistic model over a set of random variables is defined by a set of dependencies  each of them on a subset of those variables. in a propositional model  each dependency explicitly refers to the variables it affects. for example  consider a markov network involving a potential function  or factor  such as:
+¦Õ epidemic sick  =1 
+1 if epidemic ¡Ä sick  if epidemic ¡Ä  sick 1 otherwise.¡¡in fact  this type of potential function will be common enough in this paper that we define  if ¦Á then ¦Â p  to mean
+¦Õ v ar ¦Á ¦Â   =p 
+1   p if ¦Á ¡Ä ¦Â  if ¦Á ¡Ä  ¦Â 1 otherwise. where ¦Á and ¦Â are boolean formulas on binary random variables and v ar ¦Á ¦Â  is the set of these random variables. if p is omitted  it is assumed to be 1.  ¦Â p  is the same as  if   then ¦Â p  and  if ¦Á then ¦Â p else q  stands for both  if ¦Á then ¦Â p  and  if  ¦Á then ¦Â q . so we can write a model in the more readable fashion:1
+	if epidemic then sick 1	if sick then death 1
+in most practical problems  the same factor holds on many different sets of variables  requiring propositional models to repeat that factor several times  modulo the specific variables involved each time. in our example  if we wish to keep track of whether each member of a population is sick  with distinct variables sick john  sick mary  ...   we would have to
+write if epidemic then sick john  1 if sick john  then death john  1 if epidemic then sick mary  1
+	if sick mary  then death mary  1	...
+ this renders the model specification unnecessarily complex and redundant. moreover  an inference algorithm will consider each of those factors separately  even though there is some structure across them that should be exploited.
+¡¡currently  the most common way of dealing with these situations is to keep the original model and use it for each separate object  in this case  each person as needed. this however does not help when different instances of the factor need to be used at the same time  as it would be the case to answer the query p sick john  ¡Ä sick mary    for example. in these situations  procedures specific to a given model have to be manually tailored  in what is a time consuming solution.
+¡¡a natural way around this problem is to specify recurring factors in a parameterized way. this would allow us to express the same as above in the more succint way if epidemic then sick person  1 if sick person  then death person  1
+ where person  and  in our notation  words starting with a capital  is a typed logical variable assuming any value from the set of people involved in the problem. the semantics of this representation is simply that it should be equivalent to the propositional model formed by all possible instantiations of its logical variables. following poole  1   we call these parameterized factors parfactors.
+¡¡this semantics immediately provides an inference algorithm for such a representation  namely the one in which we apply any regular propositional inference algorithm to the propositionalized model  but this would be overkill. for example  in order to solve the query p death john |sick john   it is only necessary to consider the instantiations for person = john  ignoring other values. one could also consider general queries such as p sick person |death person   that do not require any instantiations at all in order to be solved. an extreme example of the benefit of directly using the first-order representation is given by adding the parfactor  if death person  then somedeath  to the model and considering the query p somedeath|epidemics . the tree width of the propositionalized graphical model is the population size  while the query can in fact be answered in time independent from the population size  a similar example is shown in fig. 1 . it is therefore desirable to have an algorithm performing lifted inference  that is  inference directly on the first-order level  which instantiates parfactors only when necessary.
+¡¡the languages we mentioned before allow parameterized specifications of probabilistic models. however  no corresponding first-order inference algorithm has been provided; inference is still performed by generating some propositionalized form of the model and using regular propositional inference algorithms on them  although some systems  like spook in  pfeffer et al.  1   benefit from the first-order structure in some ways . in this paper we present an algorithm which performs exact lifted inference on first-order models.
+¡¡it is also useful to allow deterministic constraints on the logical variables of parfactors. for example 
+if sick person1  ¡Ä roommate person1 person1 
+	then sick person1  1 person1= person1	 1 
+diabetes person  1 person 1= john ¡Ä person 1= mary
+the constraint person1= person1 in the first factor states that only its instantiations satisfying this condition will be considered. in the second factor  the potential of 1 for the random variable diabetes person  is assigned only for instantiations in which person is distinct from john and mary.
+1 language  notation and semantics
+our language and semantics are essentially the same as those in  poole  1   that is  those of a markov network specified in a first-order language that allows parameterized random variables 1 and are also similar to markov logic networks  richardson and domingos  1 . a parfactor is a triad  ¦Õ a c  representing the applications of a potential function ¦Õ on all instantiations of a tuple of logical atoms a according to assignments to the logical variables in these atoms that satisfy a constraint formula c. at this point  we restrict ourselves to constraints with a finite number of solutions so as to have finite models only  this prevents us from using function symbols - more on this in section 1 . for example   1  is represented by the parfactor  ¦Õ a c   where ¦Õ is the appropriate potential function  a is {sick person1  roommate person1  sick person1 } and c is person1= person1.
+¡¡note that we are in no way committed to the  if ...then  construction used  which is simply a notation for a specific type of potential function. any potential function is allowed  and random variables can be multivalued rather than binary only.
+¡¡just as with regular undirected graphical models  here the joint probability distribution is determined by the product of all potential functions given an assignment to all randomvariables  which are instantiations of atoms in parfactors  and therefore ground atoms . the only difference is that in a first-order model this product involves all instantiations of all parfactors. given a set of parfactors g  the joint distribution defined by it is
+	p rv  g   ¡Ø y y ¦Õg ag¦È 	 1 
+g¡Êg ¦È¡Ê¦¨g
+where rv  g  is the set of all random variables  ground atoms  involved in all instantiations of all its parfactors  ¦¨g is the set of all assignments  or substitutions  to the logical variables of g that satisfy its constraint  the solutions to the constraint   ¦Õg is the potential function in g  ag is the tuple of atoms in g and ag¦È is the instantiation of this tuple given an assignment ¦È to logical variables.
+¡¡further notation include  for a parfactor g  cg for the constraint in g and  for a set of parfactors g  ag for the atoms in g  cg for the total constraint vg¡Êg cg and ¦¨g for the set of solutions of cg. for any object ¦Á  lv  ¦Á  and rv  ¦Á  are the sets of logical and random variables in ¦Á  respectively. finally  all sets of parfactors are implicitly assumed to be standardized apart  that is  logical variables are renamed if necessary so that no logical variable is used in more than one parfactor in the set.
+1 inference
+the inference problem is  given a set of random variables  ground atoms  q representing a query  to calculate the marginal probability of q given a model g  queries involving a condition can be issued by adding parfactors representing this condition to g . this is
+p q  ¡Ø x ¦Õ g 
+rv  g  q
+where prv  g  q is a summationoverall assignments to random variables not in q and ¦Õ g  is a shorthand notation for the right-hand side of equation  1 .
+¡¡calculating this summation by brute force is intractable  but one can use independencies in the model to do it more efficiently. in propositional models  one way of doing this is
+procedure fove g  q 
+g a set of parfactors  q a set of random variables  the query .
+1. if rv  g  = q  return g.
+1. g ¡û shatter g q   figure 1 .
+1. e ¡û find-eliminable g q .
+1. ge ¡û {g ¡Ê g : rv  g  and rv  e  intersect}.
+1. ge¡¥ ¡û g   ge.
+1. g1 ¡û eliminate ge e .
+1. g1 ¡û {g1} ¡È ge¡¥.
+1. return fove g1 q .procedure find-eliminable g  q 
+g a set of parfactors  q   rv  g   g shattered against q.
+1. choose e from ag   q.
+1. ge ¡û {g ¡Ê g : rv  g  and rv  e  intersect}.
+1. if lv  e  = lv  ge   {e} is inversion-eliminable  return {e}.
+1. return find-count-eliminable g q {e} .procedure eliminate g  e  g a set of parfactors  e   rv  g .
+1. a1 ¡û ag   e.
+1. g ¡û  	g¡Êg ¦Õg|¦¨g|/|¦¨g| a1 cg   fusion  section 1 .
+1. if lv is inversion-eliminable  return parfactor   e ¦Õg a ¦È e  a  cg .
+1. return
+	 	n1 ¡¤¡¤¡¤	nu n1!...nn!	ki ¦Õg vi a1 |vi| a1   
+ as detailed in section 1 .procedure find-count-eliminable g  q  e  g a set of parfactors  q   rv  g   e   ag   q.
+1. if age   e is ground  e is counting-eliminable  return e.
+1. choose a non-ground atom e ¡Ê ag   e.
+1. return find-count-eliminable g q e ¡È {e} .figure 1: first-order variable elimination algorithm.
+the variable elimination  ve   zhang and poole  1   algorithm which calculates the total marginal by dividing it into smaller partial marginalizations  each on a single variable. the main contribution of this paper is a first-order version of ve  fove  which is shown in figure 1 and works in a similar way by eliminating one  but maybe more  atoms and their respective constraints at each step. the advantage of fove is that  by eliminating an atom with its associated constraints  we are effectively eliminating all of its groundings in a lifted way  with a cost that is sometimes independent of the number of groundings.
+1 fove correctness
+we now show that fove is correct. the algorithm works in the following way: suppose we want to eliminate the atoms in a set e at a given step of it. then we can write
+	p q  ¡Ø	¦Õ g 
+rv  g  q
+	=	¦Õ ge ¦Õ ge¡¥ 
+rv  g  q rv  e rv  e 
+	=	¦Õ ge¡¥ 	¦Õ ge 
+	rv  g  q rv  e 	rv  e 
+ where rv  e  is the set of random variables resulting from all instantiations of e in g  ge is the subset of parfactors in g depending on rv  e   and ge¡¥ is g   ge.
+¡¡if we can represent prv  e  ¦Õ ge  as the potential of a single parfactor g1   defined such that ¦Õ g1  = q¦È¡Ê¦¨g ¦Õg ag¦È    we can reduce the original marginal prv g  q ¦Õ g  to a marginal on a model g1 = ge¡¥ ¡È {g1} which involves fewer random variables:
+p q  ¡Ø	¦Õ g  =
+	rv  g  q	rv  g  q rvrv
+=
+rv  g  q rv
+=¦Õ g1 
+rv  g  q rvrv  g1  q
+¡¡there are two ways  described below  of calculating a parfactor g1 such that ¦Õ g1  = prv  e  ¦Õ ge :  1  inversion elimination or  1  counting elimination.  1  is the preferable one because it does not depend on the number of objects in the domain or  in other words  the size of rv  e . however  this method requires certain conditions on e  explained later  that may be impossible to satisfy for any e in the atoms of g.  1  is less favorable as it depends on the size of rv  e   it is still better than propositionalization  though   but it is always possible to find an e on which it can be applied.
+¡¡in the two next subsections  we assume that ge has been replaced by an equivalent parfactor g. this operation is called fusion and is explained in section 1. we are thus left with the problem of expressing prv  e  ¦Õ g  as a parfactor.
+¡¡finally  we assume that the parfactors and query have been shattered  as explained in section 1. the main property of shattered parfactors and query is that any two atoms in them have groundings which are either identical or completely disjoint. why this matters will be explained as inversion and counting elimination are explained.
+1 inversion elimination
+inversion elimination assumes that e is a unary set {e} such that lv  e  = lv  g   where lv  ¦Á  is the set of logical variables in ¦Á. let ¦È1 ...¦Èn be an enumeration of ¦¨g. then
+	¦Õ g  =	¦Õg ag¦È 
+	rv  e 	rv  e  ¦È¡Ê¦¨g
+= ¡¤¡¤¡¤ ¦Õg ag¦È1 ...¦Õg ag¦Èn  e¦È1 e¦Èn
+	=	¦Õg ag¦È1 ¡¤¡¤¡¤	¦Õg ag¦Èn 
+	e¦È1	e¦Èn
+ because of shattering 
+=
+e¦È1¦Õg ag¦È1  ...	¦Õg ag¦Èn 
+e¦Èn=
+¦È¡Ê¦¨g	¦Õg ag¦È  =	¦Õg a1¦È e¦È 
+e¦È	¦È¡Ê¦¨g e¦È=
+¦È¡Ê¦¨g	¦Õg a1¦È e 	 by renaming 
+e	=	¦Õ1 a1¦È  = ¦Õ g1 
+¦È¡Ê¦¨g
+ for g1 a new parfactor  ¦Õ1 a1 cg  where a1 is a tuple of the atoms distinct from e in ag  ¦Õ1 a1¦È  = pe¦È ¦Õg ag¦È   and cg is the constraint formula of g.
+¡¡note that the initial sum of products becomes a product of sums  hence the name inversion elimination. also note that the sum providing ¦Õ1 is over the assignments on the parameterized random variables. therefore this elimination method does not depend on the number of groundings  but on the number of assignments to the parameterizedrandom variable  which is much smaller.
+¡¡the condition lv  e  = lv  g  is essential for this method to work because it guarantees that the random variables being summed out have a one-to-one correspondence to the instantiations of g. this is a condition not taken into account by  poole  1   whose method eliminates all random variables not in the query by inversion elimination  one by one. however  the proof above should make it clear that this is not always possible. a numerical contradiction can be found by trying to answer the query r for p x  ¡Ä q y   ¡Ä r 1  with type of x being {a} and type of y being {b c}  since neither p x  or p y   is suitable for inversion elimination. the correct answer is ¡Ö 1  but eliminating p x  and then q y   by inversion produces ¡Ö 1.
+1 counting elimination
+when we cannot find an atom e in g satisfying the conditions for inversion elimination  we can resort to counting elimination  which is based on counting arguments.
+¡¡counting elimination can be done on a set of atoms e such that the remaining atoms in g  and consequently ge  are all ground. we can always find such an e in g  since the set of non-ground atoms in g is such a set. we however try to find the smallest such e since the cost of the method depends on the size of rv  e . note that counting elimination is only justified for |e|   1 since |e| = 1 implies that e is inversion eliminable.
+once we have a proper e  let a1 be the remaining atoms in
+g. then  because a1 is ground 
+	¦Õ g  =	¦Õg e¦È a1¦È 
+	rv  e 	rv  e ¦È¡Ê¦¨g
+	=	¦Õg e¦È a1 
+rv  e ¦È¡Ê¦¨g
+the last term above defines a potential function ¦Õ1 on a1.
+the result obtained from counting elimination is a new parfactor g1 =  ¦Õ1 a1   .
+¡¡in order to calculate this term  we present a counting argument. given an assignment on rv  e  
+k
+	¦Õg e¦È a1  =	¦Õg vi a1 |vi|
+	¦È¡Ê¦¨g	i
+ by grouping all applications of ¦Õg with the same vi  where v1 ... vk are the different assignments to e¦È and vi is the set of different e¦È's assigned vi.
+¡¡now assume for a moment that e is in fact just one atom e. this means that the vi's are the possible values for instances of e. note that qki ¦Õg vi |vi| is a function of vi and |vi|  but not of vi. in other words  it only matters how many instances of e are assigned vi by a given assignment on rv  e   but not which of them. different assignments will induce different vectors  v1 ... vk   but if they induce the same vector  |v1| ... |vn|   denoted n~    that product will be the same. also  given a vector n~   the number of assignments inducing it is n~ !  the multinomial coefficient of n~ 1  in the particular case where e is a binary variable  this becomes
+|rv  e |	|rv  e |
+¡¡¡¡n~1  = n~1  . we can therefore group assignments according to n~ and write
+k
+	¦Õ g  =	n~!	¦Õg vi a1 n~i
+	rv  e 	n~	i
+¡¡let us now consider the case where e contains multiple atoms. let e1 ... en be an enumeration of e and r1 ... rn be their respective groundings. let us also assume that for any two atoms em ej in e  their groundings rm rj are identical or disjoint. this condition is satisfied by shattered sets of parfactors  as discussed in 1. moreover  we also assume that any two atoms in e are either identical or not unifiable at all  according to cg. this is also granted for shattered sets of parfactors. for now  we also demand that for any two atoms em ej in e  lv  em  ¡É lv  ej  =    leaving the case where this is false for later.
+¡¡let s1 ... su be an enumeration of {rj : 1 ¡Ü j ¡Ü n}  that is  a sequence of unique rj's. we can consider each assignment as a composition of assignments on each si and write
+k
+	¦Õ g  =	¡¤¡¤¡¤	¦Õg vi a1 |vi|
+	rv  e 	s1	su	i
+¡¡as before  |vi| is the number of e¦È's assigned vi  but vi is a tuple assignment to e¦È. |vi| can be calculated by choosing  for each component vi j  how many random variables in rj can be assigned vi j  this choice can be made in this fashion because atoms in e do not share logical variables . this is simply |rj|  the number of random variables in rj  unless some other component vi m  with m   j  em 1= ej and rm = rj  has already committed a random variable in rj for itself. for this reason  it is important to know from the beginning whether em¦È is either the same random variable as ej¦È or not  otherwise we would not know whether to have one less option from rj  for the cases where em¦È 1= ej¦È  or not to have to make a choice at all  in those cases where em¦È = ej¦È and the choice has already been made for em¦È and therefore for ej¦È . this information is available since em and ej must be either identical or not unifiable  as stated above. from this reasoning 
+k
+	¦Õ g  =	¡¤¡¤¡¤	n~1!...n~n!	¦Õg vi a1 |vi|
+	rv  e 	n~1	n~u	i
+with
+|vi| = y |n~s j  i| |{m : m   j em =1 ej rm = rj}|  
+j
+where s j  is such that ss j  = rj  n~s j  is the vector corresponding to the counting of assigments on ss j  = rj  with
+n~s j  i being the number of random variables in rj assigned vi j.
+¡¡finally  we consider the case where the condition that for any two atoms em ej in e  lv  em  ¡É lv  ej  =   is not satisfied. we can reduce this case to the previous one by multiplying away the logical variables violating the condition. to multiply a logical variable vector z¡¥ away from a parfactor h  we calculate a new parfactor h1 =  ¦Õ1 a1 c1  where a1 is the same as ah but for the removal of the logical variables in z¡¥  c1 = c|lv h  z¡¥ and  for any ¦È ¡Ê ¦¨h1  ¦Õ1 a1¦È  = q¦È1¡Êc|z¡¥ ¦Õh ah¦È1¦È   where c|w¡¥   the restriction of c to a vector of logical variables w¡¥   is defined as the constraint  v c¡¥ for v¡¥ = lv  c    w¡¥ . this is simply the formula describing the solutions of c restricted to variables in w¡¥  forequationalformulaswithout functionsymbols this can be simplified to an equational formula without quantifiers .
+¡¡multiplying away is an expensive operation that depends directly on the domain size. we are currently working on more sophisticated counting arguments that minimize its use.
+1 fusion
+we now explain how a set of parfactors g can be replaced by a single  equivalent parfactor fs g  =  ¦Õ1 ag cg   with ¦Õ1 ag¦È  = qg¡Êg ¦Õg ag¦È |¦¨g|/|¦¨g| for any ¦È ¡Ê ¦¨g.
+¦Õ g  = ¦Õg ag¦È  = ¦Õg ag¦È |¦¨g|/|¦¨g| g¡Êg¦È¡Ê¦¨g g¡Êg¦È¡Ê¦¨g
+	=	¦Õg ag¦È |¦¨g|/|¦¨g|
+¦È¡Ê¦¨g g¡Êg
+	=	¦Õ1 ag¦È  = ¦Õ fs g  
+¦È¡Ê¦¨g
+¡¡the crucial step is the one in which we replace each original set of constraint solutions ¦¨g by the global constraint solution set ¦¨g. when this happens  each original instantiation of a parfactor is now instantiated |¦¨g|/|¦¨g| many times more than before  but the power |¦¨g|/|¦¨g| preserves the original potential value.
+1 shattering
+the elimination of atoms requires certain conditions guaranteed by the fact that the set of parfactors having been shattered against the query. this is based on discussion in  poole  1 .
+¡¡a set of parfactors is shattered if  for every pair of atoms  p q  in g  two conditions hold:  1   their groundings rv  p  and rv  q  are either identical or disjoint  and  1   in a condition needed by counting elimination  every pair of atoms in each parfactor must be either identical or never be instantiated to the same random variable by a single logical variable assignment. we call pairs of atoms satisfying these two conditions proper pairs. a set of parfactors is shattered against a set of ground atoms q if the same conditions hold when the atoms in q are included.
+¡¡for example  parfactors  ¦Õ1 p x a     and  ¦Õ1 p b y   y 1= d  are not shattered because rv  p x a   and rv  p b y    overlap but are not identical  violating  1 . in another example  parfactor  ¦Õ  p x  p y       is not shattered because  even though rv  p x   = rv  p y     p x  and p y   are instantiated to the same random variable by some logical variable assignments  those in which x = y    violating  1 .
+¡¡the algorithm in figure 1 shatters a set of parfactors against a query. it works by repeatedly identifying pairs of improper pairs and breaking parfactors into equivalent sets of parfactors whose sets of instantiations are the same as the original ones  but inducing proper pairs. this is done by  through unification  determining the conditions for the groundings of improper pairs to coincide or not  and breaking the parfactors along these conditions. after this  unified atoms are rewritten so that they will be identical.
+¡¡for example  if we have parfactor  ¦Õ1 p b y   y 1= d  and query p b c   p b y   and p b c  are an improper pair. their most general unifier  mgu  is y = c  so we can break the parfactor into  ¦Õ1 p b y   y 1= d ¡Ä y = c  and  ¦Õ1 p b y   y 1= d ¡Ä y 1= c  which can be rewritten as  ¦Õ1 p b y   y = c  =  ¦Õ1 p b c     and  ¦Õ1 p b y   y 1= d ¡Ä y 1= c . in another example  parfactor  ¦Õ  p x  p y    x 1= a  contains improper pair p x  p y  . their unification yields x = y   so the parfactor is broken into  ¦Õ  p x  p y    x 1= a ¡Ä x = y   and  ¦Õ  p x  p y    x 1= a ¡Ä x 1= y    the first one being rewritten as  ¦Õ  p x  p x   x 1= a .
+1 empirical results
+we use the implementation available at http://l1r.cs.uiuc.edu/ cogcomp to compare average run times between lifted and propositional inference  which produce the exact same results  for two different models while increasing the number of objects in the domain. the first one   i  in figure 1  answers the query p death  from {epidemic 1  if epidemic then sick x  1 else 1  if sick x  then death 1} and uses inversion elimination only. figure 1 shows that this model can have a very large tree width when propositionalized but can be treated as a linear graph by lifted inference. the second one   ii  in figure
+1  answers query p r  from p x  ¡Ä p y   ¡Ä r 1 x 1= y
+procedure shatter g q 
+g a set of parfactors  q a set of atoms.
+1. if there exist improper atom pair p q in ag ¡È q
+ a  for each r ¡Ê {p q} if r comes from parfactor g
+i. g1 ¡û normalize ¦Õg ag cg ¡Ä mgu p q  . ii. g1 ¡û normalize ¦Õg ag cg ¡Ä  mgu p q  .
+   iii. g ¡û  g   {g}  ¡È {g1 g1}.  b  return shatter g q .
+1. return g.procedure normalize g  g a parfactor.
+1. if there exists a pair of atoms p q in ag unified in cg replace q by p in g.
+1. return normalize g .figure 1: shattering algorithm.
+
+figure 1:  i  average run time for answering query p death  from {epidemic 1  if epidemic then sick x  1 else 1  if sick x  then death 1}  which requires inversion elimination only.  ii  average run time for answering query p r  from p x ¡Äp y  ¡Är 1 x 1= y   which requires counting elimination.
+and uses counting elimination only. in both cases propositional inference starts taking very long before any noticeable variation in lifted inference run times.
+1 discussion
+we presented and showed the correctness of a lifted firstorder probabilistic inference algorithm  the first one to our knowledge that covers all cases in its intended language. this allows expressive representations whose inference is made much cheaper by abstracting away from specific instances of random variables and dealing instead with whole classes of them at once. we believe this type of algorithm will be essential to the development of large and expressive probabilistic systems  especially when the particular model is not knownin advance and a general and automatic approach is necessary.
+¡¡we presented two ways of eliminating variables: inversion and counting elimination. counting elimination is potentially much more expensive than inversion elimination  but we expect its occurrence in practical problems to be low; in any case  we believe that much better counting arguments exist. investigating them is an interesting line for further research.
+¡¡many other interesting directions remain to be taken. a very natural extension would be to allow non-ground queries that produce not only probabilities but also bindings for logical variables. also  the algorithm can be adapted  in a way similar to  pfeffer and koller  1   in order to work
+ friedman et al.  1  n. friedman  l. getoor  d. koller  and a. pfeffer. learning probabilistic relational models. in ijcai  pages 1  1.
+ halpern  1  j. y. halpern. an analysis of first-order logics of probability. in proceedings of ijcai-1  1th international joint conference on artificial intelligence  pages 1  detroit figure 1: computing an answer to query p death  from the epidemic model and a million people is expensive for the propositional grounded model  a  as it has a large tree width  but cheap for the lifted model  b  since it is a linear graph.
+with infinite models  allowing for richer constraint languages where constraints may have infinite solutions  as for example those with function symbols. this is also related to constraint logic programming  van hentenryck  1 . given the complexity of the language  approximation schemes will be very important for practical applications; counting elimination seems a particularly good place to start given its relatively high cost but also regularity. techniques from theorem proving will be particularly useful when models with a large number of parfactors are necessary and one has to apply them wisely. a complexitystudy is also necessary for  amongother things  guiding the choice of efficient elimination orderings.
+¡¡much of the gain in performance from a lifted algorithm comes from the presence of a large number of indistinguishable objects in the domain  that is  objects about which we have exactly the same knowledge. it has been argued   chavira et al.  1   that this does not occur often in practical applications. however  the current work simply provides a base for extensions with other important benefits. in an approximate inference setting  for example  the notion of indistinguishable objects is replaced by that of objects about which there is approximately the same knowledge  according to the current approximation factor   a much more practical situation. for non-ground queries  a problem of great practical interest  lifted inference is much more suitable  since the answers to such queries may be lifted themselves.
+acknowledgments
+we would like to thank vasin punyakanok  dav zimak and the anonymous reviewers for their helpful comments. this research was supported by the advanced research and development activity  arda 's advanced question answering for intelligence  aquaint  program  by nsf grant itr-iis-1 and daf air force research laboratory grant fa1-1  darpa real program .

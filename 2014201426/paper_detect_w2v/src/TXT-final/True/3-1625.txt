@@ -1,0 +1,149 @@
+ 
+this paper describes mexec  an implemented micro executive that compiles a device model that can have feedback into a structure for subsequent evaluation.  this system computes both the most likely current device mode from n sets of sensor measurements and the n-1 step reconfiguration plan that is most likely to result in reaching a target mode - if such a plan exists.  a user tunes the system by increasing n to improve system capability at the cost of real-time performance. 
+ 
+1 introduction 
+over the past decade spacecraft complexity has exploded with increasingly ambitions mission requirements.  relatively simple flyby probes have been replaced with more capable remote orbiters  and these orbiters are slowly becoming communications relay satellites for even more ambitious mobile landers like the current mars exploration rover  the planned mars science lab  and the suggested aerobot at titan.  with this increased complexity there is also an increased probability that components will break and in unexpected ways with subtle interactions.  while traditional approaches hand-craft rule-based diagnosis and recovery systems  the difficulty in creating these rule bases quickly gets out of hand as component interactions become more subtle.  model-based approaches address this issue  but their acceptance has been retarded by the complexity of the underlying evaluation systems when compared with a simple rule evaluator whose performance is guaranteed to be linear in the number of rules  darwiche  1 . 
+   this paper combines ideas from livingston  williams and nayak  1  with results in knowledge compilation for diagnosis  darwiche  1  and planning  barrett  1  to create mexec  a micro executive that is both model-based and has an onboard evaluation system whose simplicity is comparable to that of a rule evaluator.  this involves taking a device model and compiling it into a structure that facilitates determining both a system's current mode and how to reconfigure to a desired target 
+
+¡¡¡¡¡¡figure 1: online/offline architecture for mexec mode in linear time.  thus the system's architecture consists of an offline compiler and an online evaluator  see figure 1 . 
+   in addition an online performance guarantee  the global system reasoning during compilation handles feedback loops without any explicit mechanism.  also  the same compiled structure facilitates both mode identification and planning.  evaluating it one way computes the most likely current mode given n sets of measurements  and evaluating it another way computes the best n-1 step reconfiguration plan given current and target modes - if such a plan exists. 
+   this paper starts by defining our device representation language and compares it with livingston's.  it next presents a simple example device and shows how to compile it into an internal representation for linear time planning and diagnosis.  the subsequent section shows how the structure is evaluated for both planning and diagnosis.  to provide some realism  the implementation is described with a number of experiments.  finally the paper ends with a discussion of future work and conclusions. 
+1 representing devices 
+mexec's device modeling language is a simplified yet equally expressive variant of livingstone's mpl. we model a device as a connected set of components  where each component operates in one of a number of modes.  essentially  each mode defines the relationships between a component's inputs and its outputs.  more precisely  we use five constructs to define: types of connections  abstract relations  components with modes and relations between inputs and outputs  modules to define multiple component subsystems  and the top-level system being diagnosed.  the following conventions facilitate defining our syntax. 
+  a word in italic denotes a parameter  like value. 
+  ellipsis denotes repetition  like value...    square brackets denote optional contents  like  value . 
+  a vertical bar denotes choice between options  like false | true. 
+   with these conventions the entire language's syntax is defined in figure 1  which has constructs to respectively define connection types  well-formed formulas with arguments  user defined relations  components  modules  and a system.  just like livingstone  system name's structure is a connected set of components and modules with input/output ports  but unlike livingston these inputs and outputs can form feedback loops and are statically defined in :connections sensed connections  :sensors  and the commanded connections  :affectors .  while the wffs in components can only refer to variables in local component ports  the wffs in :constraint entries can refer variables defined in :structure elements as well as locally defined variables.  
+   another divergence from livingstone involves the modeling of components.  while the syntax is similar  the semantics revolves around the concept of cost.  essentially a mode's cost denotes now unlikely it is irrespective of any information  and a transition's cost denotes how unlikely it is when its preconditions hold.  while getting costs from livingston's probabilities is a simple matter of taking a probability's negative log  our formalism makes users directly specify costs to reflect that the number specified is manually guessed  just like a probability.  
+1 model compilation 
+to provide an example of a modeled device  consider the following system  which has a single siderostat for tracking a star within an interferometer.  this system is kept as simple as possible in order to facilitate its use as a 
+running example in the rest of the paper.  it starts by defining the values and then defines a component using the values and finally defines a system in terms of the component.  one semantic restriction not mentioned in the syntax is that a definition cannot be used until after it has appeared.  this keeps modelers from crafting infinite recursive definitions. 
+  defvalues boolean  false true   
+  defvalues command  idle track none   
+  defcomponent siderostat  
+    :ports    command in  boolean valid   
+    :modes   tracking :model  = valid true  
+              :cost 1  
+             idling :model  = valid false  
+              :cost 1  
+             unknown :cost 1   
+    :transitions  
+      tracking -  idling  = in idle         idling -  tracking  = in track   
+      * -  unknown :true :cost 1     
+  defsystem tst 
+    :sensors   boolean o   
+    :affectors   command c   
+    :structure   siderostat sw  c o     
+1 model to cnf 
+compiling a device model starts by taking a system definition and recursively expanding its modules using the defmodules until only components remain with an optional 
+
+ defvalues ctype    value...    
+wff ¡ú :false | :true |  :not wff  |  :and wff...   |  :or wff...   |             = cname value  |  == cname cname  |  rname arg...     arg ¡ú wff | cname | value 
+ defrelation rname   parameter...   wff  
+ defcomponent stype 
+    :ports 	   ctype cname ...   
+    :modes   	   mname  :cost int   :model wff  ...  
+    :transitions     {mname | *} -  mname wff  :cost int   ...   
+ defmodule stype 
+    :ports         	   ctype cname ...   
+    :connections    ctype cname ...   
+    :structure 	   stype sname   cname...   ...   
+    :constraint  	wff    
+ defsystem name 
+    :sensors  	   ctype cname ...   
+    :affectors  	   ctype cname ...    
+    :connections    ctype cname ...    
+    :structure 	   stype sname   cname...   ...   
+    :constraint 	wff    
+figure 1: syntax of device modeling language 
+conjunctive constraint.  since the example lacked any defmodules  this step results in a single component called  sw  which is a siderostat in the following list  where c is a command effecter and o is a boolean observation sensor 
+   siderostat sw  c o    
+   as the example implies  name substitution occurs during the expansion.  inputs and outputs are replaced by actual parameter names - in and valid respectively become c and o.  while not visible in the example  components get unique names by prefixing each structure element name with the current module name.  for instance  if tst were a module  sw would become tst*sw  and the connection names would be similarly prefixed.  this naming convention facilitates allowing module constraints that refer to connections and modes in substructure. 
+   after determining components  their mode definitions are converted into a boolean expression.  this involves building an equation with the following form  where sname is the component's name  and each disjunctive entry is for a different mode mname with model wff.  within this form  notice the subscripts that vary from 1 to n-1. 
+  :and  :or  :not  = sname*mode mname               wff ...   
+i
+   for example  if n were one in our example the resulting equation would be the following. 
+  :and  :or  :not  = sw*mode tracking    
+1
+             = o true           :or  :not  = sw*mode idling    
+1
+             = o false    
+   for higher n  the disjuncts are replicated for each step and transition disjuncts are added.  transition disjuncts take on the following form  where sname is the component name  x denotes the xth component transition  frmx/tox 	respectively 	denote 	the 	transition's source/destination  and wffx i denotes its precondition at step i.  when frmx is  *   the frmx constraint is dropped to denote that the transition is always enabled. 
+  :or  :not  = sname*trans x   
+i
+       :and  = sname*mode frm   
+	i	x
+             = sname*mode to  wff    
+	i+1 	x	x i
+   finally  these user-defined disjuncts are supplemented with system-defined disjuncts for not transitioning at all.  they look respectively as follows  where the noop equation's size depends on the number of transitions in order to avoid choosing no transition when some transition is enabled. 
+  :or  :not  = sname*trans noop   
+i
+       :and  == sname*mode sname*mode   
+	i	i+1
+             :or  :not  = sname*mode frm   
+	i	x
+                  :not wff   ...     
+x i
+  finally  with these constructs the compiler turns the a set of components into a single boolean equation  conjoins that equation with the conjunction of :constraint wffs  and subsequently flatten the equation into a cnf form. 
+1 cnf to dnnf 
+unfortunately finding a minimal satisfying assignment to a cnf equation is an np-complete problem  and more compilation is needed to achieve linear time evaluation.   fortunately results from knowledge compilation research  darwiche and marquis  1  show how to convert the cnf representation into decomposable negation normal form  dnnf .  it turns out that this form of logical expression can be evaluated in linear time to compute either the most likely diagnosis or an optimal n level plan. 
+   while dnnf has been defined previously in terms of a boolean expression  we make a slight extension for  variable logic equations  where the negation of a variable assignment can be replaced by a disjunct of all other possible assignments to that same variable.  this extends the dnnf formalism to constraint satisfaction problems. 
+definition 1: a variable logic equation is in decomposable negation normal form if  1  it contains no negations and  1  the subexpressions under each conjunct refer to disjoint sets of variables. 
+   just as in the boolean case  there are multiple possible variable logic dnnf expressions equivalent to the cnf and the objective is to find one that is as small as possible.  
+since disjunctive normal form is also dnnf  the largest dnnf equivalent is exponentially larger than the cnf.  fortunately much smaller dnnf equivalents can often be found.  the approach here mirrors the boolean approach to finding a d-dnnf  darwiche  1  by first recursively partitioning the cnf disjuncts and then traversing the partition tree to generate the dnnf. 
+   the whole purpose for partitioning the disjuncts is to group those that refer to the same variables together and those that refer to different variables in different partitions.  since each disjunct refers to multiple variables  it is often the case that the disjuncts in two sibling partitions will refer to the same variable  but minimizing the cross partition variables dramatically reduces the size of the dnnf equation.  this partitioning essentially converts a flat conjunct of disjuncts into an equation tree with internal and nodes and disjuncts of literals at the leaves  where the number of propositions appearing in multiple branches below an and node is minimized. 
+   mirroring the boolean compiler  partitioning is done by mapping the cnf equation to a hyper-graph  where nodes and hyper-arcs respectively correspond to disjuncts and variables.  the nodes that each hyper-arc connects are determined by the disjuncts where the hyper-arc's corresponding variable appears.  given this hyper-graph  a recursive partitioning using a probabilistic min-cut algorithm  wagner and klimmek  1  computes a relatively good partition tree for the disjuncts  and generalizing this algorithm by weighting the hyperarcs with associated variable cardinalities does even better.  see figure 1 for an extremely simple example with two disjuncts and three variables whose cardinalities are 1.  from the equation tree perspective  there is an and node on top above disjuncts at the leaves.  the branches of the and node share the variable b  which is recorded in the top node's sep set.   
+
+figure 1:  example of partitioning a cnf equation 
+   once the equation tree is computed  computing the dnnf involves extracting each and node's associated shared variables using the equality 
+ 	eqneqn  {v=c}  
+ 
+where eqn {v=c} is an equation generated by replacing disjuncts containing v=c with true and removing assignments to v from other disjuncts.  if a disjunct ever ends up with no assignments  it becomes false.  
+   more formally  the dnnf equation is recursively defined on the equation tree using the two formulas below  where the first and second apply to internal and leaf nodes respectively.  the first formula's instances n.sep ¦Á  refers to the set of possible assignments to the vector of variables in n.sep that are consistent with ¦Á.  for instance  running these formulas over figure 1's tree starts by calling dnnf root true   and the instances are b=t and b=f since only b is in root.sep  and both assignments agree with true.  in general the number of consistent instances grows exponentially with n.sep  leading to the use of min-cut to reduce the size of n.sep for each partition. 
+ 
+ dnnf  n ¦Á  ¡Ô¦Â¡Êinstances	c¡Ên.kids dnnf  c ¦Á¡Ä¦Â  
+  	 trueif ¦Á  disj  dnnf  disj  ¦Á  ¡Ô    ¦Â
+	 	otherwise
+ 	 	false
+   while walking the equation tree does provide a dnnf equation that can be evaluated in linear time  two very important optimizations involve merging common subexpressions to decrease the size of the computed structure and caching computations made when visiting a node for improving compiler performance  darwiche  1 .  in  figure 1 there were no common sub-expressions to merge  and the resulting dnnf expression appears below. 
+   or  and b=t c=t   and b=f a=f   
+1 onboard evaluation 
+to illustrate a less trivial dnnf expression  consider the figure 1 for the siderostat dnnf.  actually this is a slight simplification of the generated dnnf in that it was generated from a siderostat model that lacked the unknown mode - where the omission was motivated by space limitations.  this expression's top rightmost and node has three children  and each child refers to a unique set of variables.  from top to bottom these disjoint sets respectively are  
+{sw*mode1}  {o1}  and {sw*mode1  sw*trans1  o1  c1}. 
+   given that dnnf and nodes have a disjoint branches property  finding optimal satisfying variable assignments becomes a simple three-step process: 
+1. associate costs with variable assignments in leaves; 
+1. propagate node costs up through the tree by either assigning the min or sum of the descendents' costs to an or or and node respectively; and 
+1. if the root's cost is 1  infinity  or some other value then respectively return default assignments  failure  or descend from the root to determine and return the variable assignments that contribute to its cost. 
+   actually  the algorithm is a little more general in that step 1 computes the number of min-cost assignments  and step 1 can extract any one of them in linear time. 
+1 mode estimation 
+evaluating a dnnf structure to determine component modes starts by assigning costs to the name*mode1 variables  where these costs come from the :cost entry associated with  each mode in the original model  and missing cost entries are assumed to be zero.  for instance  none of the transitions have associated costs in the model  resulting in assigning zero to the name*trans1 leave costs.  finally  sensed values are assigned either zero or infinity depending on the value sensed.  in this case the sensed values for o1 and o1 were both true. 
+
+figure 1: evaluating a 1 level dnnf structure to determine the siderostat mode from two sets of observations. 
+   following the simple propagation step  the associated node costs appear above the nodes in figure 1.  note that the cost is of the top level node is 1.  this value is used to prune the search when descending down the tree to determine the assignment to sw*mode1  which is the most likely siderostat mode that matches the observations. 
+   while this approach assumes forgetting of old state information  it can be enhanced to either remember the most likely last state or a set of likely last states using a particle filter approach.  since the only difference between such approaches revolves around leaf cost assignments  the requisite changes are very manageable. 
+1 reconfiguration planning 
+when evaluating a dnnf structure for a reconfiguration plan  a cost is assigned to each variable using a number of planning dependent preferences.  first  not performing an action has zero cost.  this results in associating zero with all leaves that set transitions to noops.  second  leaves denoting other transitions are assigned costs that come from :cost entries associated with transitions.  in the example all of these costs are assumed to be zero.  finally name*mode1 and name*moden entries are assigned costs that depend respectively on the current and target mode.  the leaf assignments that are consistent with these modes will cost zero and inconsistent leaves get an infinite cost.  for instance  figure 1 documents the evaluation to take a currently tracking siderostat and make it idle.  in this case the cost is propagated up and then it is used to guide the descent to find the desired cost of c1  the effecter variable. 
+
+figure 1: evaluating a 1 level dnnf structure to compute a 
+reconfiguration plan. 
+   while a need to keep this example simple motivating not tagging transitions with costs  such tags reflect the likelihood of a transition once its preconditions are met.  thus  many transitions can have consistent preconditions and the underlying evaluation will actually adjust the preconditions to maximize the likelihood that the triggered transitions will result in attaining the target conditions.  this implies that the planning algorithm finds n step solutions to probabilistic planning problems like those of buridan  kushmerick et al.  1 .  from this vantage point mexec's compiled internal structure can be viewed as a limited policy for solving pomdp problems if a solution can be found in n-1 steps  but this perspective has yet to be fully explored. 
+1 implementation and experiments 
+the system is currently implemented in allegro common lisp with under 1 lines to compute a device's cnf equation  under 1 lines to compute a cnf equation's associated dnnf  and less than 1 lines to evaluate a dnnf equation to find all minimal cost satisfactions. 
+   in addition to testing mexec on various switching circuit examples  there has been some work on developing and experimenting with models of a space interferometer mission test bed 1  stb-1  model  ingham et al.  1  
+
+figure 1: a simplified schematic of the formation interferometer testbed  fit . the left side of the dotted line represents the collector spacecraft and the right side of the dotted line represents the combiner spacecraft. 
+as well as the formation interferometer test bed  fit  model  which is an extension on the stb-1 model. while stb-1 represents a single spacecraft interferometer  fit represents a separated spacecraft interferometer.  as illustrated in figure 1  fit is composed of combiner  right  and collector  left  spacecraft. the collector spacecraft precisely points at a star and reflects the starlight beam to the combiner spacecraft.  while the combiner spacecraft also points at the star to collect the starlight  it also accurately points at the collector spacecraft in order to combine the starlight from the collector spacecraft with its own.  
+device c v s n = 
+1 n = 
+1 n = 
+1 n = 1 stb-1 1 1 1 1 1 1 1 fit 1 1 1 1 1 1 1 table 1: dnnf sizes  in nodes  of interferometers with c components  v variables  s sensors  and n levels. 
+   compiling these two models for instantaneous  n = 1  through three step  n = 1  dnnf structures results in the generation of table 1.  the initial message to pull out of this exercise is that instantaneous dnnf structures  for diagnosis only  tend to be extremely compact  but as n increases so does the dnnf size.  thus increasing n makes the system able to reason over longer durations when either diagnosing or planning  but the increased capability comes at the cost of longer evaluation times since dnnf equation evaluation is linear in equation size.   
+   still  work on planning  barrett  1  and strict dnnf compilation  darwiche  1  leads one to suspect that the scaling issue can be improved.  in the case of our empirical experiments  the scaling issue already has been improved by an order of magnitude.  the results reported in  chung and barrett  1  had a 1 node dnnf structure for the fit model with n = 1. 
+1 related work 
+while others have made the leap to applying compilation techniques to both simplify and accelerate embedded computation to determine a system's current mode of operation  they are more restricted than mexec.  first  dnnf equation creation and evaluation was initially developed in a diagnosis application  darwiche  1   but the resulting system restricted a component to only have one output and that there cannot be directed cycles  feedback  between components.  mexec makes neither of these restrictions.  the mimi-me system  chung et al.  1  similarly avoided making these restrictions  but it lacks hard real-time guarantees by virtue of having to solve an np-complete problem  called min-sat  when converting observations into mode estimates.  mexec supports hard real-time performance guarantees. 
+   the closest related work on real-time reconfiguration planning comes from the burton reconfiguration planner used on ds-1  williams and nayak  1  and other research on planning via symbolic model checking  cimatti and roveri  1 .  in the case of burton our system improves on that work by relaxing a number of restricting assumptions.  for instance  burton required the absence of causal cycles  feedback   no two transitions within a component can be simultaneously enabled  and that each transition must have a control variable in its precondition.  mexec has none of these restrictions.  on the other hand  our system can only plan n steps ahead where burton did not have that limitation.  similarly  the work using symbolic model checking lacked the n-step restriction  but it compiled out a universal plan for a particular target state.  our system uses the same compiled structure to determine how to reach any target state within n steps of the current state. 
+1 conclusions 
+this paper presented the mexec system  a knowledgecompilation based approach to implementing an offline domain compiler that enables embedded hard real-time diagnosis and reconfiguration planning for more robust system commanding.  this system also enables feedback reasoning by virtue of global analysis during compilation. 
+acknowledgements 
+this work was performed at the jet propulsion laboratory  california institute of technology  under a contract with the national aeronautics and space administration.  the author would also like to thank alan oursland  seung chung  adnan darwiche  daniel dvorak  and mitch 
+ingham for discussions contributing to this effort 

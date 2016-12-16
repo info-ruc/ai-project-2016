@@ -1,0 +1,165 @@
+ions  which does not necessarily imply distinct implementation data structures. 
+1. introduction 
+　　an earlier paper  describes the philosophy and overall design of a hybrid reasoning system with two levels - a bottom level of general purpose predicate calculus facilities  and a top level which supports a specialized planning language. this paper describes the implementation of this system  which has come to be called cake  in more detail  with emphasis on the predicate calculus level. two new results reported here are the refinement of the predicate calculus level into five separate layers  and a more subtle view of hybrid reasoning systems in general. we argue in this paper that a hybrid system is characterized by the use of multiple representations in the sense of multiple data abstractions  which does not necessarily  as is often interpreted  imply distinct implementation data structures. 
+　　the body of this paper is divided into mree sections. the first section introduces a example program reasoning problem  discusses why program reasoning is hard in general  and points out the advantages we hope to gain with the current architecture. the next section describes the implementation of each layer of cake in detail. following this  we return to the example reasoning problem and trace through a complete scenario of how this problem is solved by the current cake implementation. we conclude with a discussion of some difficulties with cake and its relation to hybrid reasoning systems in general. 
+this report describes research done at the artificial intelnoence laboratory of the 
+massachusetts institute of technology support for the laboratory's artlfioial intelligence research has been provided in part by the advanced research projects agency of the department of defense under office of naval research contract n1-c-1  in part by national science foundation grant mcs-1  and in part by the ibm corporation. 
+the views and conclusions contained in this document are those of the authors  and should not be interpreted as representing the policies  neither expressed nor implied  of the department of defense  of the national science foundation  nor of me ibm corporation. 1. system motivations 
+an example problem 
+　　cake is being developed as the central knowledge representation and reasoning engine for the programmer's apprentice  1 1 . as such  its reasoning capabilities will be used to support analysis  synthesis and verification of programs. 
+　　most of the knowledge in the programmer's apprentice is represented using a programming language independent formalism  called the plan calculus. a plan in this formalism is essentially a labelled  directed graph in which nodes represent program operations and data structures  and arcs represent the flow of data and control. a very important kind of reasoning involving plans which cake must perform is the following: given a plan and a set of correspondences between the incoming and outgoing arcs of the plan and the inputs and outputs of a given operation  determine whether the plan is a correct implementation of that operation  i.e. whether the plan satisfies the input-output specifications of the operation . 
+　　as an example of this kind of reasoning  suppose operations x  y and z are defined with the inputs  outputs  preconditions and postconditions shown in figure 1  where the function g is commutative  the domain of the function f is a  the range of f is b  and b is a subtype of c. 
+　　our problem is then to determine whether the plan xy  composed of operations x and y with the data flow shown in figure 1  is a correct implementation of the operation z with the indicated input and output correspondences. 
+　　the solution to this problem is achieved by a kind of symbolic plan evaluation  roughly as follows: assume the preconditions of z; using the correspondences between the inputs of z and the incoming arcs of xy  prove the preconditions of x; assert the postconditions of x; using the data flow between x and y  prove the preconditions of y; assert the postconditions of y; using the correspondences between the outputs of z and outgoing arcs of xy  prove the postconditions of z. if all of the proofs above are successful  then xy is a correct implementation of z. 
+why is this hard  
+　　the example above is highly simplified and abstracted so that the complete trace of its execution can fit into a paper of this length. in particular  the size and total number of formulae involved in the proofs is tiny  and only relevant information is included in the problem statement  e.g. there are no unused postconditions . 
+　　if the programmer's apprentice were concerned only with problems of this size  the simplest approach would be to dump all 
+
+the axioms into a theorem prover with a single uniform general method  such as resolution   and wait for the result. the difficulty with this approach is that reasoning about programs of realistic size and complexity in this homogeneous way strains such systems beyond reasonable time and space limits  basically due to the inability to control the exploration of irrelevant proof paths. furthermore  because we want the programmer's apprentice to support evolutionary program design  we require the reasoning system to support incremental retraction  i.e. truth maintenance   which existing uniform theorem provers do not. 
+　　the approach we are exploring in cake is to partition the overall reasoning task among a number of specialized reasoning components. even in the small example above  we can identify several distinct categories of reasoning which can be attacked with specialized algorithms: symbolic evaluation  of plans   equality  input/output correspondences   algebraic properties of operators  commutativity of g   functionality  f   and type inheritance  b is a subtype of c . as we will see below  the architecture of cake has separate layers for each of these kinds of reasoning. what we hope to gain by this partitioning is the reduction to a controllable size of the reasoning problem seen by each layer. 
+1. the architecture of cake 
+　　the earlier paper on cake  argued for the utility of partitioning the program reasoning task into two components  a plan level and and predicate calculus level. in this paper we carry this partitioning further. figure 1 shows the architecture of the current cake system  which is divided into eight layers. the bottom five layers  truth maintenance through types  are the refinement of the predicate calculus level described in the earlier paper; the top three layers correspond to the plan level. the currently implemented cake system includes only the bottom five layers plus the plan calculus  i.e. not the plan synthesis or plan recognition layers . we will restrict ourselves in the discussion below and in the example following primarily to the implemented portion of the system. 
+
+	c. rich 	1 
+   before describing the principal facilities of each layer  we need to say a word about what is meant by  layer  in this context. most concretely  each layer is a collection of subroutines and associated data structures. more abstractly  each layer adds a coherent increment of functionality to the system  i.e. the principal facilities summarized in the figure . the particular choice of layers shown here arose out of a mixture of bottom-up and top-down concerns. partly we were motivated to take advantage of existing efficient algorithms for certain specialized kinds of reasoning  e.g. congruence closure   and partly we followed our intuition about parts of the overall reasoning task  e.g. type inheritance   in which the control problem could be attacked with only  local  context. finally  we simply needed some kind of engineering discipline to help with the implementation of a large and complex system. 
+   the formal modularity restriction between layers is quite weak: the subroutines in each layer may invoke only subroutines in the same layer or in layers below. this is not as strict as the conventional software engineering notion of a layered architecture  in which each layer may use only the layer immediately below. we retreated from this stricter notion for the usual reason  i.e. because it prevented many necessary optimizations. we will point out some of these inter-layer relationships in the sections which follow. 
+   before proceeding further in the description of cake  we must gratefully acknowledge the use  with minor extensions  of mcallester's reasoning utility package  rup   as the basis for the bottom three layers of cake. one major extension which was made to rup is noted below. 
+the truth maintenance layer 
+   the bottommost layer of cake  truth maintenance  is essentially the boolean constraint propagation network from rup. in this network a set of prepositional axioms is stored in disjunctive clausal form. the literals which make up the clauses   constraints   are called tms-nodes  and each is assigned a value of true  false  or unknown. each clause also has a documentation string for use in generating explanations. 
+the truth maintenance layer provides two principal facilities. 
+the first is to act as a recording medium for dependencies  and thus to support retraction and explanation. the second is to perform simple  one-step  deductions  specifically  unit propositional resolution  based on the constraint clauses. this layer is at the bottom of the architecture because it provides an  active database  in which the final results of inferencing in all other layers must eventually be recorded. the data base also fig. 1. implementation of z as xy 
+
+
+1 	c. rich 
+performs simple inferences and limited contradiction detection. when a contradiction is detected in the network  control is passed to a user-provided routine to decide what to do  e.g. what premise to retract . 
+   for example  if a reasoning process in a higher layer wishes to assert statement p supported by statements 1 and r  it obtains the tms-nodes corresponding to p  1 and r  and installs the constraint clause  
+p v - q v - r   
+which is just the disjunctive normal form of 1 a r =  p. the effect of installing this clause is twofold. first  it is available for answering the question  why p  . the answer is  from q and r by ...documentation string... . one can then ask  why q   and so on recursively. second  the constraint propagation processing attached to the network will retract p whenever q or r are retracted. 
+   given its role in the architecture of cake  it is an important feature of the truth maintenance layer that deductive completeness has been traded off for control  mcallester  proves that the amount of computation triggered by a data base access is at worst linear in the size of the data base . 
+the equality layer 
+　　from the standpoint of the truth maintenance layer  tms-nodes are atomic - they have no internal structure other than their truth value. the equality layer introduces the notion of terms. a term is defined recursively as either an atomic term  e.g. a symbol or a number   or a list of subterms  operator followed by arguments   each of which is a term. the two principal facilities supported by the equality layer are the uniqueization of terms  and the incremental maintenance of a congruence  equality  relation on terms. 
+   the uniqueization facility is a conventional hashing function which  given a list of terms  returns an existing term which has the given terms as subterms  or creates a new such term. 
+   the incremental congruence closure facility operates roughly as follows  for a more complete description see  : given any two terms  the equality layer will tell you if they can be proved equal by 
+fig. 1. the layers of cake 
+
+ possibly recursive  substitution of equals using the set of currently true equalities between terms. equalities are asserted and retracted like any other statement. furthermore  the answer given by the equality layer includes the list of currently true equalities which are used in the proof  so that the proper dependencies can be installed in the truth maintenance layer. substitution of equals implemented in this way is a very powerful inference mechanism  and is used heavily by the other layers of cake. note that the congruence closure algorithm does not operate by creating all possible substitutions  since this is not only inefficient  but impossible in general  e.g. if f x = x. 
+　　there are two important connections between the equality layer and the truth maintenance layer. first  the equality layer uses the truth maintenance layer to keep track of the dependencies between substitutions it performs. second  certain terms  those which are interpreted as boolean-valued  are associated with tms-nodes. the equality layer guarantees that whenever two such terms are equated  appropriate clauses are installed in the constraint network to represent the logical equivalence between them. 
+the demon layer 
+　　demons are triggered by several different types of events in the equality and truth maintenance layers. this layer of demons provides an interface through which many facilities in the layers above are implemented  and also a kind of  trap door  through which  with care  other miscellaneous kinds of inferences may be added to cake. there are two important types of triggering event: the creation of a new term  and a change in the truth value of a tms-node. 
+   whenever a new term is created  the data base of demons is searched and all demons whose pattern matches the subterms of the new term are triggered. patterns are currently one-level  with wild-cards but no variables. whenever a new demon is added  it is triggered on all existing terms which match its pattern. the body of a demon is simply lisp code which  when executed  may make new assertions  with dependencies   change truth values  or create new demons. 
+in a major extension to rup  processing was added to new 
+
+
+term creation events to guarantee a kind of  completeness  in the interaction between the equality layer and the demon layer. in general  the equality layer only creates a carefully controlled subset of all possible variant terms  terms obtained from other terms by substitution of equals . the added processing forces the creation of variants which would not otherwise be created by the equality layer  if  and only if  such variants would cause a demon to be triggered. for example  suppose there is a demon with pattern  p a * '  and the term p x y  exists  and the equalities x = b and b = a are true. the completeness processing guarantees that the term p a y  is created. 
+　　demons triggered by a change in the truth value of a tms-node have no patterns. each demon of this type is attached to a specific tms-node. both the old and new truth values can be made available to the body of the demon. 
+　　examples of the use of demons will be seen in the description of the other layers and in the reasoning scenario. 
+the algebraic layer 
+　　the algebraic layer is composed of special-purpose decision procedures for common algebraic properties of operators  functions and relations . the following nine properties may be specified to hold independently or in combination  either permanently or retractably  of any appropriate operator. 
+reflexivity involution idempotency associativity commutativity distributivlty symmetry antisymmetry transitivity 　　in addition to these nine basic properties  the algebraic layer also has special procedures for reasoning in the following more complicated algebraic structures. 
+partial orders 
+total orders 
+equivalence relations 
+lattices 
+boolean algebras 
+　　these properties and structures are useful for many different types of reasoning about programs  such as control flow  transitivity   arithmetic  distributivity of multiplication and addition   lists  associativity of append   and sets  boolean algebra . although simplifiers and decision procedures for these kinds of properties are not new  cake is the first such system which supports them in the context of retractable equalities  including equality between operators  and truth maintenance. 
+　　most of the complexity of implementing these algebraic properties stems from attempting to control the creation of irrelevant terms and to guarantee completeness with respect to equality. to illustrate  consider commutativity  one of the simplest properties. 
+a commutative operator  f  obeys the law: 
+to implement this law  we install a demon with the pattern 
+ commutative *  . which is triggered by the assertion of a commutativity property. the creation of a term such as commutative f  triggers this demon  which then installs a new demon with the pattern  f      . when triggered on a term such as f x y   this new demon checks whether the term f y x  exists; if it does  the demon installs the equality f x y =f y x  with a 
+	c. rich 	1 
+dependency on the statement commutative f . if the term f y x  does not exist  a new demon is installed with the pattern  f y x   and an empty body. the sole purpose of this third demon is to force  via the  completeness  processing described above  the creation of the variant f y x  if it follows from other terms and equalities. the creation of this variant will in turn trigger the demon with pattern  f        which will install the equality f v x =f x y . 
+for example  suppose the following statements are premises: 
+commutative f  
+f = g a = d b - c 
+and we then enquire  why g a b  = g c d    . equality completeness processing for the pattern  commutative *   forces creation of the term commutative g   which installs a demon with pattern  g * *  - this demon triggers on g a b   installing an empty demon with pattern  g b a  . completeness processing for this pattern forces creation of the term g b a  as a variant of g c d   which triggers the demon with pattern  g * *   to install g b a  = g a b . the recursive explanation generated for this derivation is as follows: g a b  = g c d  is true by transitivity of equality from: 
+1 ＊ g c d  = g b a  which is true by subst'n of equals from: 
+1 b = c which is true as a premise. 1 a = d which is true as a premise. 
+1. g b a  = g a b  which is true by defn of commutativity from: 
+1 commutative g  which is true by subst'n of equals from: 
+1.1 commutative f  which is true as a premise. 
+1.1 f = g which is true as a premise. 
+   the implementation of the more complicated algebraic structures listed above partly uses of the demons for individual properties  e.g. partial order uses transitivity  antisymmetry and reflexivity   but also uses specialized graph representations  e.g. the haas diagram for a lattice . these graph abstractions are currently implemented using only the term indexing structures already provided by the equality layer. this is one example in cake of the use of multiple representations without separate implementations. another example is discussed in greater detail in the plan calculus layer. 
+the types layer 
+   since the notion of data types is ubiquitous in reasoning about programs  it is natural to use a typed logic in cake. the types layer provides two principal facilities: a type hierarchy  and domain/range inferences. 
+   types in this layer are simply sets. type inheritance is implemented using the boolean algebra facilities provided by the algebraic layer. we can define subtypes  intersection  union and complement types; the appropriate inferences involving elements of the tyoe are performed incrementally with dependencies. for 
+
+1 	c. rich 
+example  suppose p  1  r and intersection q r  are defined types  and p is a subtype of 1. if we assert the following type information about x  note that types are syntactically predicates; thus  x is an element of type p  is written p x  t 
+p x  
+then algebraic layer demons  created by the types layer  will deduce the following 
+lntersection q r  x . 
+   in a typed logic  every operator  f  has a domain type  d  and a range type  r  such that the following axioms hold: 
+
+and similarly for operators of higher arity. many useful properties of programs can be deduced using only this kind of information about operators. 
+   in the implementation of the types layer  the first axiom above is implemented by a demon for each operator with a pattern of the form  f *   or '**        etc. the second domain/range axiom above is implemented by special mechanisms for handling undefined terms. 
+the plan calculus layer 
+　　in an early paper  we showed how to specify the semantics of the plan calculus by mapping each feature of a plan into predicate calculus. for example  the semantics of a data flow arc is an equality between terms which represent the source and destination of the arc; the semantics of control flow is captured using a global partial order  to express temporal precedence  and an equivalence relation  to express conditional execution . since preconditions and postconditions are already logical formulae in the plan calculus  the only additional semantics to be specified for them is that the preconditions of an operation imply the postconditions. structured data types  such as records and lists  are represented in the plan calculus as clusters of nodes with a logical constraint  invariant  between them. 
+   in a succeeding paper  we reported that the predicate calculus formalization was directly usable as the basis for an implementation in which predicate calculus and plans co-exist. in this paper we wish to make a more subtle point about the relationship between the plan calculus and its  meaning postulates . 
+   what makes cake a hybrid system is that the current configuration of the plan for a program is represented by a set of true statements in the truth maintenance layer  and that the plan calculus layer provides a set of access functions supporting the node and arc view of plans  which is used by the plan recognition and plan synthesis layers to implement their respective algorithms. whether or not the plan calculus layer has its own data structures is strictly an implementation question.  in this  we are taking a functional view of knowledge representation as advocated by brachman et ai. .  in the current cake system  the plan calculus layer is in fact strictly an interface to the lower layers. later in the tuning of the system  we expect to introduce into this layer some caching and additional indexing of terms. however  these are just conventional software engineering concerns regarding the tradeoff between store vs. recompute. 
+　　the interface provided by the plan calculus layer includes functions for querying and altering any feature of a plan. each querying and altering function embodies the semantics of that feature in terms of the corresponding logical formulae. for example  the access function for enquiring whether there is data flow between two operations generates a query to the equality layer asking whether the appropriate two terms are equal; the access function for installing a new data flow arc asserts a new equality. plan modifications made using the plan calculus layer are thus seen as a matter of course by subsequent queries from any layer. 
+　　furthermore  the changes in truth values resulting from a plan modification can trigger demons and cause reasoning to take place  for example revealing a contradiction. such contradictions can be reflected back into the plan calculus layer  e.g. for explanation  by way of extra-logical annotations installed by the altering functions. for example  the function for installing data flow marks the corresponding equality statement as representing data flow. 
+　　of course  not all true statements in the truth maintenance layer correspond to some feature of a plan. some statements have to do with reasoning internal to the theories of particular data structures  such as sets  lists  integers  and so on. reasoning involving these terms can indirectly lead to a change in the truth value of some plan feature  such as a data flow equality. the dependency processing facilities of the truth maintenance layer guarantee that this change is propagated to all other features which depend on it. 
+　　contradictions may also occur involving both plan and non-plan terms. this implies that a significant degree of flexibility is needed to dispatch the handling of a contradiction to the appropriate layer. although facilities exist in cake for locally binding and unbinding contradiction handlers  use of this part of cake's control structure has not yet been explored. 
+　　before going on to the trace of reasoning in the next section  let us briefly project future developments in the remaining two layers of figure 1. the plan recognition layer will use brotsky's algorithm for parsing flow graphs  for the  structural  part of recognition  and the lower layers of cake for verifying the logical conditions. the plan synthesis layer will initially be a straightforward interactive plan generator  using a library of plan refinement rules   and will later use a general purpose planner such as chapman's . the plan synthesis layer is above the plan recognition layer because  as has been argued elsewhere   non-trivial program synthesis must make use of recognition. 
+1. a trace of reasoning 
+　　to further illustrate the interaction of the layers of cake  let us return now to the reasoning example of section 1 and trace the complete execution of the solution. the scenario described here runs in the current implementation of cake on a symbolics 1 lisp machine in approximately 1 seconds. in addition to the example problem statement here being a significant simplification as discussed in section 1  the trace below is also a summarization in that it does not follow all alternative proof paths and it omits the irrelevant terms and clauses that are produced even in this small example. 
+　　recall that the problem we were given  summarized in figure 1  is to determine whether the plan xy is a correct implementation of the operation z  under the given input-output correspondences. the control structure of the solution comes from the symbolic evaluation of the plan xy in the plan recognition layer  which is currently being simulated by an ad hoc procedure. 
+　　the data flow arcs of the plan xy in the plan calculus layer are implemented in the truth maintenance layer by the following true equalities: 
+1. x1 = y1 
+1. x1 = y1 
+the input-output specifications of operations x and y in the 
+plan calculus are implemented in the truth maintenance layer by the constraint clauses resulting from reduction of the following formulae to disjunctive normal form: 
+
+the  data theory  underlying this example includes the following 
+true statement  
+　　　　1. commutative g  as well as several demons with patterns indicated below. the code in the body of each demon is summarized below by the quantified fact which it implements. first  there is a demon in the algebraic layer which implements the definition of commutativity  as described above  for the function g. 
+
+the domain and range type of the function f is implemented in part by the following demon in the types layer. 
+	 f .   	v x a x  =* b f x   
+and finally  the fact that b is a subtype of c is implemented in part by the following demon associated with the type lattice in the types layer. 
+
+the symbolic evaluation begins by assuming the preconditions of 
+z: 
+　　　　1. a z1  
+we also take as premises the correspondences shown in figure 1 between the inputs and outputs of the plan xy and the inputs and outputs of operation z  which are implemented by the following true equalities: 
+　　　　1. z1 = x1 
+　　　　1. z1  y1. z1   y1 
+1. z1   y1 
+now  in order to recognize xy as an instance of z we need to establish the truth of the postconditions of z: 
+
+first we symbolically evaluate the operation x. the precondition of x  
+1. a x1  
+is true by substitution of the equality of line 1 into line 1. then  by the constraint of line 1 we get the postcondition of x: 
+	c. rich 	1 
+1. x1 - f x1  
+next we need to establish the preconditions of operation y. the creation of the term f x1  in the postconditions of x triggers the domain/range demon with pattern  f *    which installs the constraint clause  
+1. a x1  =  b f x1   
+which  with line 1 gives us: 
+1. b f x1   
+the creation of this term triggers the subtype noticer with pattern 
+ b *    which installs the constraint clause  
+1. b f x1   =  c f x1   
+by which it follows with line 1 that 
+1. c f x1   
+by the operation of the equality layer  the precondition of y follows from line 1 and the equalities of line 1 and 1: 
+1. c y1  
+with the constraint clause of line 1  this gives us the postconditions of y: 
+1. y1 = g y1 y1  
+1. p y1 y1  
+by substitution of the equalities from lines 1 and 1 into line 1 we establish line 1  one of the postconditions of z  oed . 
+   the creation of the term g y1 y1  in line 1 triggers the demon with pattern  g * *    which installs a demon with pattern  g y1 y1   and an empty body. via the  completeness  
+processing between the equality and demon layers  as illustrated in the commutativity example earlier  this forces substitution of the equalities of lines 1 and 1 into the term g z1  z1  yielding: 
+1. g z1 z1  = g y1 y1  
+   the creation of the term g y1 y1  then triggers the commutativity demon with pattern  g * *   again  which now installs the following constraint: 
+1. commutative g  =  g y1 y1  = g y1 y1  
+from this constraint and line 1 it follows that 
+1. g y1 y1  - g y1 y1  
+is true. line 1  the other postcondition of z  follows by transitivity of equality from lines 1 1 and 1  oed . 
+   this completes the example trace. note that as a byproduct of this reasoning  all the appropriate dependencies have been installed to support explanation and incremental retraction. 
+1. conclusions 
+the system presented here is still under development. 
+although we do find that the hybrid approach gives us leverage on the control problem  there are still difficulties. for one  the interaction of the layers  especially involving the algebraic layer  is highly tuned. each additional increment of functionality has been difficult to add without causing explosions of computation. also  on the topic of explosions  we are still concerned about the inherently exponential computations implicit in using a full 
+1 c. rich 
+boolean algebra of types. although this has yet not turned out to be a problem in practice  we may eventually be forced into restricting the power of the type hierarchy as in krypton . 
+   on the topic of hybrid reasoning systems in general  we simply would like to point out that the layered architecture of cake is just one small point in a large spectrum of possible designs. there are many other options for how knowledge is partitioned  and how the individual components communicate and share information. some of these general design issues in hybrid reasoning systems are discussed in a paper by brotsky and rich . 
+1. 
