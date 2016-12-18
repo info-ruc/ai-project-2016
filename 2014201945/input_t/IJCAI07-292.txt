@@ -1,0 +1,349 @@
+ A Heuristic Search Approach to Planning with Temporally Extended Preferences
+
+                   Jorge A. Baier   and  Fahiem Bacchus     and Sheila A. McIlraith
+                                    Department of Computer Science
+                                         University of Toronto
+                                            Toronto, Canada
+
+
+                    Abstract                          while optimizing the metric function.
+                                                        A key insight, developed early in our investigation, was
+   In this paper we propose a suite of techniques for plan- that, to be effective, a preference-based planner must actively
+   ning with temporally extended preferences (TEPs). To guide search towards the achievement of preferences. To this
+   this end, we propose a method for compiling TEP    end, we propose a compilation method that reduces a plan-
+   planning problems into simpler domains containing  ning problem with TEPs into a new problem containing only
+   only ﬁnal-state (simple) preferences and metric func- simple preferences and some metric functions. The new prob-
+   tions. With this simpliﬁed problem in hand, we     lem contains additional domain predicates that emulate the
+   propose a variety of heuristic functions for planning satisfaction of the TEPs in the original problem. Roughly,
+   with ﬁnal-state preferences, together with an incre- this means that for any TEP ϕ, we have a new predicate Pϕ
+   mental best-ﬁrst planning algorithm. A key feature that is true in the ﬁnal state of a plan iff ϕ was satisﬁed dur-
+   of the planning algorithm is its ability to prune the ing the execution of the plan. The advantage of having such a
+   search space. We identify conditions under which   compilation is that the possibly complex process of satisfying
+   our planning algorithm will generate optimal plans. a TEP is reduced to the problem of satisfying a simple pref-
+   We implemented our algorithm as an extension to    erence, i.e., a ﬁnal-state preference. Hence, we observed that
+   the TLPLAN  planning system and report on exten-   if we could ﬁnd ways of adapting existing heuristic search
+   sive testing performed to evaluate the effectiveness of techniques to achieve simple preferences, we would obtain a
+   our heuristics and algorithm. Our planner, HPLAN-P, method for solving planning problems containing TEPs.
+   competed in the 5th International Planning Competi-  Unfortunately, heuristics for classical planning goals are
+   tion, achieving distinguished performance in the qual- not directly applicable to planning with simple preferences.
+   itative preferences track.                         A contribution of this paper is the development of a number
+                                                      of new search heuristics for planning with simple preferences,
+1  Introduction                                       that we exploit for planning problems with TEPs encoded as
+Standard goals enable a planner to distinguish between plans simple preferences.
+that satisfy goals and those that do not. They provide no fur- Using these heuristics, we propose a planning algorithm
+ther means of discrimination between successful plans. Pref- that incrementally ﬁnds better plans. Once a plan is found,
+erences, on the other hand, convey information about how its metric value can be used as a bound for future plans: any
+“good” a plan is, thus enabling a planner to distinguish be- plan that exceeds this metric value can be pruned from the
+tween successful plans of differing quality. Simple prefer- search space. We also prove that under certain fairly natural
+ences express preferences over properties of the ﬁnal state of conditions our algorithm can generate optimal plans.
+a plan, while temporally extended preferences (TEPs) refer to We have implemented a planner, HPLAN-P, which uses
+properties of the whole plan. Planning with TEPs has been these techniques to ﬁnd good quality plans. The planner is
+                                                                                             [
+the subject of recent research, e.g., [Delgrande et al., 2004; built as an extension of the TLPLAN system Bacchus and
+                                                                   ] 1
+Son and Pontelli, 2004; Bienvenu et al., 2006]. It was also a Kabanza, 1998 . We used our implementation to evalu-
+theme of the 5th International Planning Competition (IPC-5). ate the performance of our algorithm and the relative per-
+  In this paper we propose techniques for planning with formance of different heuristics on problems from both the
+TEPs such as those speciﬁed in PDDL3 [Gerevini and Long, IPC-5 Simple and Qualitative Preferences tracks.
+2005]. PDDL3, is a planning domain deﬁnition language de- In what follows, we brieﬂy describe PDDL3. Then we out-
+signed speciﬁcally for IPC-5. It extends PDDL2.2 to include, line our compilation method, the proposed heuristics, the al-
+                                                         1
+among other things, facilities for expressing TEPs, described The basic TLPLAN system uses LTL formulae to express do-
+by a subset of linear temporal logic (LTL). A metric func- main control knowledge; thus, LTL formulae serve to prune the
+tion over simple and TEPs is then used to quantify the plan’s search space. Nevertheless, it has no mechanism for predicting the
+quality. The aim in solving a PDDL3 planning instance is to future satisfaction or falsiﬁcation of the LTL formula, providing no
+generate a plan that satisﬁes the hard goals and constraints heuristic guidance to the search.
+
+                                                 IJCAI07
+                                                  1808gorithm we used to realize them and the experiments we per- preference for certain conditions to hold in the ﬁnal state of
+formed to evaluate them. We conclude with a discussion of the plan. They are declared as part of the goal. For example,
+system performance and related work.                  the following PDDL3 code:
+                                                      (:goal (and (delivered pck1 depot1)
+2  Brief Description of PDDL3                                    (preference truck (at truck depot1))))
+PDDL3 extends PDDL2.2 by enabling the speciﬁcation of
+                                                      speciﬁes both a hard goal (pck1 must be delivered at depot1)
+preferences and hard constraints. It also provides a way of
+                                                      and a simple preference (that truck is at depot1). Simple
+deﬁning a metric function that deﬁnes the quality of a plan.
+                                                      preferences can also be externally quantiﬁed, in which case
+The rest of this section brieﬂy describes these new elements.
+                                                      they again represent a family of individual preferences.
+Temporally  extended  preferences/constraints PDDL3
+                                                      Metric Function
+speciﬁes TEPs and temporally extended hard constraints in
+                                                      The metric function deﬁnes the quality of a plan, generally
+a subset of LTL. Both are declared using the :constraints
+                                                      depending on the preferences that have been achieved by the
+construct. Preferences are given names in their declaration, to
+                                                      plan. To this end, the PDDL3 expression (is-violated
+allow for later reference. By way of illustration, the following
+                                                      name), returns the number of individual preferences in the
+PDDL3 code deﬁnes two preferences and one hard constraint.
+                                                      name family of preferences that are violated by the plan.
+(:constraints                                         When  name refers to a precondition preference, the expres-
+ (and
+  (preference cautious                                sion returns the number of times this precondition preference
+   (forall (?o - heavy-object)                        was violated during the execution of the plan.
+     (sometime-after (holding ?o)                       The quality metric can also depend on the function
+                   (at recharging-station-1))))       total-time, which returns the plan length. Finally, it is also
+  (forall (?l - light)                                possible to deﬁne whether we want to maximize or minimize
+   (preference p-light (sometime (turn-off ?l))))     the metric, and how we want to weigh its different compo-
+  (always (forall ?x - explosive) (not (holding ?x))))) nents. For example, the PDDL3 metric function:
+The cautious preference suggests that the agent be at a (:metric minimize (+ (total-time)
+recharging station sometime after it has held a heavy object,            (* 40 (is-violated econ))
+whereas p-light suggests that the agent eventually turn all              (* 20 (is-violated truck))))
+the lights off. Finally, the (unnamed) hard constraint estab- speciﬁes that it is twice as important to satisfy preference
+lishes that an explosive object cannot be held by the agent at econ as to satisfy preference truck, and that it is less im-
+any point in a valid plan.                            portant, but still useful, to ﬁnd a short plan.
+  When a preference is externally universally quantiﬁed, it
+deﬁnes a family of preferences, containing an individual pref-
+erence for each binding of the variables in the quantiﬁer. 3 Preprocessing PDDL3
+Therefore, preference p-light deﬁnes an individual prefer- The preprocessing phase compiles away many of the more
+ence for each object of type light in the domain. Preferences complex elements of PDDL3, yielding a simpler planning
+that are not quantiﬁed externally, like cautious, can be seen problem containing only simple preferences, a new metric
+as deﬁning a family containing a single preference.   function that must be minimized that only refers to those
+  Temporal operators, such as sometime-after in the ex- simple preferences, and possibly some hard atemporal con-
+ample above, cannot be nested in PDDL3. However, our ap- straints. In the new problem, the TEPs have been encoded in
+proach can handle the more general case of nested TEPs. new domain predicates.
+Precondition Preferences                                This phase is key in adapting existing heuristic techniques
+Precondition preferences are atemporal formulae expressing to planning with TEPs. One reason for this is that now the
+conditions that should ideally hold in the state in which the achievement of a TEP is reduced the simple satisfaction of a
+action is preformed. They are deﬁned as part of the action’s domain predicate, i.e., a new optional goal condition. Gener-
+precondition. For example, the preference labeled econ be- ating a compact compiled problem is also key for good per-
+low speciﬁes a preference for picking up objects that are not formance; our compilation achievesthisinpartbyavoiding
+heavy.                                                grounding the planning problem. The rest of this section de-
+(:action pickup :parameters (?b - block)              scribes how we do this for each of the PDDL3 elements de-
+ (:precondition (and (clear ?b)                       scribed in the previous section.
+                  (preference econ (not (heavy ?b))))) Temporally extended preferences/constraints
+ (:effect (holding ?b)))
+                                                      We use techniques presented by Baier and McIlraith [2006] to
+Precondition preferences behave something like conditional represent the achievement of ﬁrst-order temporally extended
+action costs. They are violated each time the action is ex- formulae within the planning domain, ending up with a new
+ecuted in a state where the condition does not hold. In the augmented problem. The new problem contains, for each
+above example, econ will be violated every time a heavy temporally extended preference or hard constraint ϕ,anew
+block is picked up in the plan. Therefore these preferences domain predicate that is true in the ﬁnal state of a plan if and
+can be violated a number of times.                    only if the plan satisﬁed ϕ during its execution.
+Simple Preferences                                      The advantage of using such a compilation, is that ﬁrst-
+Simple preferences are atemporal formulae that express a order LTL formulae are directly compiled without having to
+
+                                                 IJCAI07
+                                                  1809                                    (true)            properties of the world) need to be updated. To accomplish
+           {}
+                              q1
+     q1                                               this we deﬁne an automata update for each automata. Our
+                               ?x
+                   (delivered ?x)
+                                   (delivered ?x)     planner performs this update automatically after performing
+       (exists (?c)          (loaded ?x)              any domain action. For the automata of Figure 1(b), the up-
+         (and (cafe ?c)                               date would include rules such as:
+            (at ?c)))
+                        q0              q2
+                         ?x (or (not (loaded ?x)) ?x   (forall (?x) (implies (and (aut-state q0 ?x) (loaded ?x))
+                              (delivered ?x))                             (add (aut-state q1 ?x))))
+     q0    {}
+                      (or (not (loaded ?x))           That is, an object ?x moves from state q0 to q1 whenever
+                        (delivered ?x))
+     (a)                      (b)                     (loaded ?x)  is true.
+Figure 1:    PNFA   for (a)  (sometime (exists (?c)     Analogously, we deﬁne an update for the accepting pred-
+(and (cafe ?c) (at ?c)))),and(b)(forall (?x)          icate, which is performed immediately after the automata
+(sometime-after (loaded ?x) (delivered ?x)))          update—if the automata reaches an accepting state then we
+                                                      add the accepting predicate to the world state.
+                                                        In addition to specifying how the automata states are up-
+convert the formula into a possibly very large set of ground in- dated, we need also to specify what objects are in what au-
+stances. As a result, the compiled domain is much more com- tomata states initially. This means we must augment the prob-
+pact, avoiding the exponential blowup that can arise when lem’s initial state by adding a collection of initial automata
+grounding. As we see later in Section 5, this is key to our facts. Given the original initial state and an automaton, the
+planner’s performance.                                planner computes all the states in which a tuple of objects can
+  The compilation process ﬁrst constructs a parameterized be, and then adds the corresponding facts to the new problem.
+nondeterministic ﬁnite state automata (PNFA) Aϕ for each In our example, the initial state of the new compiled problem
+temporally extended preference or hard constraint expressed contains facts stating that both A and B are in states q and q .
+                 2                                                                                0    2
+as an LTL formula ϕ. The PNFA represents a family of non- If the temporal formula originally described a hard con-
+deterministic ﬁnite state automata. Its transitions are labeled straint, the accepting condition of the automaton can be
+by sets of ﬁrst-order formulae. Its states intuitively “monitor” treated as additional mandatory goal. During search we also
+the progress towards satisfying the original temporal formula. use TLPLAN’s ability to incrementally check temporal con-
+APNFAAϕ   accepts a sequence of domain states iff such a se- straints to prune from the search space those plans that have
+quence satisﬁes ϕ. Figure 1 shows some examples of PNFA already violated the constraint.
+for ﬁrst-order LTL formulae.
+                                                      Precondition Preferences
+  Parameters in the automata appear when the LTL formula Precondition preferences are very different from TEPs: they
+is externally quantiﬁed (e.g. Figure 1(b)). The intuition is are atemporal, and are associated with the execution of ac-
+that different objects (or tuples of objects) can be in different
+                                                      tions. If a precondition preference p is violated n times dur-
+states of the automata. As an example, consider a transporta-
+                                                      ing the plan, then the PDDL3 function (is-violated p)
+tion domain with two packages, A and B, which are initially returns n.
+not loaded in any vehicle. Focusing on the formula of Figure
+                                                        Therefore, the compiled problem contains a new domain
+1(b), both objects start off in states q and q of the automata
+                              0     2                 function is-violated-counter-p, for each precondition
+because they are not loaded in the initial state. This means
+                                                      preference p. This function keeps track of how many times
+that initially both objects satisfy the temporal formula, since
+                                                      the preference has been violated. It is (conditionally) incre-
+both are in the automaton’s accepting state q .Thatis,the
+                                      2               mented whenever its associated action is performed in a state
+null plan satisﬁes the formula (b) of Figure 1. Now, assume
+                                                      that violates the atemporal preference formula. In the case
+we perform the action load(A,Truck). In the resulting state,
+                                                      where the preference is quantiﬁed, the function is parameter-
+B stays in q and q while A now moves to q . Hence, A no
+          0     2                     1               ized, which allows to compute the number of times different
+longer satisﬁes the formula; it will satisfy it only if the plan
+                                                      objects have violated the preference.
+reaches a state where delivered(A) is true.
+                                                        For example, consider the PDDL3 pickup action given
+  To represent the automata within the domain, for each au- above. In the compiled domain, the original declaration is
+tomaton, we deﬁne a predicate specifying the automaton’s replaced by:
+current set of states. When the automaton is parameterized,
+the predicate has arguments, representing the current set of (:action pickup :parameters (?b - block)
+                                                       (:precondition (clear ?b))
+automaton state for a particular tuple of objects. In our exam- (:effect (and (when (heavy ?b)
+ple, the fact (aut-state q0 A) represents that object A is           (increase (is-violated-counter-econ) 1)))
+in q0. Moreover, for each automaton we deﬁne an accepting          (holding ?b))) ;; add (holding ?b)
+predicate. The accepting predicate is true of a tuple of objects
+if the plan has satisﬁed the temporal formula for such a tuple. Simple Preferences
+                                                      As with TEPs, we add new accepting predicates to the com-
+  As actions are executed, the automata states (as well as
+                                                      piled domain, one for each simple preference. These predi-
+                                                      cates become true iff the preference is satisﬁed. Moreover, if
+  2                                       [
+   The construction works for only a subset of LTL Baier and the preference is quantiﬁed, they are parameterized.
+McIlraith, 2006]. However, this subset includes all of PDDL3’s
+TEPs. It also includes TEPs in which the temporal operators are Metric Function
+nested.                                               For each preference, we deﬁne a new function is-violated.
+
+                                                 IJCAI07
+                                                  1810Its value is deﬁned in terms of the accepting predicates (for to instantiations of the accepting predicates used to convert
+temporally extended and simple preferences) and in terms of TEPs to simple preferences (as described above).
+the violation counters (for precondition preferences). If pref- Goal distance function (G) This function is a measure of
+erence p is quantiﬁed, then the is-violated function counts the how hard it is to reach the goal. It is based on a heuristic
+number of object tuples that fail to satisfy the preference. proposed by Zhu and Givan [2005]. Formally, let G be the set
+  The metric function is then deﬁned just as in the PDDL3 of goal facts that appear in the relaxed graph. Furthermore,
+deﬁnition but making reference to these new functions. If the if f is a fact, let d( f ) be the depth at which f ﬁrst appears
+objective was to maximize the function we invert the sign of during the construction of the graph. If all the problem’s goal
+the function body. Therefore, we henceforth assume that the     G        =        ( )k
+                                                      facts are in ,thenG   ∑ f ∈G d f ,wherek is a positive,
+metric is always to be minimized.                     real parameter. Otherwise G = ∞.
+4  Planning with Heuristic Search                     Preference distance function (P) This function is a mea-
+                                                      sure of how hard it is to reach the various preference facts.
+After applying the preprocessing phase described above we It is analogous to G but for preferences. Let P be the set
+are left with a planning problem containing only simple pref- of preference facts that appear in the relaxed graph. Then
+erences. We propose to solve this problem with a novel com- =   ( )k,
+                                                      P   ∑ f ∈P d f for a parameter k. Notice that P is not pe-
+bination of heuristic search techniques.              nalized when there are unreachable preference facts since in
+  Heuristic search has been very successful in solving classi- general the plan will not achieve all preferences.
+cal planing problems where the conjunction of all goals must
+be achieved. In our case, however, it is generally impossi- Optimistic metric function (O) This is an estimate of the
+ble to satisfy all preferences. Instead the planner must try value achievable by any plan extending the partial plan reach-
+to achieve a “good” subset of the preferences. In particular, ing s. O does not require constructing the relaxed planning
+this subset of preferences must be jointly achievable and must graph. Rather it is computed by evaluating the metric func-
+yield a preferred value. Some planners have used techniques tion in s assuming no precondition preference will be vio-
+for selecting, during search, a subset of preferences and then lated in the future, and that all unviolated preferences will be
+solving that subset as a classical goal using standard planning achieved in the future. Under the condition that the metric
+heuristics (e.g., YochanPS [Benton et al., 2006]). However, function is non-increasing in the number of achieved prefer-
+this introduces the non-trivial problem of ﬁrst selecting such ences, O will be a lower bound on the best plan extending s.
+                                                                                                  [    ]
+a subset.                                             O is a variant of “optimistic weight” Bienvenu et al. 2006 .
+  Our approach is to utilize a uniﬁed heuristic search tech- Best relaxed metric function (B) B is another estimate of
+nique that attempts to tradeoff preference desirability and the value achievable by extending s. B utilizes the relaxed
+ease of achieving during the search for a plan. Another im- planning graph to obtain its estimate. In particular, we eval-
+portant factor is that in addition to the preferences the plan- uate the metric function in each of the relaxed worlds of the
+ning problem generally contains a classical goal, that must be planning graph and take B to be the minimum among these
+achieved. Hence, the search must give priority to achieving values. B will generally yield a better (higher) estimate of
+the hard goal.                                        the optimal value achievable by extending s since it will re-
+  To solve this problem of tradeoffs we have developed an gard preferences that do not appear in the relaxed states as be-
+iterative planning technique that uses a sequence of heuristi- ing unsatisﬁable. Under a slightly more complex method for
+cally guided planning episodes. Instead of selecting the pref- building the relaxed planning graph B can be guaranteed to
+erences we want to satisfy, we simply ask the planner to ﬁnd be a lower bound under the same condition as O (i.e., that the
+a better plan in each planning episode.               preference metric is non-increasing in the number of achieved
+  Turning to the details we ﬁrst present the suite of heuris- preferences). However, this technique was not used in the em-
+tics we have developed to use within each planning episode, pirical results reported. Hence in our experiments B was not
+and then we explain how we control the sequence of planning a guaranteed lower bound.
+episodes.                                             Discounted metric function (D(r)) A weighting of the
+4.1  Heuristics for Planning with Preferences         metric function evaluated in the relaxed states. Assume
+                                                      s0,s1,...,sn are the relaxed states of the graph, where si is
+Many of our heuristics are based on the well-known tech- at depth i. The discounted metric, D(r),is:
+nique of computing a relaxed planning graph [Hoffmann and                   n−1
+                                                                                               i
+Nebel, 2001]. We can view this graph as composed of relaxed   D(r)=M(s0)+    ∑ (M(si+1) − M(si))r ,
+states. A relaxed state at depth n+1 is generated by applying                i=0
+all the positive effects of actions that can be performed in the where M(si) is the metric function evaluated in the relaxed
+relaxed state of depth n (i.e., by ignoring delete lists and by state si, r is a discount factor (0 ≤ r ≤ 1).
+applying all of the actions in one step).               The D  function is optimistic with respect to preferences
+  Most of the heuristics given below are computed for a state that seem easy and pessimistic with respect to preferences
+s by constructing the relaxed graph starting at s and growing that look hard. Intuitively, the D function estimates the met-
+this graph until all goal facts and all preference facts appear ric of a plan that is a successor of the planning state by “be-
+in the relaxed state, or we reach an empirically determined lieving” more in the satisfaction of preferences that appear
+bound on the depth of the relaxed states. The goal facts corre- to be easier. Observe that M(si+1) − M(si) is the amount of
+spond to the hard goals, and the preference facts correspond metric value gained when passing from state si to state si+1.
+
+                                                 IJCAI07
+                                                  1811                             i
+This amount is then multiplied by r , which decreases as i in- Input : init: initial state, goal, hardConstraints:asetofhard
+creases. Observe also that, although the metric gains are dis- constraints, USERHEURISTIC(): a heuristic function,
+                                                              METRICBOUNDFN(): function estimating metric for a partial
+counted, preferences that are weighted higher in the PDDL3    plan
+metric will also have a higher impact on the value of D.That begin
+is, D achieves the desired tradeoff between the ease of achiev- bestMetric ← worst case upper bound; HEURISTICFN ← G
+                                                         frontier ← INITFRONTIER(init)
+ing a preference and the value of achieving it.          while frontier = ∅ do
+  A computational advantage of the D function is that it is current ← REMOVEBEST(frontier)
+very easy to compute. As opposed to other approaches, this f ←Evaluate hardConstraints in current
+                                                          if f is not false then
+heuristic never needs to make an explicit selection of the pref- if current is a plan and its metric is < bestMetric then
+erences to be pursued by the planner.                        Output the current plan
+                                                             if this is ﬁrst plan found then
+Sequence of Planning Episodes                                 HEURISTICFN ← USERHEURISTIC()
+                                                              frontier ← INITFRONTIER(init) [search restarted]
+When search is started (i.e., no plan has been found), the al- hardConstraints ← hardConstraints∪
+gorithm uses the goal distance function (G) as its heuristic in   {always(METRICBOUNDFN()< bestMetric)}
+a standard best ﬁrst search. The other heuristics are ignored bestMetric ← METRICFN(current)
+in this ﬁrst planning episode. This is motivated by the fact succ ← EXPAND(current)
+                                                                 ←       (   ,    ,          )
+that the goal is a hard condition that must be satisﬁed. In f rontier MERGE succ frontier HEURISTICFN
+some problems the other heuristics (that guide the planner to- end
+wards achieving a preferred plan) can conﬂict with achieving Algorithm 1:HPLAN-P’s search algorithm.
+the goal, or might cause the search to become too difﬁcult.
+  After ﬁnding the ﬁrst plan, the algorithm restarts the search
+from scratch, but this time it uses some combination of the function.
+above heuristics to guide the planner towards a preferred plan. PDDL3 domains may also contain hard constraints. Hence,
+Let USERHEURISTIC() denote this combination. USER-    in addition to pruning by bounding, the algorithm prunes
+HEURISTIC() could be any combination of the above heuris- from its search space any state that violates a hard constraint.
+tic functions. Nevertheless, in this paper we consider only Putting the above together we obtain the Algorithm 1.
+a small subset of all possible combinations. In particular,
+we consider only prioritized sequences of heuristics, where 4.2 Properties of the Algorithm
+the lower priority heuristics are used only to break ties in the
+higher priority heuristics.                           We can show that under certain conditions our search algo-
+  Since achieving the goal remains mandatory, USER-   rithm is guaranteed to return an optimal or a k-optimal so-
+HEURISTIC() always uses G as the ﬁrst priority, and with lution. It is important to note that our conditions impose no
+some of the other heuristics at a lower priority. For exam- restriction on the USERHEURISTIC() function. In particular,
+ple, consider the prioritization sequence GD(0.3)O.When we can still ensure optimality even if this function is inadmis-
+comparing two states of the frontier, the planner ﬁrst looks at sible. In planning this is important, as inadmissible heuristics
+the G function. The best state is the one with lower G value are typically required for adequate search performance.
+(i.e. lower distance to the goal). However, if there is a tie, We require in our proofs that METRICBOUNDFN(s)bea
+then it uses D(0.3) (the best state being the one with a smaller lower bound on the metric value of the optimal plan extend-
+value). Finally, if there is still a tie, we use the O function. ing s. In this case we say that the pruning is sound.When
+In Section 5, we investigate the effectiveness of several such sound pruning is used, optimal plans are never pruned from
+prioritized heuristics sequences.                     the search space. Therefore, we can be sure no state that leads
+  One other component of the planning algorithm is that we to an optimal plan will be discarded by the algorithm. More-
+utilize a scheme for caching relaxed states (and the heuristic over, optimality can be guaranteed when the algorithm stops.
+computed at these states) so that we can short-circuit the re- Lemma 1 If Algorithm 1 terminates and a sound (or no)
+laxed planning graph construction if the same relaxed state is pruning has been used, then the last plan returned, if any,
+encountered again. Since constructing the relaxed states can is optimal.
+be expensive this caching scheme yields a useful speedup. Proof: Each planning episode has returned a better plan, and
+Increasing Plan Quality Once we have completed the ﬁrst the algorithm stops only when the ﬁnal planning episode has
+planning episode (using G) we want to ensure that each sub- rejected all possible plans. Since the bounding function never
+sequent planning episode yields a better plan.        prunes an optimal plan this means that no plan better than the
+  This is achieved by using increasingly restrictive pruning last one returned exists.                 
+in each planning episode. In particular, in each planning As described above, if the metric function is non-
+episode the algorithm prunes from the search space any state increasing in the number of achieved preferences, O will be
+s that we estimate cannot reach a better plan than the best plan a lower bound. As a matter of fact, all metric functions used
+found so far. This estimate is provided by the function MET- in IPC-5 are non-increasing in the number of achieved pref-
+RICBOUNDFN() which is given as an argument to the search erences.
+algorithm. METRICBOUNDFN(s) must compute or estimate    Lemma 1 still does not guarantee that an optimal solution
+a lowerbound on the metric of any plan extending s.Wehave will be found because the algorithm might never terminate.
+used two of the above heuristics, B and O, for this bounding To guarantee this, we impose further conditions to sound
+
+                                                 IJCAI07
+                                                  1812

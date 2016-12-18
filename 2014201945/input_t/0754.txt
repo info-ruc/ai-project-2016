@@ -1,0 +1,326 @@
+       QCSP-Solve: A Solver for Quantiﬁed Constraint Satisfaction Problems
+                                  Ian P. Gent  and  Peter Nightingale
+              School of Computer Science, University of St Andrews, Fife, KY16 9SS, UK
+                                   email: {ipg,pn}@dcs.st-and.ac.uk
+                                            Kostas Stergiou
+                  Department of Information & Communication Systems Engineering
+                 University of the Aegean, Samos, Greece, email: konsterg@aegean.gr
+
+                    Abstract                          existing direct approaches to solving QCSPs with discrete ﬁ-
+                                                      nite domains, i.e. approaches based on extending CSP tech-
+    The Quantiﬁed Constraint Satisfaction Problem     niques, are at an early stage [Bordeaux and Monfroy, 2002;
+    (QCSP) is a generalization of the CSP in which    Mamoulis and Stergiou, 2004]. As shown in [Gent et al.,
+    some variables are universally quantiﬁed. It has  2004], such approaches are signiﬁcantly outperformed by a
+    been shown that a solver based on an encoding of  QBF solver applied on an encoding of QCSPs into QBFs.
+    QCSP into QBF can outperform the existing di-     Note that, in contrast to QCSPs with ﬁnite domains, there
+    rect QCSP approaches by several orders of magni-  is a signiﬁcant body of work on quantiﬁed problems with
+    tude. In this paper we introduce an efﬁcient QCSP continuous domains (e.g. [Benhamou and Goualard, 2000;
+    solver. We show how knowledge learned from the    Ratschan, 2002]).
+    successful encoding of QCSP into QBF can be uti-
+    lized to enhance the existing QCSP techniques and   In this paper we introduce an efﬁcient QCSP solver, which
+    speed up search by orders of magnitude. We also   we call QCSP-Solve. To develop the solver we ﬁrst im-
+    show how the performance of the solver can be     plemented extensions of standard CSP algorithms (FC and
+    further enhanced by incorporating advanced look-  MAC) and gradually enhanced them with new capabilities.
+    back techniques such as CBJ and solution-directed We started by repeating and analyzing the experiments of
+    pruning. Experiments demonstrate that our solver  [Gent et al., 2004] to discover the features of the QBF solver
+    is several orders of magnitude faster than existing that account for its effectiveness compared to existing direct
+    direct approaches to QCSP solving, and signiﬁ-    approaches. This lead us to identify the pure literal rule used
+    cantly outperforms approaches based on encoding   by the QBF solver as the main factor contributing to its ef-
+    QCSPs as QBFs.                                    ﬁciency. We devised the QCSP analogue of the pure literal
+                                                      rule and incorporated into our basic solver. As a result we
+                                                      achieved a speed-up of several orders of magnitude. We then
+1  Introduction                                       continued the development of QCSP-Solve by adding intelli-
+The Constraint Satisfaction Problem (CSP) is a very success- gent look-back techniques such as conﬂict-based backjump-
+ful paradigm that can be used to model and solve many real- ing and solution-directed pruning which also offer a signiﬁ-
+world problems. The CSP has been extended in many ways cant speed-up. Finally, we implemented a symmetry breaking
+to deal with problems that contain uncertainty. The Quanti- method based on value interchangeability.
+ﬁed Constraint Satisfaction Problem (QCSP) is an extension The experimental evaluation of algorithms for QCSPs is
+in which some of the variables may be universally quanti- difﬁcult for two reasons: ﬁrst, due to the young age of the
+ﬁed. For each possible value of such variables, we have to area, there is a lack of benchmarks; and second, the general-
+ﬁnd values for the remaining, existentially quantiﬁed, vari- ization of known random generation models from related ar-
+ables so that all the constraints in the problem are satisﬁed. eas (CSP and QBF) can lead to ﬂawed models. For example
+The QCSP can be used to model PSPACE-complete decision in [Gent et al., 2004] it was noted that the generation method
+problems from areas such as planning under uncertainty, ad- used in [Mamoulis and Stergiou, 2004] suffers from a ﬂaw
+versary game playing, and model checking. For example, in that makes all generated instances insoluble even for small
+game playing we may want to ﬁnd a winning strategy for all problems sizes. This ﬂaw is also present in other random
+possible moves of the opponent. In a manufacturing problem generation methods. We propose a random generation model
+it may be required that a conﬁguration must be possible for all that, while creating hard instances, can be used to control the
+possible sequences of user choices. Finally, when planning in probability of the ﬂaw discovered in [Gent et al., 2004]. For
+a safety critical environment, such as a nuclear station, we certain parameter settings all generated instances are guaran-
+require that an action is possible for every eventuality. teed to be unﬂawed. On problems created using this model,
+  Interest in QCSPs is growing, following the development QCSP-Solve is several orders of magnitude faster than the ex-
+of numerous efﬁcient solvers in the closely related area of isting QCSP algorithms, and also signiﬁcantly outperforms
+Quantiﬁed Boolean Formulae (QBF or QSAT). However, the the QBF encoding based method of [Gent et al., 2004].2  Preliminaries                                      CSPs look-ahead techniques try to detect dead-ends early by
+In standard CSPs all variables are existentially quantiﬁed. pruning values from future variables, while look-back tech-
+QCSPs are more expressive than CSPs in that they allow uni- niques try to deal with dead-ends in an intelligent way by
+versally quantiﬁed variables. They enable the formulation of recording and exploiting the reasons for failures. Note that
+problems where all contingencies must be allowed for. We some of the techniques we will describe may delete values
+now give a formal deﬁnition.                          from the domains of universal variables because they may
+                                                      discover that, under the current assignments, these values will
+Deﬁnition 1 A Quantiﬁed Constraint Satisfaction Problem deﬁnitely lead to a solution. This pruning is different than
+(QCSP) is a formula of the form QC where Q is a sequence standard pruning in CSPs.
+of quantiﬁers Q1x1 . . . Qnxn, where each Qi quantiﬁes (∃ or
+∀) a variable xi and each variable occurs exactly once in the 3.1 Preprocessing
+sequence. C is a conjunction of constraints (c1 ∧ . . . ∧ cm) Arc consistency (AC) has been extended to QCSPs in [Bor-
+where each ci involves some variables among x1, . . . , xn. deaux and Monfroy, 2002] and [Mamoulis and Stergiou,
+  The semantics of a QCSP QC can be deﬁned recursively 2004]. QCSP-Solve always applies AC as a preprocessing
+as follows. If C is empty then the problem is true. If Q is of step. Apart from reducing the problem size by deleting values
+the form ∃x1Q2x2 . . . Qnxn then QC is true iff there exists from the domains of existentials, AC removes from the prob-
+                                                  1
+some value a ∈ D(x1) such that Q2x2 . . . QnxnC[(x1, a)] lem all constraints of the form ∃ xi∀ xj, cij and ∀ xi∀ xj, cij .
+is true. If Q is of the form ∀x1Q2x2 . . . Qnxn then QC is For the former kind, AC deletes every value of D(xi) that
+true iff for each value a ∈ D(x1), Q2x2...QnxnC[(x1, a)] is is not supported by all values of D(xj ). If D(xi) becomes
+true. In this paper we restrict our attention to binary QCSPs2. empty then the algorithm determines insolubility. For the lat-
+In a binary QCSP, each constraint, denoted by cij , involves ter kind, if there is a value of D(xi) that is not supported by
+two variables (xi and xj) which may be universally or exis- all values of D(xj ) then the algorithm determines that the
+tentially quantiﬁed.                                  problem is insoluble. After AC has been applied, all such
+  As an example consider the following QCSP where Q is constraints can be safely removed from the problem since
+a sequence of 7 quantiﬁed variables, and C is a conjunction they cannot have any further effect. A consequence of this
+of 9 constraints. This problem will be used in Section 3.4 to removal is that any universals after the last existential can be
+demonstrate the various features of QCSP-Solve.       ignored, since they participate in no constraints.
+Example 1                                             3.2  Look-Ahead
+∃x1∃x2∀x3∀x4∀x5∃x6∃x7(x1  6= x6 ∧ x1 6= x7 ∧ x2 6= x6 ∧ In QCSP-Solve we have implemented two basic forms of
+x3 6= x6 ∧x3 < x7 ∧x4 6= x6 ∧x4 6= x7 ∧x5 6= x6 ∧x5 < x7) look-ahead; forward checking (FC) and maintaining arc con-
+                                                      sistency (MAC). FC (called FC0 in [Mamoulis and Stergiou,
+  A special case of a QCSP is Quantiﬁed Boolean Formula 2004] and hereafter) is an extension of standard FC to QC-
+(QBF). A QBF is of the form QC where Q is deﬁned as above SPs. FC0 is a backtracking-based algorithm that can discover
+(however in this case the domain of each variable is 0, 1). C dead-ends early by forward checking the current variable as-
+is a Boolean formula in conjunctive normal form (CNF), a signment (of an existential or universal) against values of fu-
+conjunction of clauses where each clause is a disjunction of ture existentials constrained with the current variable. By
+literals. Each literal is a variable and a sign. The literal is slightly modifying the forward checking phase of FC we get
+said to be negative if negated and positive otherwise. The se- an algorithm, called FC1 in [Mamoulis and Stergiou, 2004],
+mantic deﬁnition is the same as for QCSPs. Note that binary which can discover dead-ends earlier than FC0. FC1 has ex-
+QCSPs, unlike 2-QBF (i.e. QBF problems with at most two actly the same behavior as FC0 when the current variable is
+literals per clause), are not trivial. Despite the restriction to an existential. If the current variable xi is a universal then
+binary constraints, binary QCSPs are still PSPACE-complete FC1 forward checks each value of xi against all future vari-
+[Boerner et al., 2003].                               ables before assigning a speciﬁc value to it. If one of xi’s val-
+  In the rest of the paper we assume that for any constraint ues causes a domain wipe-out then FC1 backtracks to the last
+cij , variable xi is before xj in the quantiﬁcation sequence, un- existential. Otherwise, it proceeds by instantiating the next
+less explicitly speciﬁed otherwise. We will sometimes refer available value a of D(xi) and removing all values of future
+to universally and existentially quantiﬁed variables as univer- variables that are inconsistent with the assignment (xi, a). In
+sals and existentials respectively.                   this way FC1 can discover dead-ends earlier and avoid fruit-
+                                                      less exploration of search tree branches.
+3  Description of QCSP-Solve                            The MAC algorithm is also an extension of standard MAC
+                                                      to QCSPs. After each variable assignment, MAC applies AC
+In this section we describe the basic features of QCSP-Solve.
+                                                      in the problem using the AC algorithm of [Mamoulis and
+First we discuss preprocessing. Then we analyze the look-
+                                                      Stergiou, 2004]. MAC has also been modiﬁed in the same
+ahead and look-back capabilities of QCSP-Solve. In standard
+                                                      way as FC to yield MAC1, an algorithm analogous to FC1.
+  1
+   (x1, a) denotes the assignment of value a to variable x1. That is, when the current variable xi is a universal MAC1
+  2QCSP-Solve can currently handle ternary and binary con- applies AC for each instantiation (xi, aj ), j ∈ {1, . . . , d} be-
+straints. We are in the process of extending it to constraints of higher fore committing to a particular instantiation. If one of the
+arity.                                                instantiations causes a domain wipe-out then the algorithmbacktracks. Otherwise, it commits to one of the values and variable xi is fully interchangeable with a value b of xi, iff
+proceeds with the next variable.                      every solution which contains the assignment (xi, a) remains
+  In the rest of the paper we will describe how various look- a solution if we substitute b for a, and vice versa [Freuder,
+ahead and look-back techniques are combined with an FC- 1991]. A value a ∈ D(xi) is neighborhood interchangeable
+based look-ahead. Most of these techniques can be combined (NI) with a value b ∈ D(xi), iff for each j, such that cij ∈ C,
+with a MAC-based look-ahead in a very similar way.    a and b are compatible with exactly the same values of D(xj ).
+                                                      QCSP-Solve exploits NI to break some symmetries by prun-
+The Pure Value Rule
+                                                      ing the domains of universal variables. That is, for each set
+In SAT and QBF a literal is called pure (or monotone) if its
+                     l                                of NI values we keep one representative and remove the oth-
+complementary literal does not appear in any clause. Such lit-
+                                                      ers, either permanently before search, or temporarily during
+erals are important because they can immediately be assigned
+                                                      search 3. If the algorithm proves that the representative is
+a value without any need for branching [Cadoli et al., 2002].
+                                                      consistent (i.e. satisﬁes the QCSP) then so are the rest.
+This is what the pure literal rule does. For example, if an
+existential literal l only occurs positively, the pure literal rule 3.3 Look-Back
+will set it to true. By repeating and analyzing the experiments
+of [Gent et al., 2004] we discovered that the pure literal rule Various look-back schemes have been developed for CSPs.
+has a profound impact on the search effort. When switching it One of the most successful is conﬂict-based backjumping
+                                                      [           ]
+off, the search process was slowed down by orders of magni- Prosser, 1993 . This algorithm has been successfully com-
+                                                                         [           ]
+tude. This immediately gave rise to the following questions: bined with FC in CSPs Prosser, 1993 , and a DLL-based pro-
+                                                                   [                    ]
+What does the pure literal rule correspond to in QCSPs, and cedure in QBF Giunchiglia et al., 2001 . We describe how
+how can we exploit it to prune the search space? To answer CBJ interacts with the FC-based look-ahead of QCSP-Solve.
+these questions, we use the notion of a pure value.     As in standard CSPs, for each variable xi we keep a con-
+                                                      ﬂict set, denoted by conf set(xi), which holds the past vari-
+Deﬁnition 2 A value a ∈ D(xi) of a QCSP QC is pure iff ables that are responsible for the deletion of values from
+∀Q x  ∈  Q, where x 6= x  and ∀b ∈ D(x ), the assign-
+   j j             j    i             j               D(xi). Initially all conﬂict sets are empty. When encoun-
+ments (xi, a) and (xj , b) are compatible.            tering a dead-end, CBJ exploits information kept in conﬂict
+In a way analogous to the pure literal rule in QBF, we have de- sets to backjump to a variable that is (partly) responsible for
+vised and implemented a look-ahead technique, which we call the dead-end. Conﬂict sets are updated as follows. If the
+the pure value (PV) rule, that detects and exploits pure values current variable xi is existentially quantiﬁed and, during for-
+to prune the search space. The actions taken are dual for exis- ward checking, a value of a future variable xj is found to be
+tential and universal pure values. An existential variable with incompatible with the assignment of xi then xi is added to
+a pure value can be set to that value, while a pure value is re- conf set(xj). If the domain of a future variable xj is wiped
+moved from the domain of a universal variable. This duality out then the variables in conf set(xj) are added to conﬂict
+reﬂects the dual semantics of existential and universal vari- set of the current variable (existential or universal). Back-
+ables. Note that values can become pure dynamically during jumping can occur in either of the following two cases:
+search because of constraint propagation (see Example 2 in
+                                                        • If the current variable xi is existential and there are no
+Section 3.4). Therefore, the PV rule is applied both as a pre- more values to be tried for it then QCSP-Solve back-
+processing technique and as a dynamic look-ahead technique jumps to the rightmost variable x in Q that belongs
+during search. The PV rule works as follows.                                            k
+                                                          to conf set(xi). At the same time all variables in
+  • If a pure value a of an existential xi is discovered dur- conf set(xi) (except xk) are copied to conf set(xk)
+    ing preprocessing (search), then the assignment (xi, a) so that no information about conﬂicts is lost.
+    is made and all other values of x are permanently (tem-
+                               i                        • If the current variable x is universal and a value is
+    porarily) removed from D(x ). To check, during search,                      i
+                            i                             deleted from its domain (because its forward checking
+    if a value a of an existential x is pure, we only need to
+                             i                            results in a domain wipeout) then QCSP-Solve back-
+    check if the assignment (x , a) is compatible with all
+                           i                              jumps to the rightmost variable in that belongs to
+    values of future variables. FC (or MAC) guarantee that                           xk   Q
+                                                          conf set(x ). Again all variables in conf set(x ) (ex-
+    (x , a) is compatible with the values (i.e. the instantia-      i                              i
+      i                                                   cept  ) are copied to          .
+    tions) of the previous variables.                         xk             conf set(xk)
+
+  • If a pure value a of a universal xi is discovered dur- Solution-Directed Pruning
+    ing preprocessing (search), then a is permanently (tem- [Giunchiglia et al., 2001] introduced solution-directed back-
+    porarily) removed from D(xi). To check if a value of a jumping for QBF. This allows backjumps over universally
+    universal is pure, we only need to check against future quantiﬁed literals once reaching a leaf node that is a solu-
+    variables since preprocessing with AC guarantees that tion. Inspired by this idea, we have implemented a technique
+    there are no constraints between a universal and a previ- that can prune values from universal variables when reach-
+    ous variable. Note that if all the values of a universal are ing a solution (i.e. a consistent leaf node). We call this
+    pure then we can ignore this variable.            solution directed pruning (SDP). SDP is based on the fol-
+                                                      lowing idea: Assume that x is the last universal in Q and
+Symmetry Breaking                                                             i
+QCSP-Solve utilizes a technique for symmetry breaking    3Experiments have shown that NI during search is an overhead
+based on neighborhood interchangeability. A value a of a when the PV rule is used.                                                      Boolean QCSP-Solve (Q, C)
+q = {xi+1 . . . xn} ⊂ Q is the sequence of existentials to the
+                                                      1: preprocess(Q, C)
+right of xi. Also, assume that the assignment (xi, ai) leads ←
+to a solution (i.e. is part of a path to a consistent leaf node) 2: c var leftmost variable in the quantiﬁcation formula
+                                                      3: while there is no backtrack from the ﬁrst existential or universal
+and {(xi+1, ai+1) . . . (xn, an)} are the assignments of vari- 4: compute P V (c var)
+ables {xi+1 . . . xn} along this path. Then any value of xi that 5: if c var is existential
+is compatible with all these assignments will deﬁnitely also 6: if no more values in D(c var)
+lead to a solution. Such values can be pruned (i.e. ignored) 7: c var ← rightmost variable in conf set(c var)
+by the search algorithm. Based on this, SDP ﬁrst computes 8: else
+the values of the last universal xi that have the above prop- 9: assign c var with next valid value a ∈ D(c var)
+                                                                 ←
+erty. All such values are temporarily removed from D(xi). 10: DWO  fc(c var, a)
+                                                      11:   if DWO = FALSE
+Now if there are no available values in D(xi), SDP proceeds
+                                                      12:     if there are no more unassigned variables
+with the universal immediately before xi in Q, say xj, and
+checks if its remaining values are compatible with the assign- 13: if there are no universals in Q return TRUE
+                                                      14:      else
+ments of all existentials after xj. This is repeated recursively 15: c var ← SDP (Q)
+until a universal is found which has available values left in its 16: restore values removed by all variables after c var
+domain after SDP has been applied. The algorithm then back- 17: else c var ← next unassigned variable
+tracks to this universal. In this way it is possible to perform 18: else restore values removed by c var
+solution-directed backjumps.                          19: else //c var is universal//
+                                                      20:  if no more values in D(c var)
+3.4  The Algorithm of QCSP-Solve                      21:   if c var is the ﬁrst universal return TRUE
+                                                                     ←
+A high level description of QCSP-Solve’s algorithm is shown 22: else c var last assigned universal variable
+in Figure 1. It takes a QCSP QC and returns TRUE if the 23: else
+                                      4               24:   DWO = FALSE
+problem is satisﬁable, and FALSE otherwise . The version 25: if no assignment to c var has been tried
+of QCSP-Solve shown in Figure 1 is based on FC. A MAC- 26:    DWO←  fc1(c var)
+based version with all the features, except CBJ for the time 27: if DWO = FALSE
+being, is also currently available. In Figure 1,      28:     assign c var with next available value a ∈ D(c var)
+  • c var is the current variable.                    29:     fc(c var, a)
+                                                      30:     c var ← next unassigned variable
+  • preprocess() is a function that preprocesses the prob- 31: else
+    lem by applying AC, and computing pure and NI values. 32: c var ← rightmost variable in conf set(c var)
+  • compute P V () computes the pure values of c var dur- 33: restore removed values by all variables after c var
+                                                      34: if there is a backtrack from the ﬁrst existential return FALSE
+    ing search. If c var is existential and one of its values 35: return TRUE
+    (say a) is pure then compute P V (c var) sets c var to
+    a and temporarily removes the rest of D(c var)’s val-     Figure 1: The algorithm of QCSP-Solve.
+    ues. If c var is universal then compute P V (c var)
+    temporarily removes all the pure values from D(c var).
+    Whenever the algorithm backtracks, all values removed QCSP-Solve works as follows. It takes as input a QCSP
+    by compute P V () are restored.                   QC  and, after preprocessing the problem (line 1), it proceeds
+  • fc0() implements the FC0-type look-ahead. It is called by checking assignments of values to variables until the truth
+    after the current variable (existential or universal) is as- of the QCSP is proved or disproved. Before assigning a value
+    signed and forward checks this assignment against all to c var, QCSP-Solve calls compute P V (c var) to com-
+    future variables constrained with c var. If a value of pute the pure values of c var (line 4). If c var is existen-
+                                                      tial and a dead-end occurs then the algorithm backtracks to
+    a future variable xi is deleted then c var is added to
+                                                      the rightmost variable in conf set(c var) (lines 6–7). Other-
+    conf set(xi). If D(xi) is wiped out then ∀xj, xj ∈
+                                                      wise, the next valid value of c var is forward checked against
+    conf set(xi), xj is added to conf set(c var).
+                                                      future variables (lines 9-10). If there is no domain wipe-out
+  • fc1() implements the FC1-type look-ahead. It is called (DWO) and the algorithm has reached a consistent leaf node
+    before c var is assigned (if it is a universal) and for- (i.e. c var is the last variable in Q) then it calls SDP () to
+    ward checks all of D(c var)’s valid values against the perform solution-directed pruning (line 13). If QCSP-Solve
+    future variables constrained with c var. If the domain is not at a leaf node, it proceeds by moving to the next vari-
+    of a future variable xi is wiped out then ∀xj, xj ∈ able (line 15). If there is a DWO, the next value of c var will
+    conf set(xi), xj is added to conf set(c var).     be tried in the next iteration of the while loop.
+  • SDP  () implements solution directed pruning. SDP () If c var is universal and all of its values have been proved
+    prunes values from universals according to the rule de- to be consistent (according to the current assignments), then
+    scribed in Section 3.3 and returns the universal that has there are two cases. If c var is the ﬁrst universal, QCSP-
+    values left in its domain after SDP has been applied. Solve terminates successfully (line 19). Otherwise, it back-
+                                                      tracks to the last universal (line 20). Before assigning any
+  4The algorithm can be modiﬁed to return solutions in the form value to a universal variable, QCSP-Solve calls fc1(c var)
+of search trees.                                      to perform FC1-type look-ahead (lines 23-24). If there isa DWO, the algorithm backtracks to the rightmost vari-
+able in conf set(c var) (line 30). If there is no DWO, or
+fc1(c var) has already been called at this level, c var is    ∃ x1                  2      3 
+assigned with its next available value (line 26), the assign-
+ment is forward checked against future variables (line 27),   ∃ x2         0   1   2 
+and QCSP-Solve proceeds with the next variable (line 28).                   PV 
+  To better understand how the algorithm of QCSP-Solve        ∀ x3               0    3 
+works, consider the following example.                                                      CBJ 
+                                                              ∀ x4      PV  0    1     6 
+Example 2 Assume that the domains of the variables in the
+problem of Example 1 are as follows: D(x1) = {2, 3},
+                                                              ∀ x5       4    5  SDP  4    5 
+D(x2) =  {0, 1, 2}, D(x3) = {0, 3}, D(x4) = {0, 1, 6},                                    FC 
+D(x5) = {4, 5}, D(x6) = {0, 1, 2, 3}, D(x7) = {0, 2, 3, 6}.   ∃ x6    0  1  2   3      DWO  of  x7 
+Let us trace the execution of QCSP-Solve for a few steps.              FC 
+  1) Preprocessing is applied. There are no arc incon-
+sistent or pure values, so no pruning is performed.5 2)       ∃ x7           0  2  3  6 
+                                                                               FC 
+The assignment (x1, 2) is made. FC reduces D(x6) and
+D(x7) to {0, 1, 3} and {0, 3, 6} respectively. We now have   Figure 2: Search tree of Example 2. Dark
+conf set(x6) = conf set(x7) = {x1}. 3) Now, value 2          nodes are pruned by QCSP-Solve.  Such
+of x2 becomes pure because it is supported by all values in  nodes together with the feature responsible
+future variables. The PV rule will immediately make the as-  for their pruning are included in dashed ovals.
+signment (x2, 2). 4) FC1 does not wipe out any future do-
+main, so the assignment (x3, 0) will be made. FC reduces
+D(x6) and D(x7) to {1, 3} and {3, 6} respectively. 5) Value inconsistent. This assignment will remain inconsistent irre-
+0 of x4 is pure. Therefore, it is removed and the assignment spective of the assignments to other universals or existentials,
+(x4, 1) is made. FC reduces D(x6) to {3}. 6) FC1 does not and therefore the problem is unsatisﬁable. We now propose a
+wipe out any future domain, so the assignment (x5, 4) will generator that can be used to control the probability of ﬂaws.
+be made. FC reduces D(x7) to {6}. 7) x6 and x7 are as-  Variables are quantiﬁed in three blocks, a block of ex-
+signed their only available values and a solution is found. 8) istentials followed by a block of universals then another
+Now function SDP() is called (line 13). SDP() discovers that block of existentials.The generator takes 7 parameters: <
+value 5 of the last universal (x5) is compatible with the as- n, n∀, npos, d, p, q∀∃, q∃∃ > where n is the total number of
+signments of all the existentials after x5. Therefore, this value variables, n∀ is the number of universals, npos is the position
+is removed from D(x5) and a solution-directed backjump to of the ﬁrst universal in Q, d is the uniform domain size, and
+x4 is performed. 9) The assignment (x4, 6) is made. FC re- p is the number of binary constraints as a fraction of all pos-
+duces D(x6) and D(x7) to {1, 3} and {3} respectively. 10) sible constraints. q∃∃ is the number of goods in ∃ xi∃ xj, cij
+FC1 applied at x5 wipes out D(x7) (value 4 of x5 is incom- constraints as a fraction of all possible tuples, and q∀∃ is a
+patible with the only value in D(x7)). Therefore, we have similar quantity for ∀ xi∃ xj, cij constraints, described fur-
+a dead-end. conf set(x7) will be added to conf set(x5) ther below. The other two types of constraints that can be
+and the algorithm will backjump to the rightmost variable in removed by preprocessing are not generated.
+conf set(x5), which is x1.                              Since the ﬂaw is a characteristic of ∀ xi∃ xj, cij con-
+  Figure 2 shows part of the search tree generated by QCSP- straints, we restrict these in the following way: we generate
+Solve and illustrates how subtrees are pruned.        a random total bijection from one domain to the other. All
+                                                      tuples not in the bijection are goods. Now q∀∃ is the fraction
+                                                      of goods from the d tuples in the bijection.
+4  Experiments                                          To control the probability pf of the ﬂaw, we write down
+[Gent et al., 2004] showed that the model for random gener- an expression for pf , approximating proportions p, q∀∃, q∃∃
+ation of QCSPs used in [Mamoulis and Stergiou, 2004] can as probabilities. n∀ is the number of universal variables, and
+suffer from a local ﬂaw that makes almost all of the generated n∃ is the number of inner existential variables. For each ex-
+instances false. In this model there are k alternating quanti- istential assignment (xi, a), the probability that it is covered
+ﬁers applied to disjoint sets of variables, with the innermost by a universal is p(1 − q∀∃). If the variable xi is ﬂawed, then
+quantiﬁer being existential. Let us brieﬂy describe the ﬂaw. all its values are in conﬂict with some value of some univer-
+                                                      sal variable. However, each universal variable can only cover
+Suppose we have a series of k universals x1, . . . , x assigned
+                                          k           one value (since we use a bijection). Therefore (representing
+to values a1, . . . , ak respectively. If there is an existential xi
+later in Q than the k universals and each one of its values is in existential values using integers) the probability that variable
+conﬂict with one of the values assigned to the universals then xi is ﬂawed is given by the following.
+the assignment of values a1, . . . , ak to variables x1, . . . , xk is
+                                                               p(xi flaw) = p(1)p(2|1)p(3|1 ∧ 2) . . . (1)
+  5
+   Values 4 and 5 of x5 are NI, but let us ignore this for the sake The probability that value a is ﬂawed, given that the previ-
+of the example.                                       ous a − 1 values are ﬂawed, is given by formula 2.

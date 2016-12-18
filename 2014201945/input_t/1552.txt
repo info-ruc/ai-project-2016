@@ -1,0 +1,329 @@
+                    Concurrent      Hierarchical     Reinforcement      Learning
+
+    Bhaskara   Marthi,  Stuart Russell, David  Latham             Carlos  Guestrin
+                Computer   Science Division                 School  of Computer  Science
+                  University of California                   Carnegie Mellon  University
+                    Berkeley, CA  94720                         Pittsburgh, PA 15213
+        {bhaskara,russell,latham}@cs.berkeley.edu               guestrin@cs.cmu.edu
+
+                    Abstract
+    We  consider applying hierarchical reinforcement    forest
+    learning techniques to problems in which an agent                                         gold mine
+    has several effectors to control simultaneously. We
+    argue that the kind of prior knowledge one typically
+                                                                                              peasants
+    has about such problems is best expressed using
+    a multithreaded partial program, and present con-   base
+    current ALisp, a language for specifying such par-
+    tial programs. We describe algorithms for learning
+    and acting with concurrent ALisp that can be efﬁ-
+    cient even when there are exponentially many joint
+    choices at each decision point. Finally, we show re- Figure 1: A resource-gathering subgame within Stratagus. Peasants
+                                                      can move one step in the N, S, E, W directions, or remain stationary
+    sults of applying these methods to a complex com- (all transitions are deterministic). They can pick up wood or gold if
+    puter game domain.                                they are at a forest or goldmine and drop these resources at the base.
+                                                      A reward of 1 is received whenever a unit of a resource is brought
+1  Introduction                                       back to the base. A cost of 1 is paid per timestep, and an additional
+                                                      cost of 5 is paid when peasants collide. The game ends when the
+Hierarchical reinforcement learning (HRL) is an emerging player’s reserves of gold and wood reach a predeﬁned threshold.
+subdiscipline in which reinforcement learning methods are
+augmented with prior knowledge about the high-level struc-
+ture of behaviour. Various formalisms for expressing this thread is difﬁcult. First, different peasants may be involved in
+prior knowledge exist, including HAMs [Parr and Russell, different activities and may be at different stages within those
+1997], MAXQ  [Dietterich, 2000], options [Precup and Sut- activities; thus, the thread has to do complex bookkeeping
+ton, 1998], and ALisp [Andre and Russell, 2002]. The idea is that essentially implements multiple control stacks. Second,
+                                                                             N
+that the prior knowledge should enormously accelerate the with N peasants, there are 8 possible joint actions, so action
+search for good policies. By representing the hierarchical selection is combinatorially nontrivial even when exact value
+structure of behaviour, these methods may also expose ad- functions are given. Finally, there are interactions among all
+ditive structure in the value function [Dietterich, 2000]. the peasants’ actions—they may collide with each other and
+  All of these HRL formalisms can be viewed as express- may compete for access to the mines and forests.
+ing constraints on the behavior of a single agent with a sin- To handle all of these issues, we introduce concurrent AL-
+gle thread of control; for example, ALisp extends the Lisp isp, a language for HRL in multieffector problems. The
+language with nondeterministic constructs to create a single- language extends ALisp to allow multithreaded partial pro-
+threaded partial programming language (see Section 2). Ex- grams, where each thread corresponds to a “task”. Threads
+perience with programming languages in robotics suggests, can be created and destroyed over time as new tasks are ini-
+however, that the behaviour of complex physical agents in tiated and terminated. At each point in time, each effector is
+real domains is best described in terms of concurrent activi- controlled by some thread, but this mapping can change over
+ties. Such agents often have several effectors, so that the total time. Prior knowledge about coordination between threads
+action space available to the agent is the Cartesian product of can be included in the partial program, but even if it is not,
+the action spaces for each effector.                  the threads will coordinate their choices at runtime to maxi-
+  Consider, for example, the Resource domain shown in Fig- mize the global utility function.
+ure 1. This is a subproblem of the much larger Stratagus do- We begin by brieﬂy describing ALisp (Section 2) and its
+main (see stratagus.sourceforge.net). Each peasant in the Re- theoretical foundations in semi-Markov decision processes
+source domain can be viewed as an effector, part of a multi- (SMDPs). Section 3 deﬁnes the syntax of concurrent AL-
+body agent. Controlling all the peasants with a single control isp and its semantics—i.e., how the combination of a concur-rent ALisp program and a physical environment deﬁnes an
+                                                       (defun  single-peasant-top   ()
+SMDP. We obtain a result analogous to that for ALisp: the op- (loop do
+timal solution to the SMDP is the optimal policy for the orig- (choose
+inal environment that is consistent with the partial program. ’((call  get-gold)  (call get-wood)))))
+Section 4 describes the methods used to handle the very
+large SMDPs that we face: we use linear function approxi- (defun get-wood ()
+mators combined with relational feature templates [Guestrin (call nav (choose *forests*))
+et al., 2003], and for action selection, we use coordination (action ’get-wood)
+graphs [Guestrin et al., 2002]. We also deﬁne a suitable (call  nav *home-base-loc*)
+SMDP  Q-learning method. In Section 5, we show experi-   (action  ’dropoff))
+mentally that a suitable concurrent ALisp program allows the
+                                                       (defun  get-gold  ()
+agent to control a large number of peasants in the resource- (call nav (choose *goldmines*))
+gathering domain; we also describe a much larger Stratagus (action ’get-gold)
+subgame in which very complex concurrent, hierarchical ac- (call nav *home-base-loc*)
+tivities are learned effectively. Finally, in Section 6, we show (action ’dropoff))
+how the additive reward decomposition results of Russell and
+Zimdars [2003] may be used to recover the three-part Q- (defun nav (l)
+decomposition results for single-threaded ALisp within the (loop until (at-pos l)  do
+more complex concurrent setting.                           (action  (choose  ’(N  S E W Rest)))))
+
+2  Background                                         Figure 2: ALisp program for Resource domain with a single peasant.
+ALisp [Andre and Russell, 2002] is a language for writing
+partial programs. It is a superset of common Lisp, and ALisp
+programs may therefore use all the standard Lisp constructs (defun multi-peasant-top ()
+                                                         (loop  do
+including loops, arrays, hash tables, etc. ALisp also adds the (loop until (my-effectors) do
+following new operations :                                    (choose  ’()))
+  • (choose   choices) picks one of the forms from the     (setf  p (first  (my-effectors)))
+    list choices and executes it. If choices is empty, it does (choose
+    nothing.                                                  (spawn p  #’get-gold  () (list  p))
+  • (action   a) performs action a in the environment.        (spawn p  #’get-wood  () (list  p)))))
+  • (call  f args) calls subroutine f with argument list
+    args.                                             Figure 3: New top level of a concurrent ALisp program for Resource
+  • (get-state)   returns the current environment state. domain with any number of peasants. The rest of the program is
+  Figure 2 is a simple ALisp program for the Resource do- identical to Figure 2.
+main of Figure 1 in the single-peasant case. The agent ex-
+ecutes this program as it acts in the environment. Let ω = To incorporate such prior knowledge, we have developed a
+(s, θ) be the joint state, which consists of the environment concurrent extension of ALisp that allows multithreaded par-
+state s and the machine state θ, which in turn consists of tial programs. For the multiple-peasant Resource domain, the
+the program counter, call stack, and global memory of the concurrent ALisp partial program is identical to the one in
+partial program. When the partial program reaches a choice Figure 2, except that the top-level function is replaced by the
+state, i.e., a joint state in which the program counter is at a version in Figure 3. The new top level waits for an unassigned
+choose  statement, the agent must pick one of the choices to peasant and then chooses whether it should get gold or wood
+execute, and the learning task is to ﬁnd the optimal choice at and spawns off a thread for the chosen task. The peasant will
+each choice point as a function of ω. More formally, an AL- complete its assigned task, then its thread will die and it will
+isp partial program coupled with an environment results in be sent back to the top level for reassignment. The overall
+a semi-Markov decision process (a Markov decision process program is not much longer than the earlier ALisp program
+where actions take a random amount of time) over the joint and doesn’t mention coordination between peasants. Never-
+choice states, and ﬁnding the optimal policy in this SMDP theless, when executing this partial program, the peasants will
+is equivalent to ﬁnding the optimal completion of the partial automatically coordinate their decisions and the Q-function
+program in the original MDP [Andre, 2003].            will refer to joint choices of all the peasants. So, for example,
+                                                      they will learn not to collide with each other while navigat-
+3  Concurrent    ALisp                                ing. The joint decisions will be made efﬁciently despite the
+Now consider the Resource domain with more than one peas- exponentially large number of joint choices. We now describe
+ant and suppose the prior knowledge we want to incorpo- how all this happens.
+rate is that each individual peasant behaves as in the single-
+peasant case, i.e., it picks a resource and a location, navi- 3.1 Syntax
+gates to that location, gets the resource, returns to the base Concurrent ALisp includes all of standard Lisp. The choose
+and drops it off, and repeats the process.            and call  statements have the same syntax as in ALisp.Threads and effectors are referred to using unique IDs. At on Allegro Lisp and uses its scheduler. However, our seman-
+any point during execution, there is a set of threads and tics will be seen below to be independent of the choice of
+each thread is assigned some (possibly empty) subset of scheduler, so long as the scheduler is fair (i.e., any nonholding
+the effectors. So the action statement now looks like thread will eventually be chosen). Let ψ be the thread chosen
+(action   e1 a1 . . . en an) which means that each effector by the scheduler. If the next statement in ψ does not use any
+ei must do ai. In the special case of a thread with exactly one concurrent ALisp operations, its effect is the same as in stan-
+effector assigned to it, the ei can be omitted. Thus, a legal dard Lisp. The call statement does a function call and up-
+program for single-threaded ALisp is also legal for concur- dates the stack; the spawn, reassign, my-effectors,
+rent ALisp.                                           wait,  and notify  operations work as described in Sec-
+  The following operations deal with threads and effectors. tion 3.1. After executing this statement, we increment ψ’s
+  • (spawn   thread-id fn args effector-list) creates a program counter and, if we have reached the end of a func-
+    new thread with the given id which starts by calling fn tion call, pop the call stack repeatedly until this is not the
+    with arguments args, with the given effectors.    case. If the stack becomes empty, the initial function of the
+  • (reassign   effector-list thread-id) reassigns the thread has terminated, ψ is removed from Ψ, and its effectors
+    given effectors (which must be currently assigned to the are reassigned to the thread that spawned it.
+    calling thread) to thread-id.                       For example, suppose the partial program in Figure 3 is be-
+  • (my-effectors)     returns the set of effectors as- ing run with three peasants, with corresponding threads ψ1,
+    signed to the calling thread.                     ψ2, and ψ3, and let ψ0 be the initial thread. Consider a sit-
+                                                      uation where ψ0 is at the dummy choose statement, ψ1 is
+  Interthread communication is done through condition vari-
+                                                      at the third line of get-wood, ψ2 is at the call in the ﬁrst
+ables, using the following operations :
+                                                      line of get-gold, and ψ3 is at the last line of get-gold.
+  • (wait  cv-name)  waits on the given condition vari- This is an internal state, and the set of nonholding threads is
+    able (which is created if it doesn’t exist).      {ψ1, ψ2}. Suppose the scheduler picks ψ1. The call state-
+  • (notify   cv-name)  wakes up all threads waiting on ment will then be executed, the stack appropriately updated,
+    this condition variable.                          and ψ1 will now be at the top of the nav subroutine.
+  Every concurrent ALisp program should contain a desig- The second case, known as a choice state, is when all
+nated top level function where execution will begin. In some threads are holding, and there exists a thread which has ef-
+domains, the set of effectors changes over time. For exam- fectors assigned to it and is not at an action statement. The
+ple, in Stratagus, existing units may be destroyed and new agent must then pick a joint choice for all the choice threads1
+ones trained. A program for such a domain should include a given the environment and machine state. The program coun-
+function assign-effectors   which will be called at the ters of the choice threads are then updated based on this joint
+beginning of each timestep to assign new effectors to threads. choice. The choices made by the agent in this case can be
+                                                      viewed as a completion of the partial program. Formally, a
+3.2  Semantics                                        completion is a mapping from choice states to joint choices.
+We now describe the state space, initial state, and transition In the example, suppose ψ0 is at the dummy choose state-
+function that obtain when running a concurrent ALisp pro- ment as before, ψ1 and ψ3 are at the choose in nav, and
+gram in an environment. These will be used to construct an ψ2 is at the dropoff action in get-wood. This is a choice
+SMDP, analogous to the ALisp case; actions in the SMDP state with choice threads {ψ0, ψ1, ψ3}. Suppose the agent
+will correspond to joint choices in the partial program. has learnt a completion of the partial program which makes it
+  The joint state space is Ω = {ω = (s, θ)} where s is an choose {(), N, Rest} here. The program counter of ψ0 will
+environment state and θ is a machine state. The machine state then move to the top of the loop, and the program counters
+consists of a global memory state µ, a list Ψ of threads, and of ψ1 and ψ3 will move to the action statement in nav.
+for each ψ ∈ Ψ, a unique identiﬁer ι, the set E of effectors The third case, known as an action state, is when all
+assigned to it, its program counter ρ, and its call stack σ. We threads are holding, and every thread that has effectors as-
+say a thread is holding if it is at a choose, action, or signed to it is at an action statement. Thus, a full
+wait statement. A thread is called a choice thread if it is at joint action is determined. This action is performed in
+a choose statement. Note that statements can be nested, so the environment and the action threads are stepped for-
+for example in the last line of Figure 2, a thread could either ward. If any effectors have been added in the new envi-
+be about to execute the choose, in which case it is a choice ronment state, the assign-new-effectors function is
+thread, or it could have ﬁnished making the choice and be called to decide which threads to assign them to. Contin-
+about to execute the action, in which case it is not. uing where we left off in the example, suppose ψ0 executes
+  In the initial machine state, global memory is empty and the my-effectors statement and gets back to the choose
+there is a single thread starting at the top level function with statement. We are now at an action state and the joint action
+all the effectors assigned to it.                     {N, dropoff, Rest}  will be done in the environment. ψ1
+  There are three cases for the transition distribution. In the and ψ3 will return to the until in the loop and ψ2 will die,
+ﬁrst case, known as an internal state, at least one thread is releasing its effector to top.
+not holding. We need to pick a nonholding thread to execute
+next, and assume there is an external scheduler that makes 1If there are no choice threads, the program has deadlocked. We
+this choice. For example, our current implementation is built leave it up to the programmer to write programs that avoid deadlock.  Let Γ be a partial program and S a scheduler, and consider choices in u will result in a collision between peasants i and
+the following random process. Given a choice state ω and j and 0 otherwise.
+joint choice u, repeatedly step the partial program forward as Now, with N peasants, there will be O(N 2) collision fea-
+described above until reaching another choice state ω0, and tures, each with a corresponding weight to learn. Intuitively, a
+let N be the number of joint actions that happen while doing collision between peasants i and j should have the same effect
+this. ω0 and N are random variables because the environment for any i and j. Guestrin et al. [2003] proposed using a rela-
+                     0
+is stochastic. Let PΓ,S(ω , N|ω, u) be their joint distribution tional value-function approximation, in which the weights for
+given ω and u.                                        all these features are all tied together to have a single value
+                                            2
+  We say Γ is good if PΓ,S is the same for any fair S. In this wcoll. This is mathematically equivalent to having a single
+case, we can deﬁne a corresponding SMDP over Ωc, the set “feature template” which is the sum of the individual colli-
+of choice states. The set of “actions” possible in the SMDP sion features, but keeping the features separate exposes more
+at ω is the set of joint choices at ω. The transition distribution structure in the Q-function, which will be critical to efﬁcient
+is PΓ,S for any fair S. The reward function R(ω, u) is the ex- execution as shown in the next section.
+pected discounted reward received until the next choice state.
+The next theorem shows that acting in this SMDP is equiva- 4.2 Choice selection
+lent to following the partial program in the original MDP. Suppose we have a partial program and set of features, and
+                                                      have somehow found the optimal set of weights w~. We can
+Theorem 1 Given a good partial program Γ, there is a bijec-
+                                                      now run the partial program, and whenever we reach a choice
+tive correspondence between completions of Γ and policies
+                                                      state ω, we need to pick the u maximizing Q(ω, u). In the
+for the SMDP which preserves the value function. In particu-
+                                                      multieffector case, this maximization is not straightforward.
+lar, the optimal completion of Γ corresponds to the optimal
+                                                      For example, in the Resource domain, if all the peasants are
+policy for the SMDP.
+                                                      at navigation choices, there will be 5N joint choices.
+  Here are some of the design decisions implicit in our se- An advantage of using a linear approximation to the Q-
+mantics. First, threads correspond to tasks and may have function is that this maximization can often be done efﬁ-
+multiple effectors assigned to them. This helps in incor- ciently. When we reach a choice state ω, we form the coordi-
+porating prior knowledge about tasks that require multiple nation graph [Guestrin et al., 2002]. This is a graph contain-
+effectors to work together. It also allows for “coordina- ing a node for each choosing thread in ω. For every feature
+tion threads” that don’t directly control any effectors. Sec- f, there is a clique in the graph among the choosing threads
+ond, threads wait for each other at action statements, and that f depends on. The maximizing joint choice can then be
+all effectors act simultaneously. This prevents the joint be- found in time exponential in the treewidth of this graph using
+haviour from depending on the speed of execution of the cost network dynamic programming [Dechter, 1999].
+different threads. Third, choices are made jointly, rather In a naive implementation, the treewidth of the coordina-
+than sequentially with each thread’s choice depending on the tion graph might be too large. For example, in the Resource
+threads that chose before it. This is based on the intuition domain, there is a collision feature for each pair of peasants,
+that a Q-function for such a joint choice Q(u1, . . . , un) will so the treewidth can equal N. However, in a typical situa-
+be easier to represent and learn than a set of Q-functions tion, most pairs of peasants will be too far apart to have any
+Q1(u1), Q2(u2|u1), . . . , Qn(un|u1, . . . un−1). However, chance of colliding. To make use of this kind of “context-
+making joint choices presents computational difﬁculties, and speciﬁcity”, we implement a feature template as a function
+we will address these in the following section.       that takes in a joint state ω and returns only the component
+                                                      features that are active in ω—the inactive features are equal
+4  Implementation                                     to 0 regardless of the value of u. For example, the collision
+In this section, we describe our function approximation ar- feature template Fcoll(ω) would return one collision feature
+chitecture and algorithms for making joint choices and learn- for each pair of peasants who are sufﬁciently close to each
+ing the Q-function. The use of linear function approximation other to have some chance of colliding on the next step. This
+turns out to be crucial to the efﬁciency of the algorithms. signiﬁcantly reduces the treewidth.
+4.1  Linear function approximation                    4.3  Learning
+                                                      Thanks to Theorem 1, learning the optimal completion of a
+We represent the SMDP policy for a partial program implic-
+                                                      partial program is equivalent to learning the Q-function in
+itly, using a Q-function, where Q ω, u represents the total
+                            (    )                    an SMDP. We  use a Q-learning algorithm, in which we run
+expected discounted reward of taking joint choice u in ω and
+                                                      the partial program in the environment, and when we reach a
+acting optimally thereafter. We use the linear approximation
+              K                                       choice state, we pick a joint choice according to a GLIE ex-
+Qˆ(ω, u; w~) = =1 wkfk(ω, u), where each fk is a feature
+            Pk                                        ploration policy. We keep track of the accumulated reward
+that maps (ω, u) pairs to real numbers. In the resource do- and number of environment steps that take place between
+main, we might have a feature fgold(ω, u) that returns the each pair of choice states. This results in a stream of samples
+amount of gold reserves in state ω. We might also have a of the form (ω, u, r, ω0, N). We maintain a running estimate
+set of features fcoll,i,j (ω, u) which returns 1 if the navigation of w~, and upon receiving a sample, we perform the update
+  2
+   This is analogous to the requirement that a standard multi- w~ ← w~+α r + γN max Q(ω0, u0; w~) − Q(ω, u; w~) f~(ω, u)
+threaded program contain no race conditions.                            u0                               0                                                     0
+
+
+       −50
+
+                                                             −500
+      −100
+
+
+      −150
+                                                             −1000
+
+      −200
+
+                                                             −1500
+                                                            Total  reward of policy
+
+      Total  reward of policy −250
+
+
+      −300
+                                                             −2000
+
+      −350
+
+                               Concurrent hierarchical Q−learning                     Concurrent hierarchical Q−learning
+                               Flat concurrent Q−learning                             Flat concurrent Q−learning
+      −400                                                   −2500
+        0   20  40  60  80  100 120 140 160 180                0      50     100    150    200    250
+                      # steps of learning (x1000)                           # steps of learning (x1000)
+
+Figure 4: Learning curves for the 3x3 Resource domain with 4 peas- Figure 5: Learning curves for the 15x15 Resource domain with 20
+ants, in which the goal was to collect 20 resources. Curves averaged peasants, in which the goal was to collect 100 resources. The shap-
+over 5 learning runs. Policies were evaluated by running until 200 ing function from Section 4.4 was used.
+steps or termination. No shaping was used.
+
+                                                                           Shared variables for
+4.4  Shaping                                                               resource allocation
+                                                         Allocate Gold
+
+Potential-based shaping [Ng et al., 1999] is a way of modi- Allocate for barracks, peasants Train Peasants (Town Hall)
+fying the reward function R of an MDP to speed up learning or footmen
+without affecting the ﬁnal learned policy. Given a potential                 ROOT
+function Φ on the state space, we use the new reward func-
+           0           0       0                          Train Footmen (Barracks) Allocate Peasants
+tion R˜(s, a, s ) = R(s, a, s ) + γΦ(s ) − Φ(s). As pointed                                      New 
+                                                                               Send idle peasants to gather peasants
+out in [Andre and Russell, 2002], shaping extends naturally                    gold or build barracks
+to hierarchical RL, and the potential function can now depend     Tactical Decision
+                                                        New 
+on the machine state of the partial program as well. In the Re- footmen Decide when to use 
+                                                                  new footmen to attack
+                                                                                Build Barracks Gather Gold 
+source domain, for example, we could let Φ(ω) be the sum of                     (Peasant) (Peasant)
+
+the distances from each peasant to his current navigation goal Attack (Footmen)
+                                                                                         Legend
+together with a term depending on how much gold and wood      Controls a set of footmen who 
+                                                              are jointly attacking the Thread spawns
+has already been gathered.                                    enemy.                 (Effector)
+5  Experiments
+                                                       Figure 6: Structure of the partial program for the strategic domain
+We now  describe learning experiments, ﬁrst with the Re-
+source domain, then with a more complex strategic domain.
+Full details of these domains and the partial programs and
+function approximation architectures used will be presented makes this discovery and reaches a near-optimal policy.
+in a forthcoming technical report.                      Our next test was on a 15x15 world with 20 peasants, with
+                                                      learning curves shown in Figure 5. Because of the large map
+5.1  Running  example                                 size, we used the shaping function from Section 4.4 in the hi-
+We begin with a 4-peasant, 3x3 Resource domain. Though erarchical learning. In ﬂat learning, this shaping function can-
+this world seems quite small, it has over 106 states and 84 not be used because the destination of the peasant is not part
+joint actions in each state, so tabular learning is infeasi- of the environment state. To write such a shaping function,
+ble. We compared ﬂat coordinated Q-learning [Guestrin et the programmer would have to ﬁgure out in advance which
+al., 2002] and the hierarchical Q-learning algorithm of Sec- destination each peasant should be allocated to as a function
+tion 4.3. Figure 4 shows the learning curves. Within the ﬁrst of the environment state. For similar reasons, it is difﬁcult to
+100 steps, hierarchical learning usually reaches a “reason- ﬁnd a good set of features for function approximation in the
+able” policy (one that moves peasants towards their current ﬂat case, and we were not able to get ﬂat learning to learn
+goal while avoiding collisions). The remaining gains are due any kind of reasonable policy. Hierarchical learning learnt a
+to improved allocation of peasants to mines and forests to reasonable policy in the sense deﬁned earlier. The ﬁnal learnt
+minimize congestion. A “human expert” in this domain had allocation of peasants to resource areas is not yet optimal as
+an average total reward around −50, so we believe the learnt its average reward was about −200 whereas the human ex-
+hierarchical policy is near-optimal, despite the constraints in pert was able to get a total reward of −140. We are working
+the partial program. After 100 steps, ﬂat learning usually to implement the techniques of Section 6, which we believe
+learns to avoid collisions, but still has not learnt that pick- will further speed convergence in situations with a large num-
+ing up resources is a good idea. After about 75000 steps, it ber of effectors.

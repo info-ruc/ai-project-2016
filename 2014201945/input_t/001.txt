@@ -1,0 +1,319 @@
+              Learning Value Predictors for the Speculative Execution of 
+                                  Information Gathering Plans 
+
+                                  Greg Barish and Craig A. Knoblock 
+                    University of Southern California / Information Sciences Institute 
+                            4676 Admiralty Way, Marina del Rey, CA 90292 
+                                      {barish, knoblock}@isi.edu 
+
+                     Abstract                          sponds to a particular value vv so that future receipt of hx 
+                                                       can lead to prediction of vy. As a result, a plan that nor•
+    Speculative execution of information gathering     mally queries source S  with h  and subsequently source 
+    plans can dramatically reduce the effect of                            1      x
+                                                       Sz with vv can be parallelized so that both SI and S2 are 
+    source I/O latencies on overall performance.       queried in parallel, the latter speculatively. Unfortu•
+    However, the utility of speculation is closely tied nately, caching has two major drawbacks. First, it does 
+    to how accurately data values are predicted at     not scale well when the domain of hints is large. A sec•
+    runtime. Caching is one approach that can be       ond drawback is the inability to deal with novel (previ•
+    used to issue future predictions, but it scales    ously unseen) hints, even when an obvious relationship 
+    poorly with large data sources and is unable to    exists between hint and predicted value. 
+    make intelligent predictions given previously 
+                                                         In this paper, we present an alternative to caching that 
+    unseen input data, even when there is an obvious 
+                                                       involves automatically learning predictors that combine 
+    relationship between past input and the output it 
+                                                       classification and transduction in order to generate pre•
+    generated. In this paper, we describe a novel 
+                                                       dictions from hints. Our approach succeeds where cach•
+    way to combine classification and transduction 
+                                                       ing fails: the predictors learned usually consume less 
+    for a more efficient and accurate value predic•
+                                                       space than that demanded by caching and they are capa•
+    tion strategy, one capable of issuing predictions 
+                                                       ble of making reasonable predictions when presented 
+    about previously unseen hints. We show how 
+                                                       with novel hints, the latter leading to better speedups. 
+    our approach results in significant speedups for 
+                                                       Specifically, our work contributes the following: 
+    plans that query multiple sources or sources that 
+    require multi-page navigation.                       • An algorithm that learns efficient transducers capa•
+                                                           ble of a variety of string transformations. 
+1 Introduction                                           • An algorithm that combines classification and trans•
+                                                           duction to learn value predictors 
+The performance of Web information gathering plans can   The rest of this paper is organized as follows. The next 
+suffer because of I/O latencies associated with the remote section briefly reviews information gathering and pro•
+sources queried by these plans. A single slow Web      vides a motivating example for speculative execution. In 
+source can bottleneck an entire plan and lead to poor  Section 3, we describe how classification and transduc•
+execution time. When a plan requires multiple queries  tion can be used to build efficient and intelligent predic•
+(either to the same source or to multiple sources),    tors. Section 4 describes our learning algorithms that 
+performance can be even worse, where the overhead is a combine both techniques. Section 5 describes experimen•
+function of the slowest sequence of sources queried.   tal results of using our approach. Finally, Section 6 de•
+  When multiple queries are required, speculative plan tails the related work. 
+execution (Barish and Knoblock 2002b) can be used to 
+dramatically reduce the impact of aggregate source laten•
+cies. The idea involves using data seen early in plan exe• 2 Preliminaries 
+cution as a basis for issuing predictions about data likely Web information gathering plans retrieve, combine, and 
+to be needed during later parts of execution. This allows manipulate data located in remote Web sources. Such 
+data dependency chains within the plan to be broken and plans consist of a partially-ordered graph of operators 
+parallelized, leading to significant speedups.         O1.Ott connected in a producer/consumer fashion. Each 
+  To maximize the utility of speculative execution, a  operator O, consumes a set of inputs a1.ap, fetches data 
+good value prediction strategy is necessary. The basic or performs a computation based on that input, and pro•
+problem involves being able to use some hint h as the  duces one or more outputs b1.bq The types of operators 
+basis for issuing a predicted value v. One approach in• used in information gathering plans vary, but most either 
+volves caching: we can note that particular hint hx corre• retrieve or perform computations on data. 
+
+
+Al AND DATA INTEGRATION                                                                                  3    To better illustrate a Web information gathering plan, 
+ we consider the example plan Carlnfo, shown in Figure 
+ 1. Given constraints on car type and pricing, Carlnfo lo•
+cates the make and model which has a median price clos•
+est to that specified and then retrieves the full review of 
+that car from the Web site ConsumerGuide.com. The 
+plan consists of four Wrapper operators that fetch and 
+                                                                  Figure 2: Carlnfo transformed for speculative execution 
+extract data from various parts of the remote source. 
+ Specifically, the plan involves: (a) querying CarsDi-        based on an iterative analysis of the most expensive path 
+rect.com for the car make and model having a median           to execute within that plan. For example, one possible 
+price closest to that specified, (b) querying Consumer-       result of transforming the plan in Figure 1 for speculative 
+Guide for the resulting make and model, (c) retrieving        execution is shown in Figure 2. 
+the link to the summary page for that car (using the link        As shown, the Speculate operator receives copies of 
+provided in the search results), and (d) retrieving the full  data sent to operators executing earlier in the plan. 
+review using the link provided on the summary page.           Based on the hints it receives, Speculate can generate 
+                                                              predicted values for later operators that can be transmit•
+                                                              ted immediately to those operators. Thus, the earlier and 
+                                                              later parts of the plan can be parallelized. After the ear•
+                                                              lier operators finish executing, Speculate can assess 
+                                                              whether or not its initial predictions were correct and 
+                                                              forward the results onto a Confirm operator, which en•
+               Figure 1: The Carlnfo plan                     sures that speculative data does not prematurely exit the 
+For example, for the input (Sedan, $19000), the car re•       plan or cause some other irreversible action to occur. 
+turned is (Honda Accord), the summary URL for this car        Finally, notice that Figure 2 shows that speculation can 
+is (http://cg.com/summ/2289.htm) and the full review          be cascading: speculation about one operator can drive 
+URL (http://cg.com/full/2289.htm).l Once at the full re•      the speculation of another operator, leading to greater 
+view URL, the review text can be extracted.                   degrees of parallelism and thus arbitrary speedups. 
+   Existing research on information agent executors              As a result of the transformation shown in Figure 2, 
+(Barish and Knoblock 2002a) and network query engines         execution would then proceed as follows. Input data, 
+(Hellerstein et al. 2000, Naughton et al 2001, Ives et al     such as (Sedan, $19000), would result in the retrieval of 
+2002) has suggested a number of techniques for the effi•      the initial search results in parallel with the predicted 
+cient execution of information gathering plans. Most of       make and model - which would drive the predictions of 
+these systems work on the principle of streaming data-        summary and full-review URLs so that all four retrievals 
+flow, which executes plan operators as fast as their data     (three speculative) were executed at once. If all predic•
+dependencies allow and supports the pipelining of data        tions are correct, the resulting execution time can be re•
+between operators. Despite the benefits of streaming          duced to only 2s plus the overhead to speculate, a maxi•
+dataflow, plan execution can still be slow if there are       mum speedup of about 4. However, the average speedup 
+many binding pattern relationships between sources in         depends on the average accuracy of prediction: the 
+the plan. For example, notice that since steps (b), (c),      greater this accuracy, the higher the average speedup. 
+and (d) are dependent on the steps that precede them, the 
+plan in Figure 1 must be executed sequentially and prof•      3 Value Prediction Strategies 
+its little from the benefit of streaming dataflow. Thus, if 
+                                                              Caching can be used to implement value prediction when 
+each source in Figure 1 has an average latency of 2s, than 
+                                                              speculatively executing plans such as Carlnfo. Unfortu•
+the average plan execution time is the summation of 
+                                                              nately, caching does not allow predictions to be issued 
+source latencies, or (4*2s =) 8s. 
+                                                              for unseen hints. As a result, the average accuracy of 
+2.1 Speculative Plan Execution                                prediction can be low when the domain of possible hints 
+                                                              is large. Further, trying to achieve better accuracy under 
+Speculative execution is one technique that can be used       these conditions can require significant amounts of mem•
+to overcome the effects of aggregate latencies in informa•    ory. In this section, we describe how a hybrid approach, 
+tion gathering plans containing multiple binding patterns.    consisting of classification and transduction, results in a 
+  As described in (Barish and Knoblock 2002b), a plan         more intelligent and space-efficient prediction strategy. 
+is transformed into one capable of speculative plan exe•
+cution by the insertion of two additional operators -         3.1 Classification 
+Speculate and Confirm - at various points the plan, 
+                                                              Classification involves extracting knowledge from a set 
+                                                              of data (instances) that describes how the attributes of 
+    1 For the sake of brevity, we have abbreviated the URLs asso• those instances are associated with a set of target classes. 
+    ciated with ConsumerGuide.com (although we retain the key Given a set of instances, classification rules can be 
+    aspects of its structure).                                learned so that future instances can be classified cor-
+
+
+4                                                                                          Al AND DATA INTEGRATION  rectly. Once learned, a classifier can also make reason•      finite sets corresponding to input and output alphabets, 8 
+ able predictions about new instances - a combination of       is the state-transition function that maps Q x I to Q, and 
+ attribute values that had not previously been seen. The       a is the output function that maps Q x A to A*. We are 
+ ability for classification to accommodate new instances is    interested in a particular type of sequential transducer 
+ intriguing for the speculative execution of information       called a P-subsequential transducer that allows at most p 
+ gathering plans because, unlike with caching, it is possi•    output symbols to be appended to the output (i.e., exist 
+ble to make predictions about novel hints.                     on the final state transition arc). 
+   For example, consider the prediction of the make and          Value prediction by transduction makes sense for Web 
+ model of a car in the Carlnfo plan. It turns out that         information gathering plans primarily because of how 
+ CarsDirect.com returns the same answer {Honda Accord)         Web sources organize information and how Web requests 
+ for "Sedan" as it does for other types (such as "All and      (i.e., HTTP queries) are standardized. In the case of the 
+"Coupe") in the same price range. The association of the       former, Web sources often use predictable hierarchies to 
+ same make and model to multiple criteria combinations         catalog information. For example, in the Carlnfo exam•
+occurs somewhat frequently on CarsDirect.com.                  ple, the summary URL for the 1999 Honda Accord was 
+   To see why classification is a more effective technique     http://cg.com/summ/2289.htm and the full review was 
+than caching for the prediction of the make and model,         http://cg.com/full/2289.htm. Notice that both URLs use 
+consider prediction of a car based on type and price:          the same piece of dynamic information (2289), but in 
+               type  Price       Car                           different ways. By learning this transduction, we can then 
+              Sedan  18000  Saturn S Series                    predict future full review URLs for corresponding sum•
+              Sedan  19000   Honda Accord                      mary URLs we have never previously seen. Transducers 
+              Sedan  20000    VW Beetle                        can also allow us to predict HTTP queries. For example, 
+              Coupe  18000  Saturn S Series]                   an HTTP GET query for the IBM stock chart is 
+              Coupe  19000   Honda Accord                      http.//finance.yahoo. com/q?s-ibm&d=c. By exploiting 
+              Coupe  20000    VW Beetle 
+                                                               the regularity of this URL structure, the system can pre•
+   The data above is what a cache would contain. In con•
+                                                               dict the URL for the Cisco Systems (CSCO) chart. 
+trast, a classifier like ld3 (Quinlan 1986) would induce 
+the following decision tree:                                     In this paper, we define two new types of transducers 
+                                                               that extend the traditional definition of P-subsequential 
+        pri <= 18000 : Saturn S Series (2.0) 
+        pri > 18000 :                                          transducers. The first is a high-level transducer, called a 
+         I pri <= 19000 : Honda Accord (2.0)                   value transducer that describes how to construct the pre•
+         I pri > 19000 : VW Beetle (2.0)                       dicted value based on the regularity and transformations 
+   When presented with an instance previously seen, such       observed in a set of examples of past hints and values. 
+as (Sedan, 19000), both the cache and the classifier           Value transducers build the predicted value through sub•
+would result in the same prediction: (Honda Accord).           string-level operations {Insert, Classify, and Transduce]. 
+However, when presented with a new instance, such as           Insert constructs the static parts of predicted values. 
+(Coupe, 18500), the cache would be unable to make a            Classify categorizes hint information into part of a pre•
+prediction. In contrast, the classifier would issue the cor•   dicted value. Finally, Transduce transforms hint infor•
+rect prediction of (Honda Accord). Any errors made by          mation into part of a predicted value. Transduce uses a 
+classification would be caught automatically later in exe•     second type of special transducer, a hint transducer, in 
+cution by the Confirm operator.                                which the operations {Accept, Copy, Replace, Upper, 
+   The decision tree above is also more space efficient        Lower] all function on individual characters of the hint 
+than a cache for the same data. The cache requires stor•       and perform the same transformation as their name im•
+ing 8 unique values. The decision tree above requires          plies, with respect to the predicted value. 
+only storing 5 values (just those shown) plus the informa•       To illustrate, consider the transducers shown in Figure 
+tion required to describe tree structure and attribute value   3, for predicting the full-review URL in the Carlnfo ex•
+conditions (i.e.,pri <= 18000).                                ample. Figure 3 shows the value transducer performs 
+   In short, classifiers such as decision trees can function   high-level operations - the insertion of substrings and the 
+as better, more space-efficient predictors. And in the         call to a lower-level transduction. The second transducer 
+worst case, where each instance corresponds to a unique        (in abbreviated form) uses the Accept and Copy opera-
+class, a classifier simply emulates a cache. 
+
+
+Al AND DATA INTEGRATION                                                                                                5  tions to transform the part of the hint value into its proper In this algorithm, learning a classifier can be achieved by 
+ point in the predicted value. Thus, the first step builds     decision tree induction algorithms such as ld3 (Quinlan 
+ the "http://cg.com/fulir part, the second step copies the     1986). Learning the SD template and the hint transform­
+ "2289" part and the third step appends the ".htm" part.       ing transducer, however, require unique algorithms. 
+   In short, transducers lend themselves to value predic­
+tion because of the way information is stored by and que­      4.1 Learning templates of string sets 
+ ried from Web sources. They are a natural fit because         Learning a VT requires first identifying a template for 
+ URLs are strings that are often the result of simple trans­   the target value that describes what parts are static and 
+ formations on earlier input. Transducers are also space       what parts are dynamic. Next, each static part is replaced 
+ efficient: once learned, they occupy a finite size and can    with Insert operations and each dynamic part becomes a 
+ be applied to an endless number of inputs. Overall, for       candidate for either transduction or classification. 
+ Web content that cannot be queried directly (instead re­        To identify an SD template, we use an approach based 
+ quiring an initial query and then further navigation),        on the longest common subsequence (LCS) between a set 
+ transducers serve as compact predictors that capitalize on    of values. First, an LCS identification algorithm similar 
+ the regularity of Web queries and source structure.           to the one described by (Hirschberg 1975) is applied to 
+                                                               the set of answer values. We then iterate through the 
+ 4 A Unifying Learning Algorithm                               LCS on each answer value to determine the set of possi­
+                                                               ble static/dynamic templates that fit that answer. Only 
+ In this section, we present algorithms that induce value 
+                                                               those templates common to all are kept - from this, one 
+ transducers (VTs), which combine classification and 
+                                                               of the set is returned (though all are valid). The algo­
+ transduction, as predictors for the speculative execution 
+                                                               rithm that implements this, LEARN-SD-TEMPLATE, is 
+ of information gathering plans. The predictors learned 
+                                                               shown below. 
+ represent not only a hybridization of classification and 
+transduction, but also of caching, since classifiers default 
+                                                               1 Function LEARN-SD-TEMPLATE returns Template 
+to caches when there is no feature of the key that is a        2 Input: set of strings S 
+particularly good indicator of the resulting value.            3 tmpl <- 0 
+   To learn a VT, the general approach consists of:            4 les <- GET-LCS(S) 
+                                                               5 If seq !=θ 
+   1. For each attribute of the answer tuple, identify an      6 tmplSet <- 0 
+      SD Template that distinguishes static from dynamic       7 Foreach string s in S 
+      parts of the target string by analyzing the regularity   8 curTmplSet <- EXTRACT-TEMPLATES (S, les) 
+      between values of this attribute for all answers.        9 tmplSet <- tmplSet n curTmplSet 
+                                                               10 If tmplSet !=0 
+  2. For each static part, add an Insert arc to the VT.        11 tmpl <— choose any member of tmplSet /* all are valid */ 
+   3. For each dynamic part, determine if transduction         12 Return tmpl 
+                                                               13 End /* LEARN-SD-TEMPLATE */ 
+      can be used; if so, add a Transduce arc to VT. 
+  4. If no transducer can be found, classify the dynamic       4.2 Learning hint transducers 
+      part based on the relevant attributes of the hint and    To learn a hint transducer (HT), we also make use of SD-
+      add a Classify arc to the VT.                            template identification. However, instead of identifying 
+We implemented this in the algorithm LKARN-VALUE-              a template that fits all answers, we identify templates that 
+TRANSDUCER, shown below. The algorithm takes a set of          fit all hints. Based on this template, we then construct an 
+hints, a set of corresponding answers, and returns a VT        HT that accepts the static parts of the hint string and per­
+that fits the data:                                            forms the character-level transformation on the dynamic 
+                                                               parts. A sketch of the algorithm that implements this, 
+1 Function LEARN-VALUE-TRANSDUCER                              LEARN-HINT-TRANSDUCKR, is shown below. 
+      returns ValueTransducer 
+2 Input: the set of hints H, the set of answers A              1 Function LEARN-HINT-TRANSDUCER returns HintTransducer 
+3 VT<-θ                                                        2 Input: the set of hints H, the set of resulting strings S 
+4 tmpl <- LEARN-SD-TEMPLATE (A)\                               3 Use LCS to identify static parts between all H 
+5 Foreach element e in tmpl                                    4 Foreach H,S pair (h, s) 
+6 If e is a static element                                     5 h'<- extraction of h replacing static chars with token 'A' 
+7 Add Insert (e.value) arc to VT                               6 A <- Align (h' s) based on lowercased string edit distance 
+8 Else if e is a dynamic element                               7 Annotate A with character level operations 
+9 DA <- the set of dynamic strings in A for this tmpl element  8 End 
+10 HT<- LEARN-HINT-TRANSDUCER (//, DA)                         9 RE <- Build a reg expr that fits all annotations (using LCS) 
+11 If HT !=0                                                   10 If RE !=0 
+12 Add Transduce (HT) arc to VT                                11 Return general predictive transducer based on RE 
+13 else                                                                that accepts static sequences of H where necessary 
+14 C <- LEARN-CLASSIFIER (//, DA)                                      and transduces dynamic sequences. 
+15 Add Classify (C) arc to VT                                  12 Else 
+16 Return VT                                                   13 Return 0 
+17 End /* LEARN-VALUE-TRANSDUCER */ 
+                                                               14 End /* LEARN-HINT-TRANSDUCER */ 
+
+
+6                                                                                           Al AND DATA INTEGRATION                                                               fication (phone number to state) and transduction (initial 
+For example, suppose prior hints {Dr. Joe Smith, Dr. Jane     state facts page to detailed demographics page). 
+Thomas) corresponded to values {joe_s,jane_t). The algo•         When learning the predictors, instances were drawn 
+rithm would first identify the static part of the hints and re• from typical distributions for that domain; for example, 
+write the hints using the Accept operation, i.e., {AAAAJoe    instances for Replnfo were drawn from a list of addresses 
+Smith, AAAAJane Thomas} where A refers to the operation       of individuals that contributed to presidential campaigns 
+Accept. It would then align each hint and value based on      (obtained from the FEC) - a distribution that closely ap•
+string edit distance and annotate with character operations   proximates the U.S. geographic population distribution. 
+required for transformation to the observed values, resulting Similarly, the phone numbers used in Phonelnfo came 
+in {AAAAALCCRLDDDD, AAAAALCCCRLDDDDD}.                        from a distribution of numbers for common last names. 
+Next, it would use the LCS to build the regular expression       We implemented speculative execution in Theseus, a 
+{A*LC*RLD*} fitting these examples and, from this, the        streaming dataflow system for Web information gather•
+HT (partial form shown) in Figure 4:                          ing. Since our tests involved thousands of requests, we 
+                                                              ran our plans using Theseus on local copies of the rele•
+                                                              vant data and simulated network latencies during re•
+                                                              trieval. In doing so, we assumed each source had a la•
+                                                              tency of 2 seconds (note that the particular latency cho•
+                                                              sen does not matter - speedups will be the same). 
+                                                                 Our results focus on three measurements. The first, 
+   Figure 4: Partial form of the HT for the names example 
+                                                              shown in Table 1, show the average number of examples 
+                                                              required in order to learn the correct transducer required 
+5 Experimental Results                                        by each of the plans. Notice, that Replnfo required more 
+                                                              than Phonelnfo or Carlnfo because there was a higher 
+To evaluate our approach to value prediction, we com•         likelihood of the examples sharing some part of their dy•
+pared it with caching on three sample plans that can          namic data in common - and this was extracted by the 
+benefit from speculative execution. These plans were          LCS-based algorithm as a static element. 
+chosen because all query multiple sources and/or multi•
+ple times within a source in order to retrieve information 
+that is not possible to query directly. These plans nor•
+mally require sequential execution; however, with specu•
+lative execution, significant speedup is possible. 
+  These plans included Carlnfo (which we have already 
+described), Replnfo, and Phone Info. Replnfo, based on                 Table 1: Learning the correct transducer 
+the plan described in (Barish and Knoblock 2002b), que•
+ries the site Vote-Smart.org for the issue positions of          The second set of results, shown in Figure 5, focuses 
+U.S. federal representatives for a particular nine-digit zip  on the accuracy of classification, as measured over a 10-
+code. Its plan involves three queries: one for the list of    fold cross-validation sample of the data (where no data in 
+representatives in the desired zip code, navigation to the    the test fold was in any of the training folds). As ex•
+profile page for each member, and navigation to their         pected, domains with larger sets of discrete target classes 
+corresponding issue positions page. Phonelnfo is a simi•      (such as Replnfo) required many more examples than 
+lar plan that takes a U.S. phone number, does a reverse       those with smaller numbers of classes (like Phonelnfo). 
+lookup of that number (on SuperPages.com) to find the            The final set of results show how the learning we have 
+state of origin and then queries the US Census (Quick-        described resulted in better average plan execution 
+Facts.census.gov) about demographics for that state. 
+When querying the Census, additional navigation is re•
+quired to get from the initial summary page about the 
+state to the corresponding demographics details page. 
+  All three were modified for speculative execution, with 
+results similar to that shown in Figure 2. We then 
+learned predictors for each, based on the data observed 
+during execution. The learning was done offline, after 
+each execution, so that future executions could benefit 
+from the resulting predictors. The Carlnfo predictors, as 
+described, involved classification (make/model/year to 
+car summary page) and transduction (summary to full 
+review page). Replnfo required classification (nine-digit 
+zip to political district page) and transduction (district to 
+issue positions page). Finally, Phonelnfo required classi•
+
+
+Al AND DATA INTEGRATION                                                                                                7 

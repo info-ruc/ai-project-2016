@@ -1,0 +1,381 @@
+                             Fast Planning with Iterative Macros
+
+              Adi Botea                     Martin Muller¨                  Jonathan Schaeffer
+       National ICT Australia         Dept. of Computing Science        Dept. of Computing Science
+   Australian National University         University of Alberta            University of Alberta
+           Canberra, ACT                   Edmonton, Canada                 Edmonton, Canada
+      adi.botea@nicta.com.au            mmueller@cs.ualberta.ca           jonathan@cs.ualberta.ca
+
+                    Abstract
+    Research on macro-operators has a long history
+    in planning and other search applications. There
+    has been a revival of interest in this topic, lead-
+    ing to systems that successfully combine macro-
+    operators with current state-of-the-art planning ap-
+    proaches based on heuristic search. However, re-
+    search is still necessary to make macros become a
+    standard, widely-used enhancement of search al-
+    gorithms. This article introduces sequences of    Figure 1: State expansion with atomic actions (left), atomic
+    macro-actions, called iterative macros. Iterative actions + macros (center), and atomic actions + iterative
+    macros exhibit both the potential advantages (e.g., macros (right). Each short line is an atomic action. Each
+    travel fast towards goal) and the potential limi- curved arrow is a macro-action.
+    tations (e.g., utility problem) of classical macros,
+    only on a much larger scale. A family of tech-
+    niques are introduced to balance this trade-off in fa- time while solution quality decreases. Addressing this per-
+    vor of faster planning. Experiments on a collection formance trade-off is the key to making macros work.
+    of planning benchmarks show that, when compared     Iterative macros are macros of macro-actions. They have
+    to low-level search and even to search with classi- similar potential beneﬁts and limitations as classical macros,
+    cal macro-operators, iterative macros can achieve only on a much larger scale. Iterative macros progress much
+    an impressive speed-up in search.                 faster down a branch of the search, with exponentially larger
+                                                      possible savings. On the downside, there can be exponen-
+1  Introduction                                       tially more instantiations of iterative macros, with many of
+                                                      them leading to dead ends. An iterative macro is more expen-
+Research on macro-operators has a long history in planning sive to compute, being the sum of instantiating each contained
+and other search applications. Recent years have shown a re- macro. Tuning the performance trade-off is more challenging
+vival of this topic, leading to systems that successfully com- than for classical macros.
+bine macro-operators with current state-of-the-art planning
+                                                        The model discussed in this paper extends the approach in
+approaches based on heuristic search. However, macros have
+                                                      Botea et al. 2005, which offers a framework for generating,
+signiﬁcant capabilities yet to be exploited. There is a need
+                                                      ﬁltering, and using macros at runtime. The contributions of
+to continue the previous efforts on this topic, aiming to reach
+                                                      this paper are:
+a point where macros would be considered to be a standard
+performance enhancement (e.g., such as hash tables for fast 1. Iterative macros, a runtime combination of macros to
+detection of duplicate nodes).                            enhance program performance,
+  In this article, we introduce sequences of macro-actions
+                                                        2. New techniques to address the performance trade-offs
+called iterative macros. Figure 1 illustrates the differences
+                                                          for iterative macros: algorithms for ofﬂine ﬁltering, dy-
+between low-level search, search with classical macros, and
+                                                          namic composition (i.e., instantiating an iterative macro
+search with iterative macros. First, consider low-level search
+                                                          at runtime), and dynamic ﬁltering (i.e., pruning instanti-
+versus search with classical macros. Macros add the abil-
+                                                          ations of an iterative macro at runtime); and
+ity to travel towards a goal with big steps, with few inter-
+mediate nodes expanded or evaluated heuristically. How- 3. Experiments using standard planning benchmarks that
+ever, macros increase the branching factor, and often also show orders of magnitude speed up in several standard
+the processing cost per node. Inappropriate macros guide the domains, when compared to low-level search and even
+search in a wrong direction, which increases the total search to a search enhanced with classical macros.
+
+                                                 IJCAI07
+                                                  1828  Section 2 brieﬂy reviews related work on macros. Section to partial-order macros). The macro extraction phase builds
+3 introduces the necessary deﬁnitions. Section 4 introduces macros with partial ordering of the steps. However, to save
+iterative macros and the algorithms for ofﬂine ﬁltering, dy- computation time, only one possible ordering is selected at
+namic composition, and dynamic ﬁltering. Experimental re- runtime.
+sults are given in Section 5. Section 6 contains conclusions Let O be the set of all domain operators and A the set
+and ideas for future work.                            of all ground actions of a planning problem. A macro-
+                                                      operator (macro-schema) is a sequence of domain opera-
+2  Related Work                                       tors ms[i] ∈Otogether with a parameter binding σ: ms =
+                                                      ((ms[1], ms[2],...,ms[l]),σ).
+Related work on macros in planning dates back to the STRIPS Partially instantiating a macro can be deﬁned in two equiv-
+       [                   ]
+planner Fikes and Nilsson, 1971 . Subsequent contributions alent ways as either (1) replacing some variables with con-
+                                     [           ]
+include off-line ﬁltering of a set of macros Minton, 1985 , stant objects or (2) replacing some operators with ground
+                             [           ]
+partial ordering of a macro’s steps Mooney, 1988 , and gen- actions. The second deﬁnition is more appropriate for this
+erating macros able to escape local minima in a heuristic work, since macros reuse actions from a relaxed plan and
+           [        ]
+search space Iba, 1989 . In a problem representation with hence action-wise instantiation is needed. A partial instanti-
+                                         [    ]
+multi-valued variables, McCluskey and Porteous 1997 use ation of a macro is mi =((mi[1], mi[2],...,mi[l]),σ),where
+macros to change the assignment of a variable to a given value (∀i ∈{1,...,l}):(mi[i] ∈A∨mi[i] ∈O).
+in one step.                                            A total macro-instantiation (shorter, macro-instantiation)
+  Several recent contributions successfully integrate macros has all steps instantiated (∀i : mi[i] ∈A). Macro-operators
+with state-of-the-art heuristic search planners such as FF and macro-instantiations are the extreme cases of partial
+[                      ]      [    ]
+Hoffmann and Nebel, 2001 .Vidal 2004 composes macros  macro-instantiations. When the distinction is clear from the
+at runtime by applying steps of the relaxed plan in the orig- context, the term “macro” can refer to any of these.
+                        [    ]
+inal problem. Botea et al. 2005 prune instantiations of When instantiating one more step in a partial instantiation
+macros based on their similarity with a relaxed plan. Coles mi, it is important to ensure that the new action is consis-
+         [    ]
+and Smith 2005  generate macros as plateau-escaping se- tent with all the constraints already existing in mi.More
+                   [    ]
+quences. Newton et al. 2005 use genetic algorithms to gen- precisely, given a partial instantiation mi, a position i and a
+                                    [   ]
+erate macros. The contributions of Vidal 2004 and Botea state s from which mi is being built, deﬁne the consistency
+     [    ]
+et al. 2005 are the most closely related, since all three ap- set Cons(mi,i,s) as containing all actions a ∈Asuch that:
+proaches exploit the similarity between a macro and a relaxed (1) a corresponds to the operator on the i-th position of mi,
+plan.                                                 (2) a does not break the parameter bindings of mi,and(3)if
+  Application-speciﬁc macros have been applied to domains either i =1or the ﬁrst i−1 steps are instantiated, then adding
+                          [          ]
+such as the sliding tile puzzle Korf, 1985 , Rubik’s Cube a on the i-th position makes this i-step sequence applicable to
+[                           ]            [
+Korf, 1983; Hern´adv¨olgyi, 2001 , and Sokoban Junghanns s. Only actions from Cons(mi,i,s) can be used to instantiate
+                ]
+and Schaeffer, 2001 . While interesting, a detailed discussion the i-th step of mi. Obviously, instantiating a new step can
+and comparison of all these approaches is beyond the scope introduce additional binding constraints. Instantiating steps
+of this paper.                                        in a macro can be done in any order. When step i is instan-
+                                                      tiated, its bindings have to be consistent with all previously
+3  Framework and Basic Deﬁnitions                     instantiated steps, including positions larger than i.
+The basic framework of this work is planning as forward Finally, let γ(s, a1 ...ak) be the state obtained by apply-
+heuristic search. To guide the search, a relaxed plan that ig- ing the action sequence a1 ...ak to state s. For the empty
+nores all delete effects of actions is computed for each eval- sequence , γ(s, )=s.If∃i ≤ k such that ai cannot be
+uated state [Hoffmann and Nebel, 2001]. Search is enhanced applied to γ(s, a1 ...ai−1),thenγ(s, a1 ...ak) is undeﬁned.
+with iterative macros as illustrated in Figure 1 (right) and de-
+tailed in Section 4. The strategy for using iterative macros 4 Iterative Macros
+consists of three steps: (1) extract macro-operators from so- This section describes a technique for speeding up planning
+lutions of training problems, (2) statically ﬁlter the set of using iterative macros. Section 4.1 presents a method for stat-
+macro-operators, and (3) use the selected macro-operators to ically ﬁltering a set of macro-operators to identify candidates
+compose iterative macros at runtime. Steps 1 and 2 deal only that can be composed to form iterative macros. Section 4.2
+with classical macro-operators. Only step 3 involves the new focuses on integrating iterative macros into a search algo-
+iterative macros. The model of Botea et al. 2005 serves as rithm. Methods that effectively address the challenging tasks
+a starting point for implementing the ﬁrst two steps. It pro- of instantiation and pruning are described.
+vides a framework for generating, ﬁltering, and using clas-
+sical macro-operators at runtime in planning. However, ex- 4.1 Static Filtering
+periments with iterative macros showed that more powerful The model introduced by Botea et al. [2005] was imple-
+ﬁltering capabilities were needed. The new enhanced method mented and enhanced. Botea et al. analyze solutions to a
+for ﬁltering in step 2 is described in Section 4.1.   set of test problem instances to extract a potentially useful set
+  The rest of this section contains deﬁnitions of concepts of macro-operators. The macros are then ranked by favoring
+used in the following sections. For simplicity, totally or- those that 1) appear frequently in solutions, and 2) signiﬁ-
+dered macros are assumed (all deﬁnitions can be generalized cantly reduce the search effort required for each application.
+
+                                                 IJCAI07
+                                                  1829Two important limitations of this ranking model are that it ig- ComposeIterativeMacro(MS,s,RP)
+                                                            U ←∅;     ←
+nores the interactions of macros when used together, and that      itm  empty sequence;
+it provides no automatic way to decide the number of selected while (true)
+                                                              for (each ms ∈ MS)
+macros.                                                            ←         (  ,γ(s, ),   \ U)
+                                 K              K               mi   Instantiate ms itm RP    ;
+  Our enhancement ﬁrst selects the top macros (where            if (instantiating mi succeeded)
+is a parameter) returned by the original procedure and then       U ←  U ∪ [mi ∩ RP]; // mark used steps
+tries to ﬁlter this down to a subset that solves the training set itm ← itm + mi; // concatenate
+most efﬁciently in terms of expanded nodes. Since enumer-         break; // restart outer loop
+ating all subsets of a set with K elements is exponentially   if (no iteration of last for loop instantiated a macro)
+hard, we use an approximation method whose complexity is        return itm;
+only linear in K. For each i from 1 to K, the training set is
+solved with macro mi in use. Macros are reordered accord- Figure 2: Composing an iterative macro at runtime.
+ing to the search effort. More precisely, mi is better than mj
+if Ni <Nj,whereNl   is the total effort (expanded nodes)                   ,s,
+                               m                                Instantiate(ms RS)
+to solve the training set using macro l. Ties are broken ac-      for (each a ∈ Cons(ms, 1,s))
+cording to the original ranking.                                    mi ← Matching(a, ms,s,RS);
+  Based on the new ordering, the training set is solved using       if (|mi ∩ RS|≥threshold)
+the top i macros, 1 ≤ i ≤ K. Assume N is the total number             ﬁll remaining gaps in mi;
+of nodes expanded to solve the training set with no macros in         if (all steps of mi are instantiated)
+     T
+use, Ni the total effort to solve the training set with the top i       return mi;
+macros, and                                                       return failure;
+                               T
+                 b = arg min Ni  .
+                        1≤i≤K
+                                                              Figure 3: Instantiating one macro-action.
+    T
+If Nb <N, then the learning procedure returns the top b
+macros. Otherwise, no macros are learned for that domain.
+  In the experiments described in Section 5, small training schemas (MS), a current search state (s), and the relaxed plan
+instances are used, to keep the learning time low. K is set computed for that state (RP). Each iteration of the main loop
+to 5, since the number of useful macros in those domains is tries to append one more macro to the iterative macro. The
+typically less than 5. For larger domains, where more macros inner loop iterates through the global list of macro-schemas.
+could be beneﬁcial, a larger value of K might produce better As soon as instantiating such a macro-schema succeeds, the
+results at the price of longer training time.         algorithm greedily commits to adding it to the iterative macro
+                                                      and a new iteration of the outer loop starts. This procedure
+4.2  Iterative Macros in Search                       automatically determines the length of an iterative macro (the
+Integrating iterative macros into a search algorithm raises two number of contained macros).
+major challenges: instantiation and pruning. In the most gen- In the code, U is the set of all relaxed plan steps already
+eral case, the total number of iterative macros applicable to a inserted in the iterative macro. During subsequent iterations,
+state is in the order of BD,whereB is the number of clas- the used relaxed steps will be ignored when the matching of
+sical macro instantiations applicable to a state, and D is the a macro instantiation with a relaxed plan is computed. Intu-
+number of macros contained in an iterative macro. Each in- itively, the Matching procedure tries to maximize the number
+stantiation can be expensive to compute, since its cost is the of relaxed steps used in a macro-instantiation. More formal
+total cost of instantiating all the contained macros. details on matching are provided later.
+  If instantiation and pruning were performed separately, a Figure 3 presents the Instantiate procedure that instantiates
+large effort could be spent on building elements that would one macro-action as part of an iterative macro. The input pa-
+be rejected later. Therefore a combined algorithm tries, for rameters are a macro-schema (ms), a search state (s), and a
+a given state, to build only one iterative macro which shows set of relaxed steps (i.e., the original relaxed plan minus the
+promise to take the search closer to a goal state. The guid- already used steps). The main loop iterates through all ac-
+ance in building this iterative macro is given by the relaxed tions that could be used as the ﬁrst step of the macro ms (i.e.,
+plan of the state being expanded. Building a macro instan- are applicable to s and are instantiations of the ﬁrst macro’s
+tiation is founded on two simple, yet powerful ideas. First, operator).
+when deciding how to instantiate a given step, heuristics are For each action a ∈ Cons(ms, 1,s), the method
+used to select an action that will allow a large number of re- Matching(a, ms,s,RS) creates a partial instantiation of ms
+laxed steps to be subsequently inserted. Second, for the steps with ﬁrst step a, followed by zero or more steps instantiated
+not ﬁlled with relaxed plan actions, other actions are used that with elements from RS, and zero or more uninstantiated steps
+preserve the correctness and the variable bindings of the iter- (see Figure 4 and a discussion later). If the number of relaxed
+ative macro. This completion is an important feature of the steps is below a given threshold, the corresponding partial in-
+algorithm, since a relaxed plan often misses steps that have to stantiation is abandoned. Otherwise, an attempt is made to
+be part of the unrelaxed solution.                    ﬁll the remaining gaps (uninstantiated steps) with any consis-
+  Figure 2 shows the procedure for building an iterative tent actions. As soon as a complete instantiation is built, the
+macro in pseudo-code. It takes as input a global list of macro- method returns without considering any other possible out-
+
+                                                 IJCAI07
+                                                  1830  Matching(a, ms,s,RS)                                low-level search (see Section 4.1 for details).
+      ←
+   mi   ms; // create local partial instantiation       Figure 5 shows the number of expanded nodes in each do-
+   mi[1] ← a;
+   for (i =2to length(ms))                            main on a logarithmic scale for each of no macros, classical
+     if (Cons(mi,i,s) ∩ RS = ∅)                       macros and iterative macros. Note that some lines are miss-
+       continue;//leavemi[i] uninstantiated           ing a data point—this represents a problem instance that was
+     for (each rp ∈ Cons(mi,i,s) ∩ RS)                not solved by that planner.
+       undo the instantiation of mi[i],ifany;           When analyzing the expanded nodes performance, the
+       mi[i] ← rp;                                    tested application domains can roughly be split into two cat-
+       count how many subsequent positions j          egories. In the ﬁrst category of eight benchmarks (all 11,less
+         can be ﬁlled with elements from Cons(mi,j,s) ∩ RS; DriverLog, Freecell and Pipesworld), planning with macros is
+     select the element rp with the highest count value;
+                          [i]                         much better than low-level search. Iterative macros are better
+     undo the instantiation of mi ;                   than classical macros, with the notable exception of Philoso-
+     mi[i] ← rp;
+   return mi;                                         phers, where both kinds of macros perform similarly. In this
+                                                      application domain, classical macros are enough to achieve
+                                                      impressive savings, and there is little room for further im-
+Figure 4: Matching a macro instantiation with a relaxed plan. provement. In Zeno Travel, the savings in the search tree
+                                                      size come at the price of a relatively large increase in solution
+comes. For simplicity, the pseudo-code skips the details of length. See Figure 6 and a discussion later. When compar-
+how the threshold is computed. An effective heuristic is to ing iterative macros vs classical macros, in domains Satellite,
+set the threshold to the largest matching encountered when Blocksworld, Rovers, Depots, and Airport a reduction in the
+the ms macro-schema is used as a parameter, regardless of number of expanded nodes by at least an order of magnitude
+the values of the other parameters a, s and RS.       is seen for the hard problem instances.
+  The matching attempts to use as many elements from RS In the second category, the beneﬁts of macros are more
+as possible in a macro instantiation. An exact computation limited. In DriverLog, macros are usually faster, but there
+of the maximal value can be expensive, since it might require are a few exceptions such as data point 7 on the horizon-
+enumerating many possible instantiations of ms applicable to tal axis, where classical macros fail and iterative macros are
+a state. Instead, the greedy procedure presented in Figure 4 much slower than low-level search. In Freecell, classical
+tries, at step i, 2 ≤ i ≤ length(ms),tocommittousingare- macros and iterative macros have similar performance in all
+laxed step rp for instantiating mi[i]. If no such step exists (i.e., instances. For many Freecell problems, planning with macros
+RS∩Cons(mi,i,s)=∅), then mi[i] is left uninstantiated. Oth- is similar to planning with no macros. When differences are
+erwise, an element from RS∩Cons(mi,i,s) is selected using a encountered, the savings are more frequent and much larger
+heuristic test (see the pseudo-code for details). In practice, the as compared to cases where macros are slower than low-level
+number of consistent actions quickly decreases as new steps search. Finally, in Pipesworld No Tankage the performance
+are instantiated, since each new step can introduce additional of macros compared to low-level search varies signiﬁcantly
+binding constraints.                                  in both directions. Iterative macros are faster than classical
+                                                      macros, but the latter solve one more problem. No clear con-
+                                                      clusion is drawn for this domain. Further analysis of these
+5  Experimental Results                               three domains is left as future work.
+Classic and iterative macros were implemented on top of FF Macros often lead to solving more problems than low-level
+                                                                                   P    P        P
+[Hoffmann and Nebel, 2001]. FF 3.4 handles both STRIPS search. Given a domain, assume im, cm and   are the
+and ADL domains, but not numeric variables, axioms, or tem- numbers of problems solved with iterative macros, classical
+poral planning.                                       macros, and no macros respectively. For our data sets and
+                                                                              (P   − P, P  − P )  (1, 1)
+  This research was tested on a large set of benchmarks time constraints, the value of im cm    is     in
+from previous international planning competitions. Both Satellite, (3, 2) in Blocksworld, (37, 34) in Optical, (36, 36)
+STRIPS  (Satellite, Blocksworld, Rovers, Depots, Zeno in Philosophers, (5, 5) in Zeno Travel, (3, 2) in DriverLog,
+Travel, DriverLog, Freecell, Pipesworld No Tankage Non- and (1, 1) in Freecell, and (0, 1) in Pipesworld.
+temporal, Pipesworld Tankage Nontemporal) and ADL       Figure 6 illustrates how macros affect the quality of so-
+(Promela Dining Philosophers, Promela Optical Telegraph, lutions and the cost per node in search. Each chart has 11
+Airport, Power Supply Restoration Middle Compiled—PSR) two-point clusters, one for each domain. First, consider the
+                                                                                            L    L
+representations were used.                            top chart. Given a problem instance, assume im, cm,and
+  Experiments were run on a 3.2GHz machine, with a CPU L are the lengths of solutions when iterative macros, classical
+                                                                                            R   =  L  /L
+limit of 5 minutes and a memory limit of 1GB for each prob- macros, and no macros are used respectively, im im
+lem instance. Planning with iterative macros, planning with and Rcm = Lcm/L. The leftmost data point of a cluster
+                                                                                                     R
+classical macros, and planning with no macros were com- shows the average, minimum, and maximum value of im
+pared. To plan with classical macros, the length of an iter- over the problem set of the corresponding domain. The right-
+ative macro was limited to one macro instantiation. Results most data point shows similar statistics for Rcm. Macros
+are shown for 11 of the 13 domains. In the two remaining slightly improve the average solution length in Freecell and
+domains, PSR and Pipes Tankage, no macros were learned, leave it unchanged in Optical and Philosophers. In all do-
+since their performance on the training set was worse than mains but Zeno Travel, the average overhead is at most 20%
+
+                                                 IJCAI07
+                                                  1831                 Satellite                          Blocksworld                         Rovers
+   10000                              1e+06                              10000
+        Iterative Macros                    Iterative Macros
+        Regular Macros                      Regular Macros
+          No Macros                           No Macros
+                                      100000
+   1000                                                                  1000
+                                      10000
+
+    100                                1000                               100
+
+                                       100
+    10                                                                    10
+                                        10
+                                                                                            Iterative Macros
+                                                                                             Regular Macros
+                                                                                              No Macros
+     1                                  1                                  1
+     0   5   10  15  20  25  30  35      0   5   10  15  20  25  30  35     0  5   10  15  20  25  30  35  40
+
+              Promela Optical Telegraph          Promela Dining Philosophers            Depots
+   1e+06                              1e+07                               1e+06
+                                                         Iterative Macros      Iterative Macros
+                                                         Regular Macros        Regular Macros
+                                                           No Macros             No Macros
+                                      1e+06                              100000
+   100000
+                                      100000
+                                                                          10000
+   10000
+                                      10000
+                                                                          1000
+                                       1000
+    1000
+                                                                           100
+                                       100
+    100
+                                                                           10
+                      Iterative Macros  10
+                      Regular Macros
+                        No Macros
+     10                                 1                                  1
+      0  5  10  15  20  25  30  35  40  45  50  0  5  10  15  20  25  30  35  40  45  50  0  5  10  15  20
+
+                 Airport                            Zeno Travel                        DriverLog
+   10000                              100000                              1e+06
+        Iterative Macros                    Iterative Macros                   Iterative Macros
+        Regular Macros                      Regular Macros                     Regular Macros
+          No Macros                           No Macros                          No Macros
+                                                                         100000
+                                      10000
+   1000
+                                                                          10000
+                                       1000
+
+    100                                                                   1000
+
+                                       100
+                                                                           100
+    10
+                                        10
+                                                                           10
+
+     1                                  1                                  1
+     0  2  4  6  8  10  12  14  16  18  20  0  5  10  15  20  25  30  35  40  0  2  4  6  8  10  12  14  16  18  20
+
+                                   Freecell                      Pipesworld Nontemporal No Tankage
+                    100000                              1e+06
+                           Iterative Macros
+                           Regular Macros
+                             No Macros
+                                                       100000
+                     10000
+                                                        10000
+
+                     1000                               1000
+
+                                                         100
+                      100
+                                                         10
+                                                                           Iterative Macros
+                                                                           Regular Macros
+                                                                             No Macros
+                      10                                  1
+                        0  10  20  30  40  50  60  70  80  0  5  10  15  20  25  30  35  40
+
+Figure 5: Search effort as expanded nodes. Problem sets are ordered so that the “No Macros” curve is monotonically increasing.
+
+for iterative macros and at most 12% for classical macros. and for Blocksworld (iterative macros), where macros solve
+                                                      problems very fast.
+  The bottom chart in Figure 6 presents similar statistics for
+               C  =   search time                       Processing a node in low-level search includes computing
+the cost per node   expanded nodes instead of solution a relaxed plan and checking whether that node has been vis-
+length L. To include a problem instance into the statistics, it ited before. Macros add the overhead of their instantiation.
+has to be solved by both the corresponding type of macros and Even if much smaller than the expanded nodes savings shown
+the low-level search within a time larger than 0.05 seconds. in Figure 5, the overhead can be surprisingly high. Proﬁling
+We included the time threshold for better accuracy of the tests have shown that the main bottleneck in the current im-
+statistics. There always is a small noise in the reported CPU plementation of macros is attempting to ﬁll gaps in a partial
+time and, if the total time is in the same order as the noise, the instantiation (Figure 3, line 5). Fortunately, this step can be
+cost per node measurement becomes unreliable. No statistics implemented much more efﬁciently. When looking for a con-
+could be collected for Philosophers (both kinds of macros) sistent action to ﬁll a gap, the corresponding operator schema
+
+                                                 IJCAI07
+                                                  1832

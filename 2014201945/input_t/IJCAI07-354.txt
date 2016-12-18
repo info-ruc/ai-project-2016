@@ -1,0 +1,266 @@
+                   Depth Estimation using Monocular and Stereo Cues
+
+                         Ashutosh Saxena, Jamie Schulte     and  Andrew Y. Ng
+                                     Computer Science Department
+                                Stanford University, Stanford, CA 94305
+                                {asaxena,schulte,ang}@cs.stanford.edu
+
+                    Abstract
+    Depth estimation in computer vision and robotics
+    is most commonly done via stereo vision (stereop-
+    sis), in which images from two cameras are used
+    to triangulate and estimate distances. However,
+    there are also numerous monocular visual cues—
+    such as texture variations and gradients, defocus,
+    color/haze, etc.—that have heretofore been little Figure 1: Two images taken from a stereo pair of cameras,
+    exploited in such systems. Some of these cues ap- and the depthmap calculated by a stereo system. Colors in
+    ply even in regions without texture, where stereo the depthmap indicate estimated distances from the camera.
+    would work poorly. In this paper, we apply a
+    Markov Random Field (MRF) learning algorithm
+                                                      defocus, color/haze, etc.—that contain useful and important
+    to capture some of these monocular cues, and in-
+                                                      depth information. Even though humans perceive depth by
+    corporate them into a stereo system. We show that
+                                                      seamlessly combining many of these stereo and monocular
+    by adding monocular cues to stereo (triangulation)
+                                                      cues, most work on depth estimation has focused on stereo
+    ones, we obtain signiﬁcantly more accurate depth
+                                                      vision, and on other algorithms that require multiple images
+    estimates than is possible using either monocular or
+                                                      such as structure from motion [Forsyth and Ponce, 2003] or
+    stereo cues alone. This holds true for a large vari-
+                                                      depth from defocus [Klarquist et al., 1995].
+    ety of environments, including both indoor environ-
+    ments and unstructured outdoor environments con-    In this paper, we look at how monocular cues from a sin-
+    taining trees/forests, buildings, etc. Our approach gle image can be incorporated into a stereo system. Estimat-
+    is general, and applies to incorporating monocular ing depth from a single image using monocular cues requires
+    cues together with any off-the-shelf stereo system. a signiﬁcant amount of prior knowledge, since there is an
+                                                      intrinsic ambiguity between local image features and depth
+                                                      variations. In addition, we believe that monocular cues and
+                                                      (purely geometric) stereo cues give largely orthogonal, and
+1  Introduction                                       therefore complementary, types of information about depth.
+Consider the problem of estimating depth from two images Stereo cues are based on the difference between two images
+taken from a pair of stereo cameras (Fig. 1). The most com- and do not depend on the content of the image. The images
+mon approach for doing so is stereopsis (stereo vision), in can be entirely random, and it will generate a pattern of dis-
+which depths are estimated by triangulation using the two im- parities (e.g., random dot stereograms [Blthoff et al., 1998]).
+ages. Over the past few decades, researchers have developed On the other hand, depth estimates from monocular cues is
+very good stereo vision systems (see [Scharstein and Szeliski, entirely based on prior knowledge about the environment and
+2002] for a review). Although these systems work well in global structure of the image. There are many examples of
+many environments, stereo vision is fundamentally limited beautifully engineered stereo systems in the literature, but the
+by the baseline distance between the two cameras. Speciﬁ- goal of this work is not to directly improve on, or compare
+cally, the depth estimates tend to be inaccurate when the dis- against, these systems. Instead, our goal is to investigate how
+tances considered are large (because even very small triangu- monocular cues can be integrated with any reasonable stereo
+lation/angle estimation errors translate to very large errors in system, to (hopefully) obtain better depth estimates than the
+distances). Further, stereo vision also tends to fail for texture- stereo system alone.
+less regions of images where correspondences cannot be reli- Depth estimation from monocular cues is a difﬁcult task,
+ably found.                                           which requires that we take into account the global structure
+  Beyond stereo/triangulation cues, there are also numerous of the image. [Saxena et al., 2006a] applied supervised learn-
+monocular cues—such as texture variations and gradients, ing to the problem of estimating depth from single monocular
+
+                                                IJCAI-07
+                                                  2197images of unconstrained outdoor and indoor environments.
+[Michels et al., 2005] used supervised learning to estimate
+1-D distances to obstacles, for the application of driving a re- Figure 2: The ﬁlters used for computing texture variations
+mote controlled car autonomously. Methods such as shape and gradients. The ﬁrst 9 are Laws’ masks, and the last 6 are
+from shading [Zhang et al., 1999] rely on purely photometric oriented edge ﬁlters.
+properties, assuming uniform color and texture; and hence
+are not applicable to the unconstrained/textured images that distribution of the direction of edges, also help to indicate
+we consider. [Delage et al., 2006] generated 3-d models from depth.2
+an image of indoor scenes containing only walls and ﬂoor. Some of these monocular cues are based on prior knowl-
+[Hoiem et al., 2005] also considered monocular 3-d recon- edge. For example, humans remember that a structure of a
+struction, but focused on generating visually pleasing graphi- particular shape is a building, sky is blue, grass is green, trees
+cal images by classifying the scene as sky, ground, or vertical grow above the ground and have leaves on top of them, and so
+planes, rather than accurate metric depthmaps.        on. These cues help to predict depth in environments similar
+  Building on [Saxena et al., 2006a], our approach is based to those which they have seen before. Many of these cues rely
+on incorporating monocular and stereo cues for modeling on “contextual information,” in the sense that they are global
+depths and relationships between depths at different points properties of an image and cannot be inferred from small im-
+in the image using a hierarchical, multi-scale Markov Ran- age patches. For example, occlusion cannot be determined
+dom Field (MRF). MRFs and their variants are a workhorse if we look at just a small portion of an occluded object. Al-
+of machine learning, and have been successfully applied to though local information such as the texture and colors of a
+numerous applications in which local features were insufﬁ- patch can give some information about its depth, this is usu-
+                                           1
+cient and more contextual information must be used. Taking ally insufﬁcient to accurately determine its absolute depth.
+a supervised learning approach to the problem of depth esti- Therefore, we need to look at the overall organization of the
+mation, we designed a custom 3-d scanner to collect training image to estimate depths.
+data comprising a large set of stereo pairs and their corre-
+sponding ground-truth depthmaps. Using this training set, 2.2 Stereo Cues
+we model the posterior distribution of the depths given the Each eye receives a slightly different view of the world and
+monocular image features and the stereo disparities. Though stereo vision combines the two views to perceive 3-d depth.
+learning in our MRF model is approximate, MAP posterior An object is projected onto different locations on the two reti-
+inference is tractable via linear programming.        nae (cameras in the case of a stereo system), depending on
+  Although depthmaps can be estimated from single monoc- the distance of the object. The retinal (stereo) disparity varies
+ular images, we demonstrate that by combining both monocu- with object distance, and is inversely proportional to the dis-
+lar and stereo cues in our model, we obtain signiﬁcantly more tance of the object. Thus, disparity is not an effective cue for
+accurate depthmaps than is possible from either alone. We small depth differences at large distances.
+demonstrate this on a large variety of environments, includ-
+ing both indoor environments and unstructured outdoor envi- 3 Features
+ronments containing trees/forests, buildings, etc.
+                                                      3.1  Monocular Features
+2  Visual Cues for Depth Perception                   In our approach, we divide the image into small rectangu-
+                                                      lar patches, and estimate a single depth value for each patch.
+Humans use numerous visual cues for 3-d depth perception, Similar to [Saxena et al., 2006a], we use two types of fea-
+which can be grouped into two categories: Monocular and tures: absolute features—used to estimate the absolute depth
+Stereo. [Loomis, 2001]                                at a particular patch—and relative features, which we use
+2.1  Monocular Cues                                   to estimate relative depths (magnitude of the difference in
+                                                      depth between two patches).3 We chose features that cap-
+Humans have an amazing ability to judge depth from a sin- ture three types of local cues: texture variations, texture gra-
+gle image. This is done using monocular cues such as tex- dients, and color, by convolving the image with 17 ﬁlters
+ture variations and gradients, occlusion, known object sizes, (9 Laws’ masks, 6 oriented edge ﬁlters, and 2 color ﬁlters,
+haze, defocus, etc. [Loomis, 2001; Blthoff et al., 1998; Fig. 2). [Saxena et al., 2006b]
+Saxena et al., 2006a]. Some of these cues, such as haze (re- We generate the absolute features by computing the sum-
+sulting from atmospheric light scattering) and defocus (blur- squared energy of each of these 17 ﬁlter outputs over each
+ring of objects not in focus), are local cues; i.e., the esti- patch. Since local image features centered on the patch are in-
+mate of depth is dependent only on the local image proper- sufﬁcient, we attempt to capture more global information by
+ties. Many objects’ textures appear different depending on
+the distance to them. Texture gradients, which capture the 2For textured environments which may not have well-deﬁned
+                                                      edges, texture gradient is a generalization of the edge directions.
+  1Examples include text segmentation [Lafferty et al., 2001],im- For example, a grass ﬁeld when viewed at different distances has
+age labeling [He et al., 2004; Kumar and Hebert, 2003] and smooth- different distribution of edges.
+ing disparity to compute depthmaps in stereo vision [Tappen and 3If two neighbor patches of an image display similar features,
+Freeman, 2003]. Because MRF learning is intractable in general, humans would often perceive them to be parts of the same object,
+most of these model are trained using pseudo-likelihood. and to have similar depth values.
+
+                                                IJCAI-07
+                                                  2198Figure 3: The absolute depth feature vector for a patch, which includes the immediate neighbors, and the distant neighbors in
+larger scales. The relative depth features for each patch compute histograms of the ﬁlter outputs.
+
+using image features extracted at multiple spatial scales4 for
+that patch as well as the 4 neighboring patches. (Fig. 3) This
+results in a absolute feature vector of (1 + 4) ∗ 3 ∗ 17 = 255
+dimensions. For relative features, we use a 10-bin histogram
+for each ﬁlter output for the pixels in the patch, giving us
+10 ∗ 17 = 170 values yi for each patch i. Therefore, our
+features for the edge between patch i and j are the difference
+yij = |yi − yj|.
+3.2  Disparity from stereo correspondence
+Depth estimation using stereo vision from two images (taken
+from two cameras separated by a baseline distance) involves
+three steps: First, establish correspondences between the two
+images. Then, calculate the relative displacements (called
+“disparity”) between the features in each image. Finally, de-
+termine the 3-d depth of the feature relative to the cameras, Figure 4: The multi-scale MRF model for modeling relation
+using knowledge of the camera geometry.               between features and depths, relation between depths at same
+  Stereo correspondences give reliable estimates of dispar- scale, and relation between depths at different scales. (Only
+ity, except when large portions of the image are featureless 2 out of 3 scales, and a subset of the edges, are shown.)
+(i.e., correspondences cannot be found). Further, the accu-
+racy depends on the baseline distance between the cameras.
+In general, for a given baseline distance between cameras, the cameras (and algorithm) allow sub-pixel interpolation accu-
+accuracy decreases as the depth values increase. This is be- racy of 0.2 pixels of disparity. Even though we use a fairly
+cause small errors in disparity then translate into huge errors basic implementation of stereopsis, the ideas in this paper can
+in depth estimates. In the limit of very distant objects, there is just as readily be applied together with other, perhaps better,
+no observable disparity, and depth estimation generally fails. stereo systems.
+Empirically, depth estimates from stereo tend to become un-
+reliable when the depth exceeds a certain distance.   4   Probabilistic Model
+  Our stereo system ﬁnds good feature correspondences be-
+tween the two images by rejecting pixels with little texture, Our learning algorithm is based on a Markov Random Field
+or where the correspondence is otherwise ambiguous.5 We (MRF) model that incorporates monocular and stereo fea-
+use the sum-of-absolute-differences correlation as the metric tures, and models depth at multiple spatial scales (Fig. 4).
+score to ﬁnd correspondences. [Forsyth and Ponce, 2003] Our The MRF model is discriminative, i.e., it models the depths d
+                                                      as a function of the image features X: P (d|X). The depth of
+  4The patches at each spatial scale are arranged in a grid of a particular patch depends on the monocular features of the
+equally sized non-overlapping regions that cover the entire image. patch, on the stereo disparity, and is also related to the depths
+We use 3 scales in our experiments.                   of other parts of the image. For example, the depths of two
+  5More formally, we reject any feature where the best match is not adjacent patches lying in the same building will be highly cor-
+signiﬁcantly better than all other matches within the search window. related. Therefore, we model the relation between the depth
+
+                                                IJCAI-07
+                                                  2199                                     ⎛        ⎛                                                            ⎞⎞
+                                                                                    3
+                                          M         −         2        −   T   2                −      2
+                               1     ⎝   1    ⎝(di(1)  di,stereo)  (di(1)  xi θr)            (di(s)  dj (s)) ⎠⎠
+               PG(d|X; θ, σ)=    exp   −              2         +        2       +                  2             (1)
+                              ZG         2          σ  stereo           σ1r                       σ2rs
+                                          i=1         i,                           s=1 j∈Ns(i)
+                                         ⎛      ⎛                                                         ⎞⎞
+                                                                                    3
+                                             M   |    −        |   |    −  T   |          |    −      |
+                                   1     ⎝      ⎝  di(1)  di,stereo di(1)  xi θr             di(s)  dj(s) ⎠⎠
+                   PL(d|X; θ, λ)=    exp   −                     +               +                                (2)
+                                  ZL                  λi,stereo         λ1r                      λ2rs
+                                             i=1                                   s=1 j∈Ns(i)
+
+                                                                                                      8
+            of a patch and its neighbors at multiple spatial scales. system, we have that σg is about 0.2 pixels; this is then used
+                                                                  to estimate σd,stereo. Note therefore that σd,stereo is a func-
+            4.1  Gaussian Model                                   tion of the estimated depth, and speciﬁcally, it captures the
+            We ﬁrst propose a jointly Gaussian MRF (Eq. 1), parame- fact that variance in depth estimates is larger for distant ob-
+                                                                  jects than for closer ones.
+            terized by θ and σ.Wedeﬁnedi(s)  to be the depth of a
+                          ∈{      }
+            patch iat scale s 1, 2, 3 , with the constraint di(s +1)= When given a new test image, MAP inference for depths d
+                                 . I.e., the depth at a higher scale is
+            (1/5)  j∈{i,Ns(i)} dj (s)                             can be derived in closed form.
+            constrained to be the average of the depths at lower scales.
+            Here, Ns(i) are the 5 neighbors (including itself) of patch i 4.2 Laplacian Model
+            at scale s. M is the total number of patches in the image (at In our second model (Eq. 2), we replace the L2 terms with
+            the lowest scale); xi is the absolute feature vector for patch i; 1
+                                                        6         L  terms. This results in a model parameterized by θ and
+            di,stereo is the depth estimate obtained from disparity; ZG is by λ,theLaplacian spread parameters, instead of Gaussian
+            the normalization constant.                           variance parameters. Since ML parameter estimation in the
+              The ﬁrst term in the exponent in Eq. 1 models the rela- Laplacian model is intractable, we learn these parameters
+            tion between the depth and the estimate from stereo disparity. following an analogy to the Gaussian case. [Saxena et al.,
+            The second term models the relation between the depth and 2006a] Our motivation for using L1 terms is three-fold. First,
+            the multi-scale features of a single patch i. The third term
+                                                                  the histogram of relative depths (di − dj) is close to a Lapla-
+            places a soft “constraint” on the depths to be smooth. We ﬁrst cian distribution empirically, which suggests that it is better
+            estimate the θr parameters in Eq. 1 by maximizing the con- modeled as one. Second, the Laplacian distribution has heav-
+                               |
+            ditional likelihood p(d X; θr) of the training data; keeping ier tails, and is therefore more robust to outliers in the image
+            σ constant. [Saxena et al., 2006a] We then achieve selective
+                                                   2              features and errors in the training-set depthmaps (collected
+            smoothing by modeling the “variance” term σ2rs in the de- with a laser scanner; see Section 5.1). Third, the Gaussian
+            nominator of the third term as a linear function of the patches
+                                                  2               model was generally unable to give depthmaps with sharp
+            i and j’s relative depth features yijs.Theσ1r term gives a edges; in contrast, Laplacians tend to model sharp transi-
+            measure of uncertainty in the second term, which we learn as tions/outliers better. (See Section 5.2.) Given a new test im-
+            a linear function of the features xi. This is motivated by the age, MAP posterior inference for the depths d is tractable,
+            observation that in some cases, depth cannot be reliably es- and is easily solved using linear programming (LP).
+            timated from the local monocular features. In this case, one
+            has to rely more on neighboring patches’ depths or on stereo
+            cues to infer a patch’s depth.                        5   Experiments
+                                                                  5.1  Laser Scanner
+            Modeling Uncertainty in Stereo
+                                                                  We designed a 3-d scanner to collect stereo image pairs and
+            The errors in disparity are modeled as either Gaussian [Das
+                                                                  their corresponding depthmaps (Fig. 6). The scanner uses the
+            and Ahuja, 1995] or via some other, heavier-tailed distribu-
+                                                                  SICK laser device which gives depth readings in a vertical
+            tion (e.g., [Szelinski, 1990]). Speciﬁcally, the errors in dispar-    ◦
+                                                                  column, with a 1.0 resolution. To collect readings along the
+            ity have two main causes: (a) Assuming unique/perfect corre-
+                                                                  other axis (left to right), we mounted the SICK laser on a
+            spondence, the disparity has a small error due to image noise
+                                                                  panning motor. The motor rotates after each vertical scan
+            (including aliasing/pixelization), which is well modeled by
+                                                                  to collect laser readings for another vertical column, with a
+            a Gaussian. (b) Occasional errors in correspondence causes ◦
+                                                                  0.5 horizontal angular resolution. The depthmap is later re-
+            larger errors, which results in a heavy-tailed distribution for
+                                                                  constructed using the vertical laser scans, the motor readings
+            disparity. [Szelinski, 1990]
+                                                                  and known position and pose of the laser device and the cam-
+              We estimate depths on a log scale as        from
+                                             d =log(C/g)          eras. The laser range ﬁnding equipment was mounted on a
+            disparity g, with camera parameters determining C.Ifthe
+                                                                  LAGR (Learning Applied to Ground Robotics) robot. The
+            standard deviation is σg in computing disparity from stereo
+            images (because of image noise, etc.), then the standard devi- (f (x))2Var(x), derived from a second order Taylor series approx-
+                           7
+            ation of the depths will be σd,stereo ≈ σg/g. For our stereo imation of f(x).
+                                                                     8
+                                                                     One can also envisage obtaining a better estimate of σg
+              6
+               In this work, we directly use di,stereo as the stereo cue. In [Sax- as a function of a match metric used during stereo correspon-
+            ena et al., 2007], we use a library of features created from stereo dence, [Scharstein and Szeliski, 2002] such as normalized sum of
+            depths as the cues for identifying a grasp point on objects. squared differences; or learning σg as a function of disparity/texture
+              7Using the delta rule from statistics: Var(f(x)) ≈  based features.
+
+                                                            IJCAI-07
+                                                              2200Figure 5: Results for a varied set of environments, showing one image of the stereo pairs (column 1), ground truth depthmap
+collected from 3-d laser scanner (column 2), depths calculated by stereo (column 3), depths predicted by using monocular cues
+only (column 4), depths predicted by using both monocular and stereo cues (column 5). The bottom row shows the color scale
+for representation of depths. Closest points are 1.2 m, and farthest are 81m. (Best viewed in color)
+
+
+                                                IJCAI-07
+                                                  2201

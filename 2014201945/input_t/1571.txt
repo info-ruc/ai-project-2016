@@ -1,0 +1,363 @@
+        Bounded Search and Symbolic Inference for Constraint Optimization
+
+                            Martin Sachenbacher and Brian C. Williams
+                                 Massachusetts Institute of Technology
+                        Computer Science and Artiﬁcial Intelligence Laboratory
+                                32 Vassar Street, Cambridge, MA 02139
+                                     {sachenba,williams}@mit.edu
+
+                    Abstract                          subproblems. Likewise, symbolic encoding using decision
+                                                      diagrams [Bryant, 1986] can exploit regularities within sets of
+    Constraint optimization underlies many problems   assignments (shared preﬁxes and postﬁxes) to collapse them
+    in AI. We present a novel algorithm for ﬁnite     into a much smaller representation. However, while these
+    domain constraint optimization that generalizes   techniques can push the border on the size of the problems
+    branch-and-bound search by reasoning about sets   that can be handled, they still do not avoid the fundamental
+    of assignments rather than individual assignments. problem of memory explosion.
+    Because in many practical cases, sets of assign-    The idea presented in this paper is to extend branch-and-
+    ments can be represented implicitly and com-      bound search to incorporate both decomposition and sym-
+    pactly using symbolic techniques such as deci-    bolic encoding. In particular, our algorithm simultaneously
+    sion diagrams, the set-based algorithm can com-   maintains sets of assignments (and thus sets of bounds) in-
+    pute bounds faster than explicitly searching over in- stead of single assignments. Because a set can, in many cases,
+    dividual assignments, while memory explosion can  be represented and manipulated efﬁciently using an implicit,
+    be avoided by limiting the size of the sets. Varying symbolic representation (such as a decision diagram), the set-
+    the size of the sets yields a family of algorithms that based search can compute bounds faster than by explicitly
+    includes known search and inference algorithms as searching over the individual assignments, while memory ex-
+    special cases. Furthermore, experiments on random plosion can be avoided by limiting the size of the sets. In our
+    problems indicate that the approach can lead to sig- approach, similar to domain splitting, the size of the sets is
+    niﬁcant performance improvements.                 controlled by partitions deﬁned for the domain of each vari-
+                                                      able. By varying the granularity of the domain partitions, a
+1  Introduction                                       family of tree-based algorithms is obtained that includes a re-
+Many problems in AI, such as planning, diagnosis, and au- cently introduced search algorithm called BTD (branch-and-
+                                                                                 [                      ]
+tonomous control, can be formulated as ﬁnite domain con- bound on tree decompositions) Terrioux and Jegou,´ 2003
+                                                                              [               ]
+straint optimization problems [Schiex et al., 1995]. Thus, the and dynamic programming Kask et al., 2003 as limiting
+ability to solve large instances of optimization problems efﬁ- cases. We show that a trade-off exists between these two ex-
+ciently is key for tackling practical applications.   tremes, and thus for many practical cases, it is advantageous
+  Depth-ﬁrst branch-and-bound ﬁnds optimal solutions by to pick an intermediate point along our spectrum.
+searching through the space of possible assignments. To The paper is organized as follows. After an introduc-
+prune parts of the search tree, it computes a lower bound on tion to the valued constraint satisfaction problem framework
+                                                      [               ]
+the value of the current partial assignment, and compares it Schiex et al., 1995 , we present a way to exploit structure in
+with the value of the best solution found so far as an upper the constraints using tree decomposition and a data-structure
+bound. While branch-and-bound is memory-efﬁcient, it can for symbolic encoding known as algebraic decision diagrams
+                                                             [               ]
+lead to impractical run-time, because the size of the search (ADDs) Bahar et al., 1993 . We then describe the set-based
+tree can grow exponentially as its depth increases.   extension of the branch-and-bound algorithm, and show how
+  An alternative approach is to infer optimal solutions by re- it generalizes existing algorithms. Finally, preliminary exper-
+peatedly combining constraints together. This approach is iments on random problems illustrate the trade-off between
+search-free and thus does not suffer from the run-time com- search and inference and the beneﬁt of a hybrid strategy.
+plexity of backtracking; however, its exponential memory re-
+quirements can render this approach infeasible as well. 2 Constraint Optimization Problems
+  In practical cases, however, constraints often exhibit a Deﬁnition 1 (Constraint Optimization Problem) A con-
+structure that can be exploited in order to reduce the memory straint optimization problem (COP) consists of a tuple
+requirements. Decomposition [Gottlob et al., 2000] can ex- (X, D, F ) with variables X = {x1, . . . , xn}, ﬁnite domains
+ploit structural properties such as low induced width in order D = {d1, . . . , dn}, constraints F = {f1, . . . , fm}, and a
+to break down the set of variables and constraints into smaller valuation structure (E, ≤, ⊕, ⊥, >). The constraints fj ∈ Fare functions fj : d1 ×. . .×dn → E mapping assignments to
+X to values in E. E is totally ordered by ≤ with a minimum
+element ⊥ ∈ E and a maximum element > ∈ E, and ⊕ is
+an associative, commutative, and monotonic operation with
+identity element ⊥ and absorbing element >.
+  The set of valuations E expresses different levels of con-
+straint violation, such that ⊥ means satisfaction and > means
+unacceptable violation. The operation ⊕ is used to combine
+(aggregate) several valuations. A constraint is hard, if all its
+valuations are either ⊥ or >. For notational convenience, we Figure 1: Full adder circuit consisting of two And gates, one
+denote by xi ← v both the assignment of value v ∈ di to Or gate, and two Xor gates. Input and output values are ob-
+variable xi, and also the hard constraint corresponding to this served as indicated.
+assignment (its valuation is ⊥ if the value of xi is v, and >,
+otherwise). Likewise, we regard elements of E as values, but
+also as special cases of constraints (constant functions). The sinking operation, denoted sink(f, g) returns the con-
+                                                      straint that forbids t if f(t) ≥ g(t):
+Deﬁnition 2 (Combination and Projection) Let f, g ∈ F
+                                                                            ½
+be two constraints. Let t ∈ d1 × . . . × dn, and let t↓Y denote               f(t)  if f(t) < g(t)
+                                                              sink(f, g)(t) =
+the restriction of t to a subset Y ⊆ X of the variables. Then,                >     otherwise
+ 1. The combination of f and g, denoted f ⊕ g, is the con-
+    straint that maps each t to the value f(t) ⊕ g(t); The lifting operation, denoted lift(f), turns a constraint into a
+ 2. The projection of f onto a set of variables Y , denoted hard constraint that allows t if f(t) < >. Finally, the comple-
+    f ⇓  , is the constraint that maps each t to the value ment of a hard constraint f, denoted cmpl(f), is the constraint
+       Y                                              whose valuation is > if f(t) = ⊥, and ⊥, otherwise.
+    min{f(t1), f(t2), . . . , f(tk)}, where t1, t2, . . . , tk are
+    all the assignments for which ti ↓Y = t ↓Y .
+  Given a COP and a subset Z ⊆ X of variables of interest, 3 Structure in Constraints
+                                    Lm
+a solution is an assignment t with value ( j=1 fj)(t) ⇓Z . Our approach is based on exploiting independence properties
+In particular, for Z = ∅, the solution is the value α∗ of an of the constraint functions F , such that they can be repre-
+assignment with minimum constraint violation, that is, α∗ =
+ Lm                                                   sented more compactly (abstractly) than explicitly listing all
+(  j=1 fj) ⇓∅.                                        assignments to X. In this section, we characterize these prop-
+  For example, the problem of diagnosing the full adder erties, which are often present in practical problems.
+circuit in Fig. 1 can be framed as a COP with variables To start with, in many situations the valuation of a con-
+X = {u, v, w, y, a1, a2, e1, e2, o1}. Variables u to y describe straint will depend only on a subset of the variables. For in-
+boolean signals and have domain {0, 1}. Variables a1 to o1 stance, for the constraint fa1, its valuation depends only on
+describe the mode of each gate, which can either be G (good), a1, w, and y. Formally, the support of a constraint f is the
+S1 (shorted to input 1), S2 (shorted to input 2), or U (unknown subset of variables that it depends upon:
+failure). The COP has ﬁve constraints fa1, fa2, fe1, fe2, fo1,
+one for each gate in the circuit. Each constraint expresses that Deﬁnition 3 (Support) The support of a constraint f, de-
+if the gate is G then it correctly performs its boolean function; noted sup(f), is the variable set {xi ∈ X | ∃v1, v2 ∈ di
+and if it is S1 (S2) then it is broken such that its output equals s.t. (f ⊕ (xi ← v1)) ⇓X\{xi}6= f ⊕ (xi ← v2)) ⇓X\{xi}}.
+its ﬁrst (second) input; and if it is U then it is broken in an
+                                                        For the example, sup(fa1) = {a1, w, y}, sup(fa2) =
+unknown way and no assumption is made about its behav-
+                                                      {a2, u, v}, sup(fe1) = {e1, u, y}, sup(fe2) = {e2, u}, and
+ior. The valuation structure captures the likelihood of being
+                                                      sup(fo1) = {o1, v, w}. The support structure of a constraint
+in a mode, and is ([0, 1], ≥, ·, 1, 0) (with · being multiplica- problem can be abstractly represented through a hypergraph
+tion over the real numbers). We assume Or-gates have a .95
+                                                      H  that associates a node with each variable xi, and a hyper-
+probability of being G, a .02 probability of being S1 (S2),
+                                                      edge with the variables sup(fj) of each constraint fj. Fig. 3
+and a .01 probability of being U; both And-gates and Xor- shows the hypergraph for the example.
+gates have a .975 probability of being G, a .01 probability of While the notion of support captures the independence of a
+being S1 (S2), and a .005 probability of being U. The value function’s value from variables outside the support, there can
+of the best solution then corresponds to the most likely fault still exist independence within the support. For instance, in
+in the circuit. For the example, α∗ is .018, corresponding to a
+                                                      the constraint fo1, if o1 = S1 and v = 0, then the value is .02
+stuck-at-ﬁrst-input (S1) fault of Or-gate 1.          regardless of the value of w; if o1 = U, then the value is .01
+  We introduce four more operators that we will use later to regardless of the values for w and y, etc. More generally, a
+compare constraints and to turn them into hard constraints. property that we call weak support can be exploited: if the
+The minimum operation, denoted min(f, g), returns the con- relationship between assignments and a function’s value can
+straint whose valuation is the minimum of f(t) and g(t):
+                     ½                                be described more compactly than explicitly listing all the
+                        f(t) if f(t) < g(t)           assignments to the support, then it is more efﬁcient to solve
+        min(f, g)(t) =
+                        g(t) otherwise                problems on that symbolic level.3.1  Symbolic Encoding using Decision Diagrams
+In the following, we present a way to recognize support and
+weak support of functions, namely through symbolic encod-
+ing in the form of decision diagrams.
+  A decision diagram represents a function over boolean
+variables to a set of values. Binary decision diagrams (BDDs)
+[Bryant, 1986] represent functions with values 0 or 1; alge-
+braic decision diagrams (ADDs) [Bahar et al., 1993] repre-
+sent functions to any set of values. A decision diagram is
+a rooted, directed, acyclic graph, where each internal node
+corresponds to a boolean variable, and each leaf node corre-
+sponds to a value of the function. Internal nodes have two Figure 2: Constraint fo1 for the example in Fig. 1 and its
+children n1, n2, and are recursively interpreted as the func- ADD, using two binary variables o11, o12 to encode o1, and
+tion f = if xi then f1 else f2, where xi is the boolean vari- variable ordering o11 ≺ o12 ≺ v ≺ w. Assignments and paths
+able corresponding to the node, and f1 and f2 interpret the with value 0 are not shown.
+sub-diagrams with root nodes n1 and n2, respectively.
+  The power of decision diagrams derives from their reduc-
+tion rules and canonicity of representation. A decision dia-
+gram can be ordered by imposing a variable ordering x1 ≺
+x2 ≺ . . . ≺ xn, such that for all paths from the root to the
+leaves, the sequence of variables encountered obeys the or-
+dering. Ordered decision diagrams can be reduced by itera-
+tively applying two graph reduction rules, which collapse as-
+signments by sharing common preﬁxes and postﬁxes (to share
+a common postﬁx, the function value must be the same): the
+node deletion rule eliminates nodes from the diagram whose
+children are equal (n1 = n2), and the node sharing rule elimi- Figure 3: Hypergraph (left) and a tree decomposition (right)
+nates one of two nodes that are root nodes of isomorphic sub- for the example in Fig. 1. The tree shows the labels χ and λ
+diagrams. A reduced, ordered decision diagram is a canon- for each node.
+ical representation of its function [Bryant, 1986] and con-
+tains only variables from the support of the function. It is
+easy to extend the technique to non-binary variables by map- 4.1 Tree Decomposition
+ping each non-binary variable xi to a block of dlog2 | Di |e Tree decomposition [Gottlob et al., 2000; Kask et al., 2003] is
+boolean variables that encode the domain values logarithmi- a way to exploit structural properties of H to decompose the
+cally. Figure 2 shows a reduced, ordered ADD representing original problem into independent subproblems (“clusters”):
+the function fo1. Operations on functions, such as projec-
+tion and combination, can be directly performed on this rep- Deﬁnition 4 (Tree Decomposition) A tree decomposition
+resentation. The complexity of the operations depends on the for a problem (X, D, F ) is a triple (T, χ, λ), where T =
+size of the diagram (number of nodes and arcs), rather than (V, E) is a rooted tree, and χ, λ are labeling functions that
+on the number of possible assignments; due to the sharing associate with each node (cluster) vi ∈ V two sets χ(vi) ⊆
+of common substructures, the number of nodes and arcs can X and λ(vi) ⊆ F , such that
+be orders of magnitude smaller than the number of possible 1. For each fj ∈ F , there exists exactly one vi such that
+assignments. While no compaction is achieved in the worst fj ∈ λ(vi). For this vi, var(fj) ⊆ χ(vi) (covering con-
+case, for certain types of constraints it can be shown that the dition);
+size of the decision diagram grows only logarithmically with
+                                                        2. For each x ∈ X, the set {v ∈ V | x ∈  χ(v )} of
+the number of assignments [Bryant, 1986].                           i              j         i      j
+                                                          vertices labeled with xi induces a connected subtree of
+                                                          T (connectedness condition).
+4  Set-based Branch-and-Bound with Tree
+                                                      In addition, we demand that the constraints appear as close to
+   Decompositions                                     the root of the tree as possible, that is,
+In this section, we describe how the independence proper-
+                                                            var(f ) ⊆ χ(v )    var(f ) 6⊆ χ(v )    v
+ties of functions described in the previous section (support, 3. If j    i  and     j        k with k the
+                                                                  v      f  ∈ λ(v )
+weak support) can be exploited in the framework of branch- parent of i, then j   i .
+and-bound search. We describe an algorithm that uses a tree Figure 3 shows a tree decomposition for the example. The
+decomposition of the hypergraph H to exploit the support separator of a node, denoted sep(vi), is the set of variables
+of functions, and set-based search to exploit the weak sup- that vi shares with its parent node vj: sep(vi) = χ(vi)∩χ(vj).
+port of functions. Thus, the algorithm beneﬁts from compact For convenience, we deﬁne sep(vroot) = ∅. Intuitively, sep(vi)
+representations of the functions, while memory explosion is is the set of variables that connects the subproblem rooted at
+avoided through depth-ﬁrst search.                    vi with the rest of the problem:Deﬁnition 5 (Subproblem) For a COP and a tree decompo-  There are two limiting cases: partitions consisting of sin-
+sition (T, χ, λ), the subproblem rooted at vi is the COP that gleton sets, that is, |Pi| = |di|, and partitions consisting of
+consists of the constraints and variables in vi and any de- a single set containing all domain values, that is, |Pi| = 1.
+scendant vk of vi in T , with variables of interest sep(vi). Again for notational convenience, we denote by xi ∈ p the
+                                                      restriction of a variable xi to the values in a partition element
+  The subproblem rooted at vroot is identical to the problem
+          ∗                                           p, and a constraint over variable xi (its valuation is ⊥ if the
+of ﬁnding α for the original COP. The beneﬁt of a tree de- value of x is in p, and >, otherwise).
+composition is that each subproblem needs to be solved only    i
+                                                        The set-based algorithm proceeds by assigning partition el-
+once (possibly involving re-using its solutions); the optimal
+                                                      ements p to variables x , and computing lower bounds by
+solutions can be obtained from optimal solutions to the sub-               i
+                                                      combining the constraints all of whose variables have been
+problems using dynamic programming. Thus, the complexity
+                                                      assigned. Since a partition element can contain more than
+of constraint solving is reduced to being exponential in the
+                                                      one domain value, the result is in general a function (set of
+size of the largest cluster only.
+                                                      assignments) rather than a single assignment. Thus, we need
+  In order to exploit the decomposition during search, the to generalize the basic test of the branch-and-bound algorithm
+variables must be assigned in an order that is compatible with – comparing a lower bound with an upper bound – to compar-
+the tree, namely by ﬁrst assigning the variables in a cluster ing two functions:
+before assigning the variables in the rest of the subproblems
+rooted in the cluster. This is called a compatible order in Proposition 1 Given a COP with variables of interest Z ⊆
+[Jegou´ and Terrioux, 2003]. In [Terrioux and Jegou,´ 2003], X, let fu be a function with sup(fu ⊆ Z), and let fa be a set
+Jegou´ and Terrioux present an algorithm called BTD (back- of assignments to Y ⊆ X (i.e., fa is a function with sup(fa ⊆
+                                                      Y ). Then for an assignment t to Y , its extension t0 to all
+tracking with tree decompositions) that exploits tree decom-                             Lm
+positions in branch-and-bound search. BTD assigns variables variables X can improve on fu (that is, ( j=1 fj)(t) ⇓Z <
+along a compatible order, beginning with the variables in fu(t)), if sink(fa ⇓Z , fu ⇓Z )(t) 6= >.
+χ(v   )              v
+   root . Inside a cluster i, it proceeds like classical branch- Hence, the sinking operation generalizes the comparison
+                                            λ(v )
+and-bound, taking into account only the constraints i of of a lower bound to an upper bound by “ﬁltering out” assign-
+this cluster. Once all variables in the cluster have been as- ments that cannot improve on a bounding function f .
+signed, BTD considers its children (if there are any). Assume                                     u
+                                                        Algorithm 1 shows the pseudo-code for the resulting algo-
+v is a child of v . BTD ﬁrst checks if the restriction of the
+ j            i                                       rithm SBBTD (set-based branch-and-bound with tree decom-
+current assignment to the variables in sep(v ) has previously
+                                    j                 position). SBBTD is given a constraint f (corresponding to
+been computed as a solution to the subproblem rooted at v . If                          a
+                                               j      a set of current assignments and their values), a cluster v
+so, the value of this solution (called a “good”) is retrieved and                                       i
+                                                      with a set of variables Y that remain to be assigned, and an
+combined with the value of the current assignment, thus pre-              vi
+                                                      upper bound function f whose support is a subset of the vari-
+venting BTD from solving the same subproblem again (called               u
+                                                      ables sep(v ) (f is a constant in the case where v = v ).
+a “forward jump” in the search). Otherwise, BTD solves the      i  u                            i   root
+                                                      SBBTD returns a constraint corresponding to the extension
+subproblem rooted at v for the current assignment to sep(v )
+                   j                             j    of assignments f to solutions of the subproblem rooted at v
+and the current upper bound, and records the solution as a          a                                   i
+                                                      (again, the result is a constant in the case where v = v ).
+new good. Its value is combined with the value of the current                                   i   root
+                                                      The valuation of this constraint is the value of best solution of
+assignment, and if the result is below the upper bound, BTD
+                                                      the subproblem rooted at vi, or a value greater than or equal
+proceeds with the next child of vi.
+                                                      to fu(t), if this best value is greater than or equal to fu(t).
+                                                      SBBTD uses two functions G , R to record the goods (so-
+4.2  Set-based Search                                                          vi  vi
+                                                      lutions to the subproblem rooted at vi) for each vi. Gvi is a
+In the following, we generalize BTD from single assignments soft constraint that contains the actual goods, while Rvi is a
+(and thus single bounds) to sets of assignment (and thus sets hard constraint that contains the information whether an as-
+of bounds), in order to exploit symbolic representations of signment has been recorded as a good or not (the use of two
+functions.                                            functions is necessary because a good can have any value in
+                                                      E, thus function G alone cannot give sufﬁcient information
+  The method that we use to extend the search from single             vi
+assignments to sets of assignments is to replace the step of whether the good has been stored or not). That is, an assign-
+                                                      ment t is recorded as a good for the separator if R (t) = >,
+assigning a value to a variable by the more general step of re-                                 vi
+                                                      and not recorded if R (t) = ⊥; in case the good is recorded,
+stricting a variable to a subset of its domain. This generaliza-        vi
+                                                      its value is G (t). Initially, R = G = ⊥.
+tion is similar to domain splitting; however, whereas domain     vi            vi    vi
+splitting might further split up the subsets at subsequent levels SBBTD starts by ﬁltering out the assignments whose value
+of the search tree, we consider the case where each variable exceeds the bounding function (line 1). Inside a cluster (lines
+occurs only once in each path of the search tree. That is, we 19-28), SBBTD operates like branch-and-bound, except that
+                                                      it restricts variables to subsets of their domains (partition el-
+assume that for each variable xi, a static, predeﬁned partition
+of its domain into subsets is given:                  ements) instead of single values. Once all variables in the
+                                                      cluster have been assigned, SBBTD turns to its children (lines
+Deﬁnition 6 (Domain Partition) A partition of a ﬁnite do- 3-17). SBBTD chooses a child vj and ﬁrst computes the sub-
+                                                                       0
+main di is a set Pi of disjoint subsets of di whoseS union is di, set of assignments fa of fa that are not previously recorded
+that is, p ∩p = ∅ for p , p ∈ P , j 6= k, and p = d . as goods of sep(v ) (line 7). If there are any assignments
+       j  k         j k    i            p∈Pi     i                   jSBBTD(fa, vi, Yvi , fu)                               Theorem 1  For a COP (X, D, F ) with a tree decomposi-
+ 1: fa ← sink(fa, fu)                                 tion (T, χ, λ) and any domain partitions P1, P2, . . . , Pn for
+
+ 2: if Yvi = ∅ then                                   variables x1, x2, . . . , xn, the algorithm SBBTD is sound and
+                                                                                                   ∗
+ 3:  F  ← children(vi)                                complete, that is, SBBTD(⊥, vroot, χ(vroot), >) = α .
+ 4:  while F 6= ∅ and fa 6= > do
+                                                        For instance, consider the full adder example with the do-
+ 5:    choose vj ∈ F
+                                                      main partitions P , P = {{0},{1}}, P , P = {{0,1}}, and
+ 6:    F  ← F \ vj                                                   u  v              w   y
+         0                                            Pa1, . . . , Po1 = {{G},{S1,S2},{U}}. That is, the search
+ 7:    fa ←  Rvj ⊕ fa
+          0                                           simultaneously explores the values {0,1} for w and y and
+ 8:    if fa 6= > then
+                    0                                 the values {S1,S2} for the mode variables. SBBTD starts
+ 9:       ha ← lift(f ) ⇓
+                   a   sep(vj )                                               {u, v, w, y, a , a }
+10:       e ← SBBTD(h    , v ,χ(v )\sep(v ),f ⇓   )   by assigning the variables         1  2  in the clus-
+          a             a j    j      j   u sep(vj )  ter v , which gives two assignments, hu, v, w, y, a , a i =
+11:       G  ←  G   ⊕ (e ⊕ h )                            1                                       1  2
+           vj     vj    a   a                         h0, 0, 0, 0, G, Gi and h0, 0, 1, 1, G, Gi, both with value .95.
+12:       R  ←  R   ⊕ compl(h  )
+           vj     vj          a                       SBBTD next considers a child of v , for instance, v . Since
+13:    end if                                                                       1             2
+                                                      there are no goods recorded for this cluster so far, the solu-
+14:    f  ←  f ⊕ G
+        a     a    vj                                 tions are computed for this subproblem for the assignments
+15:    f  ←  sink(f , f )
+        a         a  u                                hu, yi = h0, 0i and h0, 1i. The value of these solutions are
+16:  end while
+                                                      .0097 (corresponding to a S2 failure of Xor-gate 1) and .95,
+17:  return f ⇓
+            a  sep(vi)                                respectively. These solutions are recorded and combined with
+18: else
+                                                      the two assignments, which now have the values .0092 and
+19:  choose x ∈ Y
+             i   vi                                   .90, respectively. Next, the solutions for the subproblem v
+20:  S ←  P                                                                                             3
+           i                                          are computed simultaneously for the assignments hv, wi =
+21:  I ←  {f ∈λ(v ): x ∈ sup(f), sup(f)⊆sup(f )∪x }
+                 i   i                      a    i    h0, 1i and h0, 1i. The values are .95 and .01 (correspond-
+22:  while S 6= ∅ and f 6= > do
+                     a                                ing to a S1 failure of the Or-gate), respectively. After com-
+23:    choose p ∈ S
+                                                      bining these solutions with the two assignments in v , their
+24:    S ←  S \ p                                                                                  1
+         0               L                            value becomes .0088 and .018, respectively. Since there
+25:    fa ←  fa ⊕ (xi ∈ p) f∈I f
+                             0                        are no children left, SBBTD updates the bound for the best
+26:    fu ←  min(fu, SBBTD(fa, vi, Yvi \ {xi}, fu))   solution found to .018. This bound prunes all subsequent
+27:  end while
+                                                      assignments to variables in v1 except hu, v, w, y, a1, a2i =
+28:  return fu                                        h1, 1, 0, 0, G, Gi and h1, 1, 1, 1, G, Gi. Since the assignments
+29: end if
+                                                      hu, yi = h1, 0i and h1, 1i for the subproblem v2 lead to values
+Algorithm 1: Set-based branch-and-bound with tree decom- worse than the bound, .018 is returned as optimal solution.
+positions                                               In comparison, observe that BTD (obtained as a special-
+                                                      ization of SBBTD for the case |Pi| = |di|) suffers from the
+                                                      problem that it would explicitly iterate through all possible
+not recorded as goods, SBBTD solves the subproblem rooted combinations of values for w and y until encountering the
+                                                      best assignment (which is obtained for hw, yi = h1, 1i); in
+at vj for these assignments (line 10), and records the solu-
+tions as new goods (lines 11 and 12). It updates the val- contrast, SBBTD handles those combinations implicitly. Dy-
+                                                      namic programming (obtained as a specialization of SBBTD
+ues of the current assignments fa (lower bounds) (line 14),
+and compares it with the current upper bounds (line 15). It for |Pi| = 1) suffers from the problem that it would consider
+continues with the next child (if any) or returns the solu- more assignments than necessary (for example, it would com-
+tions to the subproblem. The initial call to the algorithm is pute the value for assignments involving ha1, a2i = hU, Ui,
+                                                      which is very low because it corresponds to a double fault).
+SBBTD(⊥, vroot, χ(vroot), >).
+  Since the formulation of the algorithm is independent of 4.3 Trade-off between Search and Symbolic
+how the domain partitions are deﬁned, Fig. 1 actually deﬁnes Inference
+a spectrum of algorithms that is parameterized by the domain
+partitions Pi for each variable. The limiting cases of the spec- SBBTD uniﬁes search with good recording (BTD) and dy-
+trum are |Pi| = |di| and |Pi| = 1, corresponding to ﬁnest and namic programming (CTE). In fact, the goods that the BTD
+coarsest granularity of the domain partitions, respectively. In algorithm computes can be understood as partial construc-
+the ﬁrst case, the set of assignments fa actually consists of a tion of the messages sent between clusters by the dynamic
+single assignment with value smaller than >, and thus Alg. 1 programming algorithm CTE [Kask et al., 2003]. Thus, the
+becomes identical to branch-and-bound on tree decomposi- two limiting cases can be understood as lazy and eager forms
+tions (BTD). In the second case, the restrictions xi ∈ p yield of dynamic programming, respectively: BTD computes solu-
+constraints identical to ⊥, and thus the search tree degener- tions to subproblems only as far as required to compute the
+ates to a list. Hence, in this case the algorithm is backtrack- optimal solution, whereas CTE computes them completely.
+free and becomes identical to dynamic programming on the It has been previously shown [Jegou´ and Terrioux, 2003]
+tree (called cluster-tree elimination (CTE) in [Kask et al., that BTD (i.e., lazy dynamic programming) outperforms CTE
+2003]). For the cases in between, that is, 1 < |Pi| < |di|, (i.e., eager dynamic programming). This is because search on
+hybrids of search and dynamic programming are obtained. single assignments exploits the upper bounds as rigorously as
