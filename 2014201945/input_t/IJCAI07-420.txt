@@ -1,0 +1,382 @@
+                                     Logical Circuit Filtering
+
+                                   Dafna Shahaf     and   Eyal Amir
+                                     Computer Science Department
+                               University of Illinois, Urbana-Champaign
+                                        Urbana, IL 61801, USA
+                                       {dshahaf2,eyal}@uiuc.edu
+
+                    Abstract                            Several approaches were developed that represent belief
+                                                      states compactly in logic (e.g., BDDs [Bryant, 1992], Log-
+    Logical Filtering is the problem of tracking the pos- ical Filter, and database progression [Winslett, 1990; Lin and
+    sible states of a world (belief state) after a sequence Reiter, 1997]) and update this representation. However, none
+    of actions and observations. It is fundamental to of them guarantees compact representation, even for simple
+    applications in partially observable dynamic do-  domains. [Amir and Russell, 2003], for instance, guarantees
+    mains. This paper presents the ﬁrst exact logical compactness and tractability only for sequences of STRIPS
+    ﬁltering algorithm that is tractable for all determin- actions whose preconditions are known to hold. Most impor-
+    istic domains. Our tractability result is interesting tantly, the straightforward approach to Logical Filtering (de-
+    because it contrasts sharply with intractability re- ciding if a clause should be in the belief state representation
+    sults for structured stochastic domains. The key to of time t +1, based on the belief state of time t)wasshown
+    this advance lies in using logical circuits to repre- to be coNP-complete [Liberatore, 1997].
+    sent belief states. We prove that both ﬁltering time
+                                                        In this paper we show that solving the update problem in
+    and representation size are linear in the sequence
+                                                      its entirety is easier (done in poly-time) than creating the new
+    length and the input size. They are independent of
+                                                      belief state piecemeal. We present C-Filter– the ﬁrst exact,
+    the domain size if the actions have compact repre-
+                                                      tractable Logical Filtering algorithm that can handle any de-
+    sentations. The number of variables in the result-
+                                                      terministic domain. Importantly, both time (to compute a be-
+    ing formula is at most the number of state features.
+                                                      lief state) and space (to represent it) do not depend on the do-
+    We also report on a reasoning algorithm (answer-
+                                                      main size. Furthermore, the number of variables in the result-
+    ing propositional questions) for our circuits, which
+                                                      ing formula is at most n, the number of state features (com-
+    can handle questions about past time steps (smooth-
+                                                      pare this with n · t, the number of variables used in Bounded
+    ing). We evaluate our algorithms extensively on AI-
+                                                      Model Checking [Clarke et al., 2001]).
+    planning domains. Our method outperforms com-
+    peting methods, sometimes by orders of magnitude.   We extend C-Filter to NNF Circuits (no internal negation
+                                                      nodes), and show that similar space and time bounds hold for
+                                                      this more restricted representation. We further show how to
+1  Introduction                                       reason with an output circuit, including smoothing (queries
+Much work in AI applies system models whose state changes about the past). Our results are also useful from the perspec-
+over time. Applications use these dynamic-system models to tive of representation-space complexity; they sidestep previ-
+diagnose past observations, predict future behavior, and make ous negative results about belief-state representation (Section
+decisions. Those applications must consider multiple possi- 5.4) and intractability results for stochastic domains.
+ble states when the initial state of the system is not known, The key to our advance lies in using logical circuits to rep-
+and when the state is not observed fully at every time step. resent belief states instead of traditional formulas. We show
+One fundamental reasoning task in such domains is Logical that updating a logical circuit formula amounts to adding a
+Filtering [Amir and Russell, 2003]. It is the task of ﬁnding few internal connectives to the original formula. We take ad-
+the set of states possible (belief state) after a sequence of ob- vantage of determinism: a feature is true after an action iff
+servations and actions, starting from an initial belief state. the action made it true or it was already true and the action
+  Logical Filtering in large deterministic domains is impor- did not change that. Interestingly, our empirical examination
+tant and difﬁcult. Planning, monitoring, diagnosis, and others suggests that other graphical representations (e.g., BDDs) do
+in partially observable deterministic domains estimate the be- not maintain compact representation with such updates.
+lief state (e.g., [Biere et al., 1999; Cimatti and Roveri, 2000; C-Filter applies to many problems that require belief-state
+Bertoli et al., 2001; Petrick and Bacchus, 2004])aspartof update, such as Bounded Model Checking and planning with
+performing other computations. This estimation is difﬁcult partial observability. The attractive nature of this approach is
+because the number of states in a belief state is exponential in that we can apply standard planning techniques without fear
+the number of propositional features deﬁning the domain. of reaching belief states that are too large to represent.
+
+                                                IJCAI-07
+                                                  26112  Logical Filtering                                  are two possible orientations ((a) and (b), left part). After
+We now describe the problem of Logical Filtering (tracking rotating the triangle 90 degrees, each possible state is updated
+the state of the world), hereby referred to as Filtering. Imag- (middle part). If the world state was (a), we√ should see a 1-
+ine an assembly robot that can put items together in order to edge again. Otherwise, we expect to see the 2-edge. After
+construct some machine. The parts are randomly oriented, observing a 1-edge (right part), the robot eliminates (b) from
+and they must be brought to goal orientations for assembly. his belief state, leaving him only with (a). That is, the robot
+At the beginning, the parts are located on a conveyor belt. knows the orientation of the triangle.
+Each part drifts until it hits a fence perpendicular to the belt,
+and then rotates so one of its edges is aligned against the fence                                    
+(see Figure 1). A sensor measures that edge, providing par-
+tial information about the part’s orientation (partial, because
+the part can have some edges of equal length, and the sensor
+might be noisy). The robot can then rotate a part (by a certain,
+discrete amount) and place it back on the belt, or pick it up                   
+and try assembling it. We now deﬁne the problem formally.
+Deﬁnition 2.1 (Deterministic Transition System) A transi-
+tion system is a tuple P, S, A, R. P is a ﬁnite set of propo-
+sitional ﬂuents, S ⊆ Pow(P ) is the set of world states. A state           
+contains exactly the ﬂuents that are true in it. A is a ﬁnite set    
+   
+                  ×   →                                                                √
+of actions, and R : S A  S is the transition function. Figure 2: A belief-state update with a 1,1, 2 triangle. Left: Pos-
+                                                      sible initial states. Middle: Progressing with Rotate(90)– rotating
+Executing action a in state s results in state R(s, a). R may be    ◦
+partial. In our example, P = { OnBelt(part1), PartOfAssem- thetriangleby90 and putting it on the belt again. Right: After
+bly(part1), Touch(part1-e1), Touch(part1-e2), ... }, A = { observing length=1, state (b) is eliminated.
+PickUp(part1), Assemble(part1), Rotate(part1,90), ... }
+In the sequel we assume an implicit transition system. 3  Circuit Filtering
+                                                                                         |P |
+                                                      Filtering is a hard problem. There are 22 belief states, so
+                                                      na¨ıve methods (such as enumeration) are intractable for large
+                                                      domains. Following [Amir and Russell, 2003],werepresent
+                                                      belief states in logic. Their solution provides the foundations
+                                                      for our research, but it guarantees an exact and compact rep-
+                                                      resentation only for a few classes of models (e.g. restricted
+                                                      action models, belief-states in a canonical form). We use log-
+Figure 1: A conveyor belt: the triangle drifts down, hits the fence ical circuits (not ﬂat formulas) in order to extend their results
+and rotates. The edge touching the fence is then measured. to all deterministic domains. In this section we describe our
+                                                      representation and explain how to update it with an action-
+  Our robot tries to keep track of the state of the world, but observation sequence, and how to reason with the result.
+it cannot observe it completely. One possible solution is to
+maintain a belief state– a set of possible world states. Every 3.1 Representation
+  ⊆
+ρ   S is a belief state. The robot updates its belief state as A belief-state ρ can be represented as a logical formula ϕ
+the result of performing actions and receiving observations. over some P  ⊇ P :astates is in ρ iff it satisﬁes ϕ (s ∧ ϕ
+We now deﬁne the semantics of Filtering.              is satisﬁable). We call ϕ a belief-state formula.Werepresent
+Deﬁnition 2.2 (Filtering Semantics [Amir and Russell, 2003]) our belief state formulas as circuits.
+  ⊆                                           ∈
+ρ   S, the states that the robot considers possible, ai A. Deﬁnition 3.1 (Logical Circuits) Logical Circuits are di-
+We assume that observations oi are logical sentences over P . rected acyclic graphs. The leaves represent variables, and
+ 1. Filter[](ρ)=ρ (: an empty sequence)             the internal nodes are assigned a logical connective. Each
+                {  |           ∈   }
+ 2. Filter[a](ρ)= s s  = R(s, a),s ρ                  node represents a formula– the one that we get by applying
+                {  ∈  |           }
+ 3. Filter[o](ρ)= s  ρ o is true in s                 the connective to the node’s children.
+ 4. Filter[aj ,oji≤j≤t](ρ)=
+                                                      We allow the connectives ∧, ∨, ¬. ¬ nodes should have
+     Filter[ aj,oj i<j≤t](Filter[oi](Filter[ai](ρ)))                       ∧  ∨
+We call step 2 progression with a and step 3 ﬁltering with o. exactly one child, while , can have many. In Corollary
+                                                      5.6 we explain how to avoid internal ¬ nodes (for NNF).
+                          
+  Every state s in ρ becomes s = R(s, a) after performing We use logic to represent R, too: a domain description is
+action a. After receiving an observation, we eliminate every a ﬁnite set of effect rules of the form “a causes F if G”, for
+state that is not consistent with it.                 a an action, F and G propositional formulas over P . W.l.g.,
+  Figure 2 illustrates a belief-state update. Imagine that√ the F is a conjunction of literals. The semantics of these rules
+robot has an isosceles right triangle (edges of size 1,1, 2), is as follows: after performing a in state s, iterate through
+and one of the 1-edges is currently touching the fence. There its rules. If the rule’s precondition G holds in s, its effect F
+
+                                                IJCAI-07
+                                                  2612will hold in R(s, a). If this leads to a contradiction, a is not state formula, ϕ, over P , and a domain description D.It
+possible to execute. The rest of the ﬂuents stay the same; if outputs the ﬁltered belief state as a logical circuit.
+no preconditions hold, the state does not change (we can also The algorithm maintains a circuit data structure, and point-
+make action failure lead to a sink state).            ers to some of its nodes. A pointer to a node represents the
+  Consider the triangle in Figure 2. If the triangle is on the formula which is rooted in that node (and they will be used
+belt, action a = Rotate(90) will rotate it, so the touching edge interchangeably). We maintain pointers to the following for-
+will change: e1 to e2, e2 to e3, e3 to e1. a’s effect rules are: mulas: (1) A formula cb (constraint base) – the knowledge
+“a causes Touch(e2) ∧¬Touch(e1) if OnBelt() ∧ Touch(e1)” obtained so far from the sequence (receiving observations and
+“ causes Touch(e3) ∧¬Touch(e2) if OnBelt() ∧ Touch(e2)” knowing that actions were possible to execute constrains our
+ a                                                                                 ∈
+“a causes Touch(e1) ∧¬Touch(e3) if OnBelt() ∧ Touch(e3)” belief state). (2) For every ﬂuent f P , a formula explf ;this
+                                                      formula explains why f should be true now (in Figure 4, the
+3.2  C-Filter                                         node marked e(Tch1) is the explanation formula of Touch(e1)
+                                                      at time t, and the root node is the explanation at time t +1).
+We described how domains and belief-states are represented; We keep the number of variables in our representation
+we can now present our Circuit-Filtering algorithm, C-Filter. small (|P |) by allowing those formulas to involve only ﬂu-
+                                                      ents of time 0. In a way, this is similar to regression: explf
+PROCEDURE   C-Filter(ai,oi0<i≤t,ϕ,D)                expresses the value of ﬂuent f as a function of the ini-
+{ai actions, oi observations, ϕ an initial belief state over P , tial world state, and cb gives the constraints on the initial
+ D  domain description}
+                            D  ϕ                      state.                     
+                    Preprocess ,                        The belief state is always cb∧ (f ↔ expl ).Inother
+                (D, a    )                                                       f∈P         f
+ 1: ProcessDomain    i 0<i≤t                          words, a possible model should satisfy cb, and each ﬂuent f
+ 2: for f ∈ P do explf := a new proposition f0
+ 3: cb := Time0(ϕ )                                   can be replaced with the formula explf .
+                    Process sequence                    In the preprocessing phase, we extract data from the do-
+ 4: for i=1to t do                                    main description (Procedure C-Filter, line 1). We then cre-
+ 5:      ProgressAction(ai)                           ate a node for each ﬂuent, and initialize the explf pointers to
+ 6:      FilterObservationV (oi)                      them. We also create a circuit for the initial belief-state, ϕ
+           ∧      (f ↔ explf )
+ 7: return cb  f∈P                                    (using the explf nodes), and set the cb pointer to it (lines 2-
+                                                      3). Then we iterate through the sequence, update the circuit
+PROCEDURE   ProgressAction(a)
+{a        }                                           and the pointers with every time step (lines 4-6, see below),
+   an action                                          and ﬁnally return the updated belief state.
+           Update cb: a executed, thus was possible.
+               Get f’s next-value explanation:        A Closer Look
+         a      f    f       a           ¬f
+           caused ,or held and did not cause          The circuit is constructed as follows. In the preprocessing
+ 1: for f ∈ Effects(a) do                             stage, we extract some useful formulas from the domain de-
+ 2:      cb := cb ∧ Time0( Poss(a,f) )
+                                                     scription. Let Effects(a) be the set of ﬂuents that action a
+ 3:      explf := Time0( NextVal(a,f) )
+      f ∈                :=                          might affect. For each f in this set, we need to know how a
+ 4: for   Effects(a) do explf explf                   can affect f.LetCause(a,f) be a formula describing when a
+PROCEDURE   FilterObservation(o)                      causes f to be true. It is simply the precondition of the rule of
+{o an observation over P }                            a causing f to hold (if there are several, take the disjunction;
+                                                                                              |
+ 1: cb := cb ∧ Time0(o)                               if there are none, set it to FALSE ). That is, if s = Cause(a,f)
+                                                      and a is possible to execute, f will hold after it. Cause(a,¬f)
+PROCEDURE   Time0(ψ)                                  is deﬁned similarly.
+{ψ        }
+   aformula                                             For example, take  a  =   Rotate(90) (Section 3.1).
+           Return an equivalent circuit over time 0   Effects(a)={Touch(e1), Touch(e2), Touch(e3)} ,and
+      f ∈ P   ψ         f
+ 1: for     in  do replace with the node pointed by explf                           ∧
+ 2: return ψ                                             Cause(a,Touch(e1)) = OnBelt() Touch(e3)
+                                                         Cause(a,¬ Touch(e1)) = OnBelt() ∧ Touch(e1) (*)
+PROCEDURE   ProcessDomain(D, ai0<i≤t)
+                                                        Procedure ProgressDomain then constructs the formula
+{D  a domain description, ai actions}
+        Extract ”Next Value” and ”Possible” Formulas  NextVal(a,f), which evaluates to TRUE iff f holds after a
+                                                      (given the previous state). Intuitively, either a caused it to
+ 1: for f ∈ P, a ∈ai do
+ 2:      NextVal(a,f) := Cause(a,f) ∨ (f ∧¬Cause(a,¬f)) 1 hold, or it already held and a did not affect it. Similarly, the
+ 3:      Poss(a,f) := ¬(Cause(a,f) ∧ Cause(a,¬f))     formula Poss(a,f) states that a was possible to execute regard-
+ 4:      (optional: Simplify Formulas)                ing f, i.e. did not cause it to be true and false at the same
+                                                      time.
+              Figure 3: C-Filter Algorithm              After preprocessing, we iterate through the sequence. Pro-
+                                                      cedure ProgressAction uses those formulas to update the be-
+                                                      lief state: First, it constructs a circuit asserting the action was
+Algorithm Overview
+C-Filter is presented in Figure 3 and demonstrated in Section 1Cause(a,f) represents the conditions for a to cause f, extracted
+4. It receives an action-observation sequence, an initial belief from the domain description (See (*))
+
+                                                IJCAI-07
+                                                  2613possible (corresponding to the Poss formula) and adds it to initial value of g be TRUE?). Note that every ﬂuent in every
+cb (line 2). Then, it builds a circuit for the NextVal formula. time step has a corresponding node. If we keep track of those
+Procedure Time0 ensures the circuit uses only time-0 ﬂuents. nodes, we can replace ﬂuents from any time step by their ex-
+When we construct a new Poss or NextVal circuit, its leafs planations. If the queries are given in advance, this does not
+represent ﬂuents of the previous time step; Time0 replaces change the complexity. Otherwise, ﬁnding a past-explanation
+them by their equivalent explanation nodes. Our circuit im- node might take O(log t) time. Note that the same mecha-
+plementation is crucial for the efﬁciency of this replacement. nism (tracking previous explanations) has many interesting
+Instead of copying the whole formula, we only need to up- applications, such as ﬁltering in non-Markovian domains.
+date edges in the graph (using the pointers). This way, we
+can share formulas recursively, and maintain compactness. SAT for Circuits
+  After all the new circuits were built, the explanation point- After building a query circuit, we check satisﬁability. Tradi-
+ers are updated (line 4); the new explanation is the root of the tional approaches check circuit-SAT by converting the circuit
+corresponding NextVal circuit, built earlier (line 3; see also into a CNF formula. The approaches for doing so either grow
+Section 5.1). Then we deal with the observation (Procedure the representation exponentially (duplicating shared subfor-
+FilterObservation): similarly, we use Time0 to get a time-0 mulas) or grow the number of variables signiﬁcantly.
+formula, and simply add it to cb.                       Instead, we run inference on the circuit itself. A number of
+                                                      works show that the structural information lost in a CNF en-
+                                        coding can be used to give SAT procedures a signiﬁcant per-
+                                                 formance improvement. Using circuit SAT solvers, we can
+                     ∨                       solve the problem more efﬁciently and effectively in its origi-
+          ∧                                      nal non-clausal encoding. Several such algorithms have been
+                                                     proposed recently, taking advantage of the circuit structure
+                                  ∧                   [Ganai et al., 2002; Thiffault et al., 2004]. We use those, and
+                          ∧                           a simple algorithm of our own, C-DPLL.
+                                                        C-DPLL  is a generalization of DPLL. Every iteration, an
+             
+               uninstantiated variable f is chosen, and set to TRUE.The
+                                                      truth value is then propagated as far as possible, resulting in
+                                          a smaller circuit (for example, if f had an OR parent, it will
+                                                      be set to TRUE as well). Then, C-DPLL is called recursively.
+Figure 4: Updating the explanation of Touch(e1) after Rotate(90)
+                                                      If no satisfying assignment was found, it backtracks and tries
+                                                      f=FALSE. If no assignment is found again, return UNSAT.
+  Example:   Figure 4 shows an update of the explanation
+                                                      C-DPLL  takes O(|E|·2l) time and O(|E|) space for a circuit
+of Touch(e1) after the action Rotate(90). Rectangles (on the
+                                                      with |E| edges and l leaves.
+bottom nodes) represent the explanation pointers of time t
+(before the action). The circuit in the image is the NextVal
+formula, after Procedure Time0 replaced its ﬂuents by the cor- 4 Extended Example
+responding explanation nodes.                         We now give a detailed example of the whole process. Inter-
+  The ∨ node is the root of the graph representing state of estingly, this example demonstrates how logical circuits can
+Touch(e1) after the action: the right branch describes the case represent compactly a belief state that one cannot represent
+that the action caused it to hold, and the left branch is the compactly using CNF formulas over the same variables.
+case that it held, and the action did not falsify it. In the next Our domain includes ﬂuents {p1, ..., pn, odd}. The follow-
+iteration, the pointer of Touch(e1) will point at this node. ing sequence of actions makes odd equal to p1 ⊕ p2 ⊕ ...pn,
+  Note the re-use of some time-t explanation nodes; they are the parity of the other ﬂuents. Our actions a1, ..., an−1 are
+internal nodes, possibly representing large subformulas. deﬁned such that a1 sets odd := p1 ⊕ p2, and any other ai
+                                                      sets odd := odd ⊕ p +1. Formally:
+3.3  Query Answering with the End Formula                              i
+                                                           1              1 ∧¬  2 ∨  ¬ 1 ∧ 2
+                                    t                    “a  causes odd if (p  p )  ( p   p )”
+C-Filter returns an updated belief state ϕ , represented as “a1 causes ¬odd if ¬[(p1 ∧¬p2) ∨ (¬p1 ∧ p2)]”
+a logical circuit. We are interested in satisﬁability queries “a causes odd if (odd ∧¬p +1) ∨ (¬odd ∧ p +1)”
+(ϕt ∧ ψ satisﬁable) and entailment queries (ϕt |= ψ,or     i                     i             i
+                                                         “a causes ¬odd if ¬[(odd ∧¬p +1) ∨ (¬odd ∧ p +1)]”
+ t ∧¬                                                      i                        i              i
+ϕ    ψ unsatisﬁable). In the following, we construct a circuit                                    ⊕
+corresponding to the query and run inference on it.     Applying the sequence a1, ..., an−1 sets odd = p1 ...pn.
+                                                      We now show how our algorithm maintains the belief state
+Query Circuits                                        throughout the sequence.
+Let ψ be an arbitrary propositional query formula; we want to
+check whether ϕt∧ψ is satisﬁable. Very similarly to an obser- Preprocessing the Domain:
+vation, we add ψ to cb, and replace the ﬂuents for their expla- In this phase we extract the Poss and NextVal formulas. We
+nations. The new cb is our query circuit. Queries are usually examine the action speciﬁcations: the only ﬂuent which is
+about time t, but the circuit structure allows more interesting affected is odd. a1 is executable when it does not cause both
+                                                          ¬
+queries, in particular smoothing– queries that refer to the past odd, odd.
+(e.g., did f change its value in the last 5 steps? Could the Cause(a1,odd) =(p1 ∧¬p2) ∨ (¬p1 ∧ p2)
+
+                                                IJCAI-07
+                                                  2614   Cause(a1,¬odd) = ¬[(p1 ∧¬p2) ∨ (¬p1 ∧ p2)]                                       
+
+
+
+   Poss(a1,odd) = ¬[Cause(a1,odd) ∧ Cause(a1,¬odd)]                      
+
+  It is easy to see that both cannot hold simultaneously, and                    
+
+the formula can be simpliﬁed to TRUE: indeed, a1 is always
+                                                                                        ϕ =
+executable. Similarly, all of our actions are always possible (a) At time t=0: initial belief state TRUE
+to execute, so the Poss formulas are all equal TRUE.
+  Now, the NextVal formulas. After executing a1, odd will                       ⊕     ≡       ∨
+be set to Cause(a1,odd) ∨ [odd ∧¬Cause(a1,¬odd)].
+                                                                                         ∧    ∧
+  This is equivalent to Cause(a1,odd).Inotherwords,odd                                            
+will be set to p1 ⊕ p2. Similarly, after action ai odd will          
+            ⊕                                                                             
+be set to pi+1 odd. Note, simplifying the formulas is not            ⊕
+mandatory; the representation will be compact without it, too. 
+
+Executing the Actions:                                               
+
+
+    
+Imagine  that we   receive the  (arbitrary) sequence
+                                                                                          
+a1,a2, ..., an−1, odd ∧¬pn (performing n actions and                               
+
+receiving an observation). Figure 5 describes how the
+                                                                   (b) Time t=1: after performing a1
+algorithm updates the belief-state with this sequence. At
+time 0 (5a) we create a node for every ﬂuent, and another for
+                                                                       
+TRUE. The nodes represent the value of the ﬂuent at time 0.
+                                                              
+We set a pointer (the rectangles) for each formula that we                 ⊕
+want to maintain: the formula for cb (constraints) is set to
+TRUE  because we do not have any initial knowledge. The              ⊕
+explanation formula of each ﬂuent is set to the corresponding
+node.                                                                
+
+
+    
+  We then execute a1, arriving at time 1 (5b). No constraint
+was added to cb, since the action is always executable. No                     
+
+                                    1
+explanation formula of pi changed, since a does not affect       (c) Time t=2: after performing a1,a2
+them. The only thing that changed is the state of odd: its new
+explanation is 1 ⊕ 2. We construct the graph for this for-
+            p    p                                                                     
+
+mula, and update the explanation pointer to its root node.                       
+NOTE: the image shows xor gates just for the sake of clar-                               ⊕       ∧
+ity. In fact, each of them should be replaced by ﬁve gates, as                ⊕
+depicted in 5b.                                                     
+  Executing a2 is similar (time 2, 5c). We construct the graph             ⊕                 
+for odd’s new value, odd ⊕ p3. Note that we substitute the
+ﬂuents in this formula (odd,p3) by their explanations in time        ⊕
+1, i.e. the pointers of the previous time step.
+                                         ∧¬
+  We execute a3, ..., an−1, and then observe odd pn (5d.                
+This is just an example observation; alternatively, you can
+                                                                               
+
+think of it as querying whether it is possible that odd ∧¬pn
+holds now). First, we process the actions and update the ex- (d) Time t=(n-1): after performing a1, .., an−1 and observing
+                             ∧¬
+planation of odd. Then we add odd pn to our constraints,                   (odd ∧¬pn)
+creating a new cb circuit and updating the pointer. Finally, we
+return the circuit in 5d, along with the pointers. This is our
+                                                                                      
+      
+  
+updated belief state.                                                                   ⊕       ∧
+Answering Queries:                                                             
+
+In 5e we show an example of truth-value propagation: if we                       ⊕
+                                                                        
+  
+assume that at time 0 p1=TRUE and the rest are set to FALSE,                              
+
+those values are propagated up and result in cb=TRUE.That         
+       ⊕                  
+is, this assignment is consistent with our sequence.                 ⊕
+
+5  Analysis and Complexity                                        
+                  
+5.1  Correctness
+                                                                               
+
+Theorem 5.1 C-Filter is correct. For any formula ϕ and a
+                                   
+sequence of actions and observations ai,oi 0<i≤t,                Figure 5: (e) Propagating truth-values
+    { s ∈ S that satisfy C-Filter(ai,oi0<i≤t,ϕ)} =
+      Filter[ai,oi0<i≤t]({s ∈ S that satisfy ϕ}).
+
+                                                IJCAI-07
+                                                  2615

@@ -1,0 +1,313 @@
+                  Ordering Heuristics for Description Logic Reasoning
+
+                                  Dmitry Tsarkov and Ian Horrocks
+                                      School of Computer Science
+                                        University of Manchester
+                                            Manchester, UK
+                                    traskov|horrocks@cs.man.ac.uk
+
+                    Abstract                          tion known as the trace technique that uses a top-down con-
+                                                      struction requiring (for PSpace logics) only polynomial space
+    We present a new  architecture for Description    in order to delineate a tree structure that may be exponential
+    Logic implementations, a range of new optimisa-   in size (with respect to the size of the input concept). For
+    tion techniques and an empirical analysis of their the ExpTime logics implemented in modern systems, how-
+    effectiveness.                                    ever, guaranteeing polynomial space usage is no longer an
+                                                      option. Moreover, for logics that support inverse roles (such
+1  Introduction                                       as SHIQ), a strictly top down approach is no longer possible
+Description Logics (DLs) are a family of logic based knowl- as constraints may be propagated both “up” and “down” the
+edge representation formalisms. Although they have a  edges in the tree.
+range of applications (e.g., conﬁguration [McGuinness & We describe an alternative architecture for tableaux imple-
+Wright, 1998], and reasoning with database schemas and mentations that uses a (set of) queue(s) instead of (an adap-
+queries [Calvanese et al., 1998b; 1998a]), they are per- tion of) the standard top-down approach. This architecture,
+haps best known as the basis for widely used ontology lan- which we have implemented in our new FaCT++ system, has
+guages such as OIL, DAML+OIL and OWL    [Horrocks et  a number of advantages when compared to the top-down ap-
+al., 2003]. As well as DLs providing the formal under- proach. Firstly, it is applicable to a much wider range of log-
+pinnings for these languages (i.e., a declarative semantics), ics, including the expressive logics implemented in modern
+DL systems are also used to provide computational services systems, because it makes no assumptions about the structure
+for ontology tools and applications [Knublauch et al., 2004; of the graph (in particular, whether tree shaped or not), or the
+Rectore, 2003].                                       order in which the graph will be constructed. Secondly, it
+  Most modern DL systems are based on tableaux algo-  allows for the use of more powerful heuristics that try to im-
+rithms. Such algorithms were ﬁrst introduced by Schmidt- prove typical case performance by varying the global order
+Schauß and Smolka [Schmidt-Schauß & Smolka, 1991], and in which different syntactic structures are decomposed; in a
+subsequently extended to deal with ever more expressive log- top-down construction, such heuristics can only operate on a
+ics [Baader et al., 2003]. Many systems now implement the local region of the graph—typically a single vertex.
+SHIQ   DL, a tableaux algorithm for which was ﬁrst pre-
+sented in [Horrocks et al., 1999]; this logic is very expres- 2 Preliminaries
+sive, and corresponds closely to the OWL ontology language. We present here a brief introduction to DL (in particular
+In spite of the high worst case complexity of the satisﬁabil- SHIQ) syntax, semantics and reasoning; for further details
+ity/subsumption problem for this logic (ExpTime-complete), the reader is referred to [Baader et al., 2003].
+highly optimised implementations have been shown to work
+well in many realistic (ontology) applications [Horrocks, 2.1 Description Logics
+1998].                                                Syntax Let R be a set of role names with both transitive and
+  Optimisation is crucial to the viability of tableaux based normal role names R+ ∪RP = R, where R+ ∩RP = ∅. The
+systems: in experiments using both artiﬁcial test data and set of SHIQ-roles (or roles for short) is R∪{R− | R ∈ R}.
+application ontologies, (relatively) unoptimised systems per- Let NC be a set of concept names. The set of SHIQ-
+formed very badly, often being (at least) several orders of concepts (or concepts for short) is the smallest set such that
+magnitude slower than optimised systems; in many cases, every concept name C ∈ NC is a concept, and if C and D
+hours of processing time (in some cases even hundreds of are concepts, R is a role, S is a simple role1 and n ∈ IN, then
+hours) proved insufﬁcient for unoptimised systems to solve (C u D), (C t D), (¬C), (∀R.C), (∃R.C), (6nR.C) and
+problems that took only a few milliseconds for an optimised (>nR.C) are also concepts; the last four are called, respec-
+system [Massacci, 1999; Horrocks & Patel-Schneider, 1998]. tively, value, exists, atmost and atleast restrictions.
+Modern systems typically employ a wide range of optimisa- For R and S (possibly inverse) roles, R v S is called a
+tions, including (at least) those described in [Baader et al., role inclusion axiom, and a ﬁnite set of role inclusion axioms
+1994; Horrocks & Patel-Schneider, 1999].              is called a role hierarchy. For C and D (possibly complex)
+  Tableaux algorithms try to construct a graph (usually a
+tree) representation of a model of a concept, the structure of 1A simple role is one that is neither transitive nor has any tran-
+which is determined by syntactic decomposition of the con- sitive subroles. Restricting number restrictions to simple roles is
+cept. Most implementations employ a space saving optimisa- required for decidability [Horrocks et al., 1999].concepts, C v D is called a general concept inclusion (GCI), negation, which is pushed inwards using re-writings such as
+and a ﬁnite set of GCIs is called a TBox.             de Morgan’s laws, until it applies only to atomic concepts).
+Semantics An interpretation I = (∆I , ·I ) consists of a non- For example, the expansion rule for conjunction causes C and
+empty set ∆I , the domain of I, and a function ·I which maps D to be added to any node label already containing C u D (in
+                      I    I                          order to guarantee termination, side conditions prevent rules
+every role to a subset of ∆ × ∆ such that, for P ∈ R and from being applied if they do not change either the graph or
+                  I            −I                I
+R ∈ R+, hx, yi ∈ P iff hy, xi ∈ P , and if hx, yi ∈ R its labelling).
+and hy, zi ∈ RI then hx, zi ∈ RI . The interpretation func- There are two forms of non-determinism in the expansion
+tion ·I of an interpretation I = (∆I , ·I ) maps, additionally, procedure. In the ﬁrst place, many rules may be simultane-
+                         I                            ously applicable, and some order of rule applications must be
+every concept to a subset of ∆ such that              chosen. From a correctness perspective, this choice is usually
+    (C u D)I = CI ∩ DI , (C t D)I   = CI ∪ DI ,       irrelevant2 (because, if there is a model, then it will be found
+        ¬CI = ∆I  \ CI ,                              by any expansion ordering), but as we will see later, the order
+    (∃R.C)I  =  {x ∈ ∆I | RI (x, C) 6= ∅},            of expansion can have a big effect on efﬁciency. In the second
+                                                      place, some rules expand the graph non-deterministically;
+    (∀R.C)I  =  {x ∈ ∆I | RI (x, ¬C) = ∅},
+           I          I    I                          e.g., the expansion rule for disjunction causes either C or
+   (6nR.C)   =  {x ∈ ∆  | ]R (x, C) 6 n}, and         D  to be added to any node label already containing C t D.
+   (>nR.C)I  =  {x ∈ ∆I | ]RI (x, C) > n},            From a correctness perspective, this choice is relevant (be-
+                                       I              cause one choice may lead to the successful construction of
+where ]M is the cardinality of a set M and R (x, C) is de- a model, while another one does not), and is usually dealt
+ﬁned as {y | hx, yi ∈ RI and y ∈ CI }.                with by backtracking search. Although such search must (in
+An interpretation I satisﬁes a role hierarchy R iff RI ⊆ SI the worst case) consider all possible expansions, the order in
+for each R v S ∈ R, and it satisﬁes a TBox T iff CI ⊆ DI which they are considered can still have a big effect on efﬁ-
+for each C v D ∈ T ; such an interpretation is called a model ciency.
+of R and T .                                            Two kinds of rule will be of particular interest in the fol-
+  A concept C is satisﬁable w.r.t. a role hierarchy R and a lowing discussion: non-deterministic rules, such as the t-rule
+TBox T  iff there is a model I of R and T with CI 6= ∅. mentioned above, and generating rules, such as the ∃-rule,
+Such an interpretation is called a model of C w.r.t. R and T . that add new nodes to the graph. Applying these rules is
+As usual for expressive DLs, subsumption can be reduced to likely to be more “costly”, as they either increase the size
+satisﬁability, and reasoning w.r.t. a TBox and role hierarchy of the graph or increase the size of the search space, and they
+can be reduced to reasoning w.r.t. a role hierarchy only [Hor- are typically applied with lower priority than other rules.
+rocks et al., 1999].                                  3   FaCT++   System Architecture
+2.2  Tableaux Algorithms                              As discussed above, many implementations use a top-down
+The basic idea behind a tableau algorithm is to take an in- expansion based on the trace technique. The idea of the top-
+put concept C and role hierarchy R, and to try to prove the down expansion is to apply the ∃-rule with the lowest priority
+satisﬁability of C w.r.t. R by constructing a model I of C (i.e., only apply this rule when no other rule is applicable); the
+w.r.t. R. This is done by syntactically decomposing C so as added reﬁnement of the trace technique is to discard fully ex-
+to derive constraints on the structure of such a model. For panded sub-trees, so that only a single “trace” (i.e., a branch
+example, any model of C must, by deﬁnition, contain some of the tree) is kept in memory at any one time.
+individual x such that x is an element of CI , and if C is of This technique has the advantage of being very simple and
+the form ∃R.D, then the model must also contain an individ- easy to implement—a procedure that exhaustively expands a
+ual y such that hx, yi ∈ RI and y is an element of DI ; if D node label can be applied to the current node and then, recur-
+is non-atomic, then continuing with the decomposition of D sively, to each of its successors. It does, however, have some
+would lead to additional constraints. The construction fails serious drawbacks. In the ﬁrst place, for logics with inverse
+if the constraints include a clash (an obvious contradiction), roles, the top-down method simply breaks down as it relies
+e.g., if some individual z must be an element of both C and on the fact that rules only ever add concepts to the label of
+¬C for some concept C. Algorithms are normally designed the node to which they are applied or to the label of one of its
+so that they are guaranteed to terminate, and guaranteed to successor nodes. The result is that, once the rules have been
+construct a model if one exists; such an algorithm is clearly a exhaustively applied to a given node label, no further expan-
+decision procedure for concept satisﬁability.         sion of that label will be possible. In the presence of inverse
+  In practice, algorithms often work on a tree shaped graph roles, expansion rules may also add concepts to the labels of
+that has a close correspondence to a model; this may be be- predecessor nodes, which could then require further expan-
+cause, e.g., models could be non-ﬁnite (although obviously sion. Moreover, discarding fully expanded sub-trees may no
+ﬁnitely representable), or non-trees (although usually tree- longer be possible, as the expansion of a concept added to
+like). Typically this will be a labelled graph (usually a tree the label of a predecessor may cause concepts to be added
+or collection of trees) where nodes represent individuals in to the label of a sibling node that had previously been fully
+the model, and are labelled with a set of concepts of which expanded.
+they are instances, and edges represent role relationships be- In the second place, the top down method forces non-
+tween pairs of individuals, and are labelled with a set of role deterministic rules to be applied with a higher priority than
+names.                                                generating rules. As the size of the search space caused
+  The decomposition and construction is usually carried out by non-deterministic rule expansions is, in practice, by
+by applying so called tableaux expansion rules to the concepts
+in node labels, with one rule being deﬁned for each of the 2Although the correctness of some algorithms requires a priority
+syntactic constructs in the language (with the exception of ordering for different rules.far the most serious problem for tableaux based systems problematical is, given a range of possible heuristics, choos-
+[Horrocks, 1997], it may be advantageous to apply non- ing the best one to use for a given (type of) problem.
+deterministic rules with the lowest priority [Giunchiglia & So far, the heuristics tried with DL reasoners have mainly
+Sebastiani, 1996]. In fact, top-down implementations typ- been adaptions of those already developed for SAT reason-
+ically apply non-deterministic rules with a priority that is ers, such as the well known MOMS heuristic [Freeman,
+lower than that of all of the other rules except the generat- 1995] and Jeroslow and Wang’s weighted occurrences heuris-
+ing rules [Horrocks & Patel-Schneider, 1999].         tic [Jeroslow & Wang, 1990]. These proved to be largely in-
+ToDo List Architecture The FaCT++ system was designed effective, and even to degrade performance due to an adverse
+with the intention of implementing DLs that include inverse interaction with backjumping [Baader et al., 2003]. An al-
+roles, and of investigating new optimisation techniques, in- ternative heuristic, ﬁrst presented in [Horrocks, 1997], tries
+cluding new ordering heuristics. Currently, FaCT++ imple- to maximise the effect of dependency directed backtracking
+ments SHIF, a slightly less expressive variant of SHIQ (backjumping) by preferentially choosing expansions that in-
+where the values in atleast and atmost restrictions can only troduce concept with “old” dependencies. Even this heuristic,
+be zero or one.3                                      however, has relatively little effect on performance with real-
+  Instead of the top-down approach, FaCT++ uses a ToDo istic problems, e.g., problems encountered when reasoning
+list to control the application of the expansion rules. The ba- with application ontologies.
+sic idea behind this approach is that rules may become appli- We conjecture that the standard top-down architecture has
+cable whenever a concept is added to a node label. When this contributed to the difﬁculty in ﬁnding useful heuristics as it
+happens, a note of the node/concept pair is added to the ToDo rules out many possible choices of rule-ordering; in particu-
+list. The ToDo list sorts all entries according to some order, lar, the top-down technique may require generating rules to be
+and gives access to the “ﬁrst” element in the list.   applied with a low priority, and so lead to non-deterministic
+  A given tableaux algorithm takes an entry from the ToDo rules being applied before deterministic generating rules. In
+list and processes it according to the expansion rule(s) rele- contrast, the ToDo list architecture gives a much wider range
+vant to the entry (if any). During the expansion process, new of possible rule orderings, and so has allowed us to investigate
+concepts may be added to node labels, and hence entries may a range of new rule-ordering heuristics, in particular heuris-
+be added to the ToDo list. The process continues until either tics that give non-deterministic rules the lowest priority.
+a clash occurs or the ToDo list become empty.           Another factor that has contributed to the weakness of SAT
+  In FaCT++ we implement the ToDo list architecture as a derived heuristics is that they treat concepts as though they
+set of queues (FIFO buffers). It is possible to set a priority were atoms. This is obviously appropriate in the case of
+for each rule type (e.g., u and ∃), and a separate queue is im- propositional satisﬁability, but not in the case of concept sat-
+plemented for each unique priority. Whenever the expansion isﬁability where sub-concepts may have a complex structure.
+algorithm asks for a new entry, it is taken from the non-empty We have also investigated expansion-ordering heuristics that
+queue with the highest priority, and the algorithm terminates take into account this structure, in particular a concept’s size,
+when all the queues are empty. This means that if the ∃-rule maximum quantiﬁer depth, and frequency of usage in the
+has a low priority (say 0), and all other rules have the same knowledge base.
+priority (say 1), then the expansion will be (modulo inverse Implementation in FaCT++ The FaCT++ reasoner uses the
+roles) top-down and breadth ﬁrst; if stacks (LIFO buffers) standard backtracking search technique to explore the differ-
+were used instead of queues with the same priorities, then ent possible expansions offered by non-deterministic rules
+the expansion would simulate the standard top-down method. (such as the t-rule). Before applying a non-deterministic
+                                                      rule, the current state is saved, and when backtracking, the
+4  Heuristics                                         state is restored before re-applying the same rule (with a dif-
+When implementing reasoning algorithms, heuristics can be ferent expansion choice). When inverse roles are supported,
+used to try to ﬁnd a “good” order in which to apply infer- it is possible for a sequence of deterministic rule applications
+ence rules (we will call these rule-ordering heuristics) and, to propagate changes throughout the graph, and it may, there-
+for non-deterministic rules, the order in which to explore the fore, be necessary to save and restore the whole graph struc-
+different expansion choices offered by rule applications (we ture (in addition to other data structures such as the ToDo
+will call these expansion-ordering heuristics). The aim is to list). FaCT++ trys to minimise the potentially high cost of
+choose an order that leads rapidly to the discovery of a model these operations by lazily saving the graph, (i.e., saving parts
+(in case the input is satisﬁable) or to a proof that no model of the graph only as necessitated by the expansion), but the
+exists (in case the input is unsatisﬁable). The usual technique cost of saving the state still makes it expensive to apply a
+is to compute a weighting for each available option, and to non-deterministic rule, even if the state is never restored dur-
+choose the option with the highest (or lowest) weight. Much ing backtracking.
+of the “art” in devising useful heuristics is in ﬁnding a suit- As discussed in Section 3, FaCT++ uses a ToDo list ar-
+able compromise between the cost of computing the weight- chitecture with separate queues for each priority level. Dif-
+ings and their accuracy in predicting good orderings. ferent rule-ordering heuristics can, therefore, be tried sim-
+  Such heuristics can be very effective in improving the ply by varying the priorities assigned to different rule types.
+performance of propositional satisﬁability (SAT) reason- Low priorities are typically given to generating and non-
+ers [Freeman, 1995], but ﬁnding useful heuristics for descrip- deterministic rules, but the ToDo list architecture allows dif-
+tion and modal logics has proved to be more difﬁcult. Choos- ferent priority ordering of these rule types; in contrast, the
+ing a good heuristic, or at least not choosing a bad one, is very top-down architecture forces a lower priority to be given to
+important: an inappropriate heuristic may not simply fail to generating rules.
+improve performance, it may seriously degrade it. Even more FaCT++ also includes a range of different expansion-
+                                                      ordering heuristics that can be used to choose the order in
+  3SHIF  corresponds to the OWL-Lite ontology language [Hor- which to explore the different expansion choices offered by
+rocks et al., 2003].                                  the non-deterministic t-rule. This ordering can be on the ba-sis of the size, maximum quantiﬁer depth, or frequency of us- For all the tests, FaCT++ v.0.99.2 was used on Pentium
+age of each of the concepts in the disjunction, and the order 4 2.2 GHz machine with 512Mb of memory, running Linux.
+can be either ascending (smallest size, minimum depth and Times were averaged over 3 test runs.
+lowest frequency ﬁrst) or descending. In order to avoid the 5.1 Rule-ordering Heuristics
+cost of repeatedly computing such values, FaCT++ gathers
+all the relevant statistics for each concept as the knowledge In these tests we tried a range of different rule-ordering strate-
+base is loaded, and caches them for later use.        gies. Each “strategy” is shown as a sequence of letters spec-
+                                                      ifying the priorities (highest ﬁrst) of the different rule types,
+5  Empirical Analysis                                 where “O” refers to the t-rule, “E” to the ∃-rule, and “a” to
+                                                      any other rule type. E.g., “aO” describes the strategy where
+In order to evaluate the usefulness of the heuristics imple- t
+mented in FaCT++, we have carried out an empirical analy- the -rule has the lowest priority, and all other rules have an
+sis using both real-life ontologies and artiﬁcial tests from the equal higher priority.
+DL’98 test suite [Horrocks & Patel-Schneider, 1998].  Ontology tests The results of using different rule-ordering
+  Ontologies can vary widely in terms of size and complexity strategies with the various ontologies are shown in Table 1.
+(e.g., structure of concepts, and types of axiom used). We All ontologies were tested with the best disjunction-ordering
+used three ontologies with different characteristics in order to heuristic, as determined in separate tests (see below).
+see how the heuristics would perform in each case:
+WineFood  A sample ontology that makes up part of the        KB    DOLCE    WineFood     GALEN
+               4                                                 SAT  SUB  SAT  SUB   SAT   SUB
+    OWL test suit [Carroll & De Roo, 2004]; it is small, but  a  0.74 0.74 0.22 2.44  99.44 1678.11
+    has a complex structure and includes 150 GCIs.           aO  0.64 0.68 0.14 1.64  29.80 569, 64
+DOLCE   A foundational (top-level) ontology, developed in    aEO 0.58 0.57 0.15 1.67  9.88 173.79
+    the WonderWeb project [Gangemi et al., 2002]; it is of   aE  0.60 0.58 0.27 2.87  13.35 205.32
+    medium size and medium complexity.                       aOE 0.61 0.59 0.27 2.93  13.22 201.40
+GALEN   The anatomical part of the well-known medical
+    terminology ontology [Rogers et al., 2001]; it is large Table 1: Ontology tests with different rule-orderings
+    (4,000 concepts) and has a relatively simple structure, The ﬁrst thing to note is that rule-orderings have relatively
+    but includes over 400 GCIs.                       little effect on the DOLCE and WineFood ontologies; in con-
+  FaCT++  separates the classiﬁcation process into satisﬁa- trast, the performance of the best and worst strategies dif-
+bility testing (SAT) and subsumption testing (SUB) phases; fers by a factor of almost 10 in the GALEN tests. Even in
+the results from the SAT phase are cached and used to speed the GALEN case, however, the difference between the “-O”
+up subsequent tests via a standard “model-merging” optimi- strategies (i.e., those that assign the lowest priority to the t-
+sation [Horrocks & Patel-Schneider, 1999]. FaCT++ allows rule) and “-E” strategies (i.e., those that assign the lowest pri-
+different heuristics to be used in the two phases of the pro- ority to the ∃-rule) is relatively small. In most cases the best
+cess; this is because the tests have different characteristics: in result is given by the “aEO” strategy, i.e., by assigning the
+the SAT phase, nearly all of the tests are satisﬁable (ontolo- lowest priority to the t-rule and the next lowest priority to the
+gies typically do not give names to unsatisﬁable concepts), ∃-rule, and even when “aEO” is not the best strategy, the dif-
+while in the SUB phase, up to one in four of the tests are un- ference between it and the best strategy is very small. More-
+satisﬁable. We measured the time (in CPU seconds) taken by over, the difference between the “aEO” and “aOE” strategies
+FaCT++ to complete each phase.                        is small in most cases, and never more than a factor of 2.
+  In addition to the ontologies, we used artiﬁcially generated DL98 tests The results of using different rule-ordering strate-
+test data from the DL’98 test suite. Artiﬁcial tests are in some gies with the DL98 tests are shown in Table 2. The ﬁrst thing
+sense corner cases for a DL reasoner designed primarily for to note from these results is that rule-ordering heuristics can
+ontology reasoning, and these tests are mainly intended to in- have a much more signiﬁcant effect than in the ontology tests:
+vestigate the effect of hard problems with very artiﬁcial struc- in some cases the performance of the best and worst strategies
+tures on the behaviour of our heuristics. For this purpose we differs by a factor of more than 100. In most tests, the “-E”
+selected from the test suite several of the tests that proved to strategies give the best results, with the difference between
+be hard for FaCT++.                                   “-O” and “-E” strategies being much more marked than in
+  Each of these tests consists of a set of 21 satisﬁability test- the case of the ontology tests. In the case of the d4 n test,
+ing problems of similar structure, but (supposedly exponen- however, performance is dramatically improved (by a factor
+tially) increasing difﬁculty; the idea of the test is to determine of 20) when an “-O” strategy is used.
+the number of the largest problem that can be solved within a
+ﬁxed amount of processing time (100 seconds of CPU time in test br n   br  p   d4  n   ph  n   ph  p
+our case). The names of the tests are of the form “test p”    last time last time last time last time last time
+or “test n”, where “test” refers to the kind of problem    a   8 16.7  9 20.5 20 94.8 11  99.0 7  15.5
+(e.g., the “ph” tests are derived from encodings of pigeon aO 11 38.2 11 38.1 21  0.8 10  10.8 7  32.1
+hole sorting problems), and “p/n” refers to whether the prob- aEO 11 38.8 11 39.0 21 0.8 10 10.9 7 32.9
+lems in the test set are satisﬁable (n) or unsatisﬁable (p). For aE 11 17.1 12 18.3 21 15.7 11 97.4 7 15.2
+these tests we have reported the number of the largest prob- aOE 11 19.3 12 21.1 21 16.1 11 99.5 7 15.9
+lem solved in less than 100 seconds (21 means that all the
+problems were solved), along with the time (in CPU seconds) Table 2: DL-98 tests with different rule-ordering strategies
+taken for the hardest problem that was successfully solved. 5.2 Expansion-ordering Heuristics
+  4This ontology therefore has a much weaker claim to being “real- In these tests we tried a range of different expansion-ordering
+life”.                                                heuristics. Each heuristic is denoted by two letters, the ﬁrst ofwhich indicates whether the ordering is based on concept size order br n br p    d4 n    ph n    ph p
+(“S”), maximum depth (“D”) or frequency of usage (“F”), and      test 11 test 12 test 21 test 10 test 7
+the second of which indicates ascending (“a”) or descending Sa    22.6    24.8    0.9     8.1    29.5
+(“d”) order. In each group of tests we used the best rule- Da     22.6    24.8    0.9    >300    24.5
+ordering heuristic as determined by the tests in Section 5.1. Fa >300    >300     32.0    22.9   20.2
+Ontology tests For the ontology tests, we tried different or- Sd  17.0    18.3   >300     38.7   24.7
+derings for the SAT and SUB phases of classiﬁcation. The   Dd     17.1    18.3   >300     19.7   19.3
+results are presented in Tables 3, 4 and 5; the ﬁrst ﬁgure in Fd  22.2    25.1    0.8     6.2    15.3
+each column is the time taken by the SAT phase using the
+given ordering, and the remaining ﬁgures are the subsequent Table 6: DL98 tests with different Or strategies
+times taken using different SUB phase orderings.
+  For DOLCE (Table 3), the difference between the best and 5.3 Analysis
+worst orderings was a factor of about 4, and many possible or- The different rule-ordering heuristics we tried had relatively
+derings were near optimal. For WineFood (Table 4), the dif- little effect on the performance of the reasoner when classify-
+ference between the best and worst orderings was a factor of ing the DOLCE and WineFood ontologies. With the GALEN
+about 2, and using Sd for SAT tests and Dd for SUB tests gave ontology, any strategy that gave a lower priority to the ∃- and
+the best result, although several other orderings gave similar t-rules worked reasonably well, and the aEO strategy was
+results. For GALEN (Table 5), the difference between the optimal or near-optimal in all cases. The crucial factor with
+best and worst orderings was so large that we were only the GALEN is giving low priority to the ∃-rule. This is due to
+orderings given allowed tests to be completed in a reasonable the fact that GALEN is large, contains many GCIs and also
+time. The best result was given by using Da for both phases. contains existential cycles in concept inclusion axioms (e.g.,
+                                                      C v ∃R.D  and D v ∃R−.C); as a result, the graph can grow
+     SAT     Sa    Da    Fa    Sd    Dd    Fd         very large, and this increases both the size of the search space
+     SUB   1.29  1.28  1.24   0.61   0.6   0.6        (because GCI related non-determinism may apply on a per-
+      Sa   2.53  2.52  2.52   2.46  2.45  2.41        node basis) and the cost of saving and restoring the state dur-
+     Da    2.53  2.53  2.53   2.44  2.44  2.41        ing backtracking search. Giving a low priority to the ∃-rule
+      Fa   0.91  0.91  0.89   0.97  0.98  0.88        minimises the size of the graph and hence can reduce both the
+      Sd   0.61  0.60  0.60   0.59  0.59  0.59        size of the search space and the cost of saving and restoring.
+     Dd    0.60  0.60  0.60   0.60  0.59  0.60        This effect is less noticeable with the other ontologies be-
+      Fd   1.33  1.34  1.33   1.30  1.34  1.33        cause their smaller size and/or lower number of GCIs greatly
+                                                      reduces the maximum size of graphs and/or search space. In
+  Table 3: DOLCE test with different expansion-orderings view of these results, FaCT++’s default rule-ordering strategy
+                                                      has been set to aEO.5
+     SAT     Sa    Da    Fa    Sd    Dd    Fd           The picture is quite different in the case of the DL’98 tests.
+     SUB   0.26  0.29  0.19   0.13  0.13  0.20        Here, different strategies can make a large difference, and no
+      Sa   3.15  3.57  3.27   3.21  3.21  3.68        one strategy is universally near optimal. This is to be ex-
+     Da    3.54  3.57  3.44   3.20  3.40  3.47        pected, given that some of the tests include very little non-
+      Fa   3.67  3.57  2.32   2.12  2.41  2.35        determinism, but are designed to force the construction of
+      Sd   1.77  1.80  1.71   1.80  1.80  1.83        very large models (and hence graphs), while others are highly
+     Dd    1.69  1.77  1.87   1.66  1.78  1.78        non-deterministic, but have only very small models. Given
+      Fd   2.30  2.26  2.75   3.14  3.54  2.76        that these extreme cases are not representative of typical real-
+                                                      life ontologies, the test results may not be directly relevant to
+ Table 4: WineFood test with different expansion-orderings a system designed to deal with such ontologies. It is inter-
+                                                      esting, however, to see how badly the heuristics can behave
+               SAT        Sa     Da                   in such cases: in fact the standard aEO strategy is near opti-
+              SUB      18.76    9.88                  mal in two of the tests, and is never worse than the optimal
+               Sa     276.90  276.16                  strategy by a factor of more than 2.
+               Da     185.79  172.89                    The expansion-ordering heuristics had a much bigger
+               Fd    1049.74  943.06                  effect on ontology reasoning performance (than the rule-
+                                                      ordering heuristics). In the case of DOLCE and WineFood,
+  Table 5: GALEN test with different expansion-orderings almost any strategy that uses Sd or Dd in the SUB phase is
+DL98 tests Table 6 presents the results for the DL98 tests. near optimal. For GALEN, however, using Da in both phases
+Each column shows the times taken using different expan- gives by far the best results. This is again due to the character-
+sion orderings to solve the hardest problem that was solvable istic structure of this ontology, and the fact that preferentially
+within the stipulated time limit using any ordering.  choosing concepts with low modal depth tends to reduce the
+  In almost every test, the difference between the best and size of the graph. Unfortunately, no one strategy is univer-
+worst strategies is large: a factor of more than 300 in the d4 n sally good (Da/Da is best for GALEN but worst for DOLCE
+test. Moreover, strategies that are good in one test can be very and WineFood); currently, Sd/Dd is the default setting, as the
+bad in another (the Sd and Dd strategies are the best ones in majority of real life ontologies resemble DOLCE and Wine-
+the branch tests (br n and br p), but (by far) the worst in the Food more than GALEN), but this can of course be changed
+d4 n test), and this is not strongly dependent on the satisﬁ-
+ability result (in the br tests, all strategies perform similarly 5Top-down architectures necessarily give lowest priority to the
+in both satisﬁable and unsatisﬁable cases). The Fd strategy is, ∃-rule, and generally give low priority to t-rule, which is why they
+however, either optimal or near optimal in all cases. work relatively well with ontologies.

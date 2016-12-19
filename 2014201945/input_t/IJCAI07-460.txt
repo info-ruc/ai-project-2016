@@ -1,0 +1,375 @@
+                 Real-Time Detection of Task Switches of Desktop Users
+
+                      Jianqiang Shen    and  Lida Li  and  Thomas G. Dietterich
+                           1148 Kelley Engineering Center, School of EECS
+                         Oregon State University, Corvallis, OR 97331, U.S.A.
+                                 {shenj, lili, tgd}@eecs.oregonstate.edu
+
+
+                    Abstract                          of several efforts that seek to address this problem by creating
+                                                      “task-aware” user interfaces for the information worker.
+    Desktop users commonly work on multiple tasks.      TaskTracer provides a convenient way for the user to de-
+    The TaskTracer system provides a convenient, low- ﬁne a hierarchy of tasks and associate information resources
+    cost way for such users to deﬁne a hierarchy of   (email messages, ﬁles, folders, web pages) with those tasks.
+    tasks and to associate resources with those tasks. The user can declare a “current task” (via a Task Selector
+    With this information, TaskTracer then supports the component in the window title bar), and TaskTracer then con-
+    multi-tasking user by conﬁguring the computer for ﬁgures the desktop in several ways to support the selected
+    the current task. To do this, it must detect when the task. For example, it supplies an application called the Task
+    user switches the task and identify the user’s cur- Explorer, which presents a uniﬁed view of all of the resources
+    rent task at all times. This problem of “task switch associated with the current task and makes it easy to open
+    detection” is a special case of the general problem those resources in the appropriate application. It also predicts
+    of change-point detection. It involves monitoring which folder the user is most likely to access and modiﬁes the
+    the behavior of the user and predicting in real time Open/Save dialog box to use that folder as the default folder.
+    when the user moves from one task to another. We  If desired, it can restore the desktop to the state it was in when
+    present a framework that analyzes a sequence of   the user last worked on the task, and so on.
+    observations to detect task switches. First, a clas- This approach of requiring the user to declare the current
+    siﬁer is trained discriminatively to predict the cur- task makes sense when the user is returning from an interrup-
+    rent task based only on features extracted from the tion and wants to bring up the list of relevant resources. How-
+    window in focus. Second, multiple single-window   ever, this approach fails when the user is interrupted (e.g., by
+    predictions (speciﬁcally, the class probability esti- a phone call, instant message). The user typically changes
+    mates) are combined to obtain more reliable pre-  documents, web pages, etc. without remembering to ﬁrst in-
+    dictions. This paper studies three such combina-  form TaskTracer. In such cases, we would like TaskTracer to
+    tion methods: (a) simple voting, (b) a likelihood automatically detect the activity switch.
+    ratio test that assesses the variability of the task
+                                                        To address this problem, we wish to apply machine learn-
+    probabilities over the sequence of windows, and (c)
+                                                      ing methods to automatically detect task switches. When a
+    application of the Viterbi algorithm under an as-
+                                                      task switch is detected, we would like TaskTracer to pop up
+    sumed task transition cost model. Experimental re-
+                                                      a “balloon alert” asking the user for permission to change the
+    sults show that all three methods improve over the
+                                                      current declared task. To be usable, this task switch detector
+    single-window predictions and that the Viterbi ap-
+                                                      must be highly precise (i.e., have very low false alarm rate),
+    proach gives the best results.
+                                                      and it must be timely (i.e., it must detect the task switch as
+                                                      soon as possible after it occurs so as to avoid interrupting the
+                                                      user once he or she is fully engaged in the new task). Finally,
+1  Introduction                                       it must consume minimal CPU resources so that it does not
+Today’s desktop information workers continually shift be- interfere with the work the user is trying to accomplish. We
+tween different tasks (i.e., projects, working spheres). For call this task switch detector the TaskPredictor.
+example, Gonzalez and Mark [2004], in their study of infor- The ﬁrst TaskPredictor for TaskTracer was developed by
+mation workers at an investment ﬁrm, found that the average Shen et al.[2006] and deployed in TaskTracer in 2006. This
+duration of an episode devoted to a task was slightly more TaskPredictor is a classiﬁer trained to predict the user’s cur-
+than 12 minutes, and that workers typically worked on 10 dif- rent task based only on features describing the window cur-
+ferent tasks in a day. Furthermore, the information needed for rently in focus. In the remainder of this paper, we will refer
+each task tends to be fragmented across multiple application to this as the Single Window Classiﬁer (SWC). Although the
+programs (email, calendar, ﬁle system, ﬁle server, web pages, SWC achieves fairly high accuracy, it is unusable in practice
+etc.). The TaskTracer system [Dragunov et al., 2005] is one because it produces far too many task-switch false alarms.
+
+                                                IJCAI-07
+                                                  2868  This paper describes a set of experiments to develop an im- 1
+proved TaskPredictor. Our basic idea is to develop algorithms
+that analyze the sequence of predictions from the SWC to    0.9
+make more reliable task switch predictions.
+  The remainder of this paper is structured as follows. First, 0.8
+we describe the Single Window Classiﬁer in detail. Then we
+present a framework that we have applied to the task switch 0.7
+
+
+detection problem. This framework makes the task switch     Coverage
+
+decision based on a metric that combines multiple task pre- 0.6
+dictions over time. Three different metric functions are pro-
+posed in this paper. Third, we show experimental results on
+                                                            0.5
+both synthetic and real user data. We conclude the paper with
+a review of related work and a discussion of future work.
+                                                            0.4
+                                                             600   500    400   300   200    100    0
+                                                                           The number of features
+2  TaskTracer and the Single Window
+                                                      Figure 1: Impact of feature selection. Fraction of one-minute
+   Classiﬁer (SWC)                                    intervals that have informative observations as a function of
+                                                      the number of selected features.
+TaskTracer operates in the Microsoft Windows environment
+and collects a wide range of events describing the user’s
+computer-visible behavior. TaskTracer collects events from 3 Switch Detection With Informative
+MS Ofﬁce 2003, MS Visual .NET, Internet Explorer and the  Observations
+Windows XP operating system. Then various TaskTracer
+                                                      Detecting switches from individual task predictions fails
+components provide services to the user based on this in-
+                                                      mainly because decisions based on just one observation are
+formation. From the raw event stream, the SWC extracts a
+                                                      not reliable: given the observations {x1, x2,...,xt},the
+sequence of Window-Document Segments (WDSs). A WDS
+                                                      SWC only uses xt to predict the task at time t. Instead, we
+consists of a maximal contiguous segment of time in which
+                                                      should detect switches based on the previous  observations
+a window is in focus and the name of the document in that
+                                                      {xt+1−,...,xt}. The larger value of  can bring more in-
+window does not change. The SWC extracts information
+                                                      formation to make the task switch predictions. However, this
+about the window title and the ﬁle pathname from each WDS.
+                                                      comes at the cost of reducing the timeliness of the predic-
+Then it heuristically segments these into a bag of “words”
+                                                      tions, because roughly we have to wait for /2 observations
+and creates a binary variable xj in the feature set for each
+                                                      before the system has enough information to reliably detect
+unique word. To put more weight on long-duration WDSs,
+                                                      the task switch.
+TaskPredictor creates multiple training instances for each
+WDS. For a WDS that lasts t seconds, TaskPredictor gen-
+               5                                      3.1  A Framework to Detect Task Switches
+erates n =  1+5 exp(−0.1t)  identical training instances.
+                                                      Figure 2 presents our framework for detecting task switches.
+  For the sake of both accuracy and speed, the information We execute the detector every f seconds or when an event is
+gain [Yang and Pedersen, 1997] of each feature is computed received. If the bag of features for a WDS contains no infor-
+and then the 200 features with the highest (individual) pre- mative features (i.e., it is the null bag), then it is ignored. This
+dictive power are retained and the rest are discarded. We will usually happens for short-duration pop-up windows, empty
+refer to these 200 features as the “informative” features . Internet Explorer windows, new ofﬁce documents (“Docu-
+  It is reasonable to ask whether feature selection causes a ment1”), and so on.
+large number of WDSs to have empty bags of words (i.e., to The informative WDS observations are pushed into a ﬁrst-
+be uninformative). We checked this on one user’s 2-month in-ﬁrst-out queue X of maximum length .OnceX contains
+TaskTracer dataset. This dataset contains 781 distinct words.  elements, each new element added to X causes the oldest
+We discretized time into 60-second periods and applied fea- element to be removed. The function SWITCHMETRIC com-
+ture selection to the entire dataset. Figure 1 shows the frac- putes the switch metric value Λ from X and also returns the
+tion of episodes that have at least one informative feature as predicted new task as discussed below. If Λ exceeds a thresh-
+a function of the number of features selected. With 200 fea- old, a task-switch alert is shown to the user, and the user is
+tures, more than 95% episodes still have informative features. asked to conﬁrm it. If the user agrees, then the current task is
+  The ﬁrst version of our TaskPredictor worked by applying changed to the new task, otherwise it is left unchanged.
+the SWC to predict the task of every informative WDS. If the The variable SILENTNUMBER stores the number of infor-
+predicted task was different than the user’s declared task and mative observations since the last switch alarm was made. To
+if the prediction was sufﬁciently conﬁdent, then TaskPredic- avoid annoying the user, the method does not raise any new
+tor issued a task switch alarm. Initial experience with this alarms for at least the next r informative observations after a
+TaskPredictor revealed that it was very sensitive to noise and switch alarm.
+that it issued many false alarms. Clearly, we need a more If no event occurs for a long time (more than d seconds),
+sophisticated technique to solve this problem.        then there is no point in predicting a switch, so we can avoid
+
+                                                IJCAI-07
+                                                  2869                                                      tions. The basic idea is to vote for the task of (x1,...,x/2)
+           WITCH  ETECTOR  , d, r,
+Procedure S      D        (      threshold)           and the task of (x/2+1,...,x) and see whether they are
+                                                                                             /2
+                                                      the same. First, compute ya =argmaxy        P (y|xi)
+ Input:  – we will store  observations in queue X                                           i=1
+                                                          y                     P y|x
+      d – efﬁciency delay; skip switch computation if WDS and b =argmaxy  i=/2+1 (   i). Then calculate the
+                         d                            switch metric as
+        has lasted longer than seconds                                ⎧                             ⎫
+      r                               r
+       – recovery time; keep silent for the next informative          ⎨/2                       ⎬
+         observations after a switch alarm
+                                                        Λ=I[ya  = yb] ·    P (ya|xi)+       P (yb|xi) ,
+ NOEVENTTIME   ←  0                                                   ⎩                             ⎭
+                                                                         i=l          i=/2+1
+ SILENTNUMBER   ←∞
+ do (every f seconds or if an event happens)                                                          (1)
+   if (no event happened)                             where I[p]=1if  p is true and −1 otherwise. Throughout
+                    ←                  f
+      NOEVENTTIME      NOEVENTTIME   +                this paper, we train support vector machines to do class prob-
+                      ←
+   else NOEVENTTIME     0                             ability estimation [Platt, 1999; Wu et al., 2004]. This voting
+   //skip inference if nothing has happened for d seconds method votes the class probability distributions to calculate
+                    >d
+   if (NOEVENTTIME     ) continue                     the metric. It is straightforward and cheap, but it doesn’t take
+   //update the observation queue X =(x1,...,x)      into account the variability of the task probabilities.
+   xnow ←  GETOBSERVATION()
+   if (xnow is not null)                              Likelihood Ratio Scores
+      UPDATEQUEUE(X,   xnow,)                        Instead of just looking at the sum of the predicted class
+      SILENTNUMBER   ←  SILENTNUMBER   +1             probability distributions, we can also consider the variabil-
+   else continue                                      ity of those distributions. Although voting may suggest a task
+   if (SILENTNUMBER  ≤ r) continue                    switch, if the class probability distributions within each half
+   (Λ, PREDICTEDTASK) ←  SWITCHMETRIC(X)              of X are highly variable, this suggests low conﬁdence in the
+   if (Λ > threshold)                                 prediction.
+      SILENTNUMBER   ←  0                               Let Θi be the posterior probability distribution over the
+      if (POPUPALERT(PREDICTEDTASK)==OK)              tasks given observation xi,andμa, μb be the true means
+        SETCURRENTTASK(PREDICTEDTASK)                 of {Θ1,...,Θ/2} and {Θ/2+1,...,Θ} respectively. We
+ until the system is shutdown                         seek to test the hypothesis H0 : μa = μb against the alterna-
+                                                      tive H1 : μa = μb. Developed by Neyman and Pearson, the
+                                                      likelihood ratio test provides a general methodology to test
+ Figure 2: Generic framework for detecting task switches. a two-sided alternative against a null hypothesis [Mukhopad-
+                                                      hyay, 2000]. The central limit theorem states that the sample
+                                                      mean is approximately a Gaussian distribution given a sufﬁ-
+the cost of computing the switch metric. We do not want X to ciently large sample. Thus, we can compute the switch metric
+be full of identical observations from the same long-duration Λ as the Gaussian likelihood ratio score
+WDS. Hence, there is no need to update X either.                          
+           −1
+  With some user studies, we set the default parameters for             T   2     2
+                                                           Λ=(Θa   − Θb)     Σa +  Σb     (Θa − Θb),  (2)
+this framework as follows: f =5,d = 25, and r = 10.                              
+
+3.2  Metric Functions                                 where Θa  and Θb are the sample means and Σa and Σb
+                                                      are the sample covariance matrices of {Θ1,...,Θ/2} and
+We now describe three methods for computing metric func-
+                                                      {Θ/2+1,...,Θ} respectively. We should reject H0 for
+tions based on the FIFO queue of informative observations                          ∀i  j y      y
+X. First we describe the baseline method, which is similar to large values of Λ. If we assume = , i and j are in-
+what has been deployed in the latest TaskTracer release. dependent, and treat Σa and Σb as diagonal matrices, then
+                                                      the computation time is O( ·|y|) excluding the expense for
+Baseline Method                                       the SWC to compute P (yj|xi).
+The Baseline Method applies the SWC to each observation The central limit theorem suggests that  should be quite
+individually. Given an observation x, the SWC returns three large (e.g., > 30). However, very large  values will substan-
+things: a predicted class label yˆ, a probability distribution tially delay the task switch alarms. Fortunately, our experi-
+Θ=P   (y|x) over the possible class labels, and a conﬁdence mental results are good even when  =8.
+measure that estimates P (x). The baseline method considers
+                                                      Minimal Transition Costs
+a prediction to be conﬁdent if P (x) exceeds a given threshold
+[Shen et al., 2006]. It compares the class labels of the two Our third metric is based on hypothesizing a task switch cost
+most recent conﬁdent predictions and declares a task switch and applying an additive conditional cost formula similar to
+alarm if they are different.                          that of hidden Markov models (HMMs). We deﬁne the cost
+                                                      of labeling X by Y as
+Class Probability Voting                                                           
+                                                         C  Y|X         C   y |x        C  x |x    ,
+A simple solution to combine multiple predictions is voting. (  )=        a( i i)+        t( i i−1)   (3)
+                                                                   1≤i≤           1<i≤
+Let X =(x1,...,x) be the queue of informative observa-
+
+                                                IJCAI-07
+                                                  2870where Ca is the atemporal cost of labeling observation i
+                                                      Table 1: Datasets for Evaluating Switch Detection (# of
+with yi and Ct is the transition cost of moving from task
+                                                      words is computed after stoplist and stemming)
+yi−1 to task yi.WedeﬁneCa as the negative log likelihood
+C    −    P y |x
+ a =   log  ( i i).AsinFernetal.[2005],wedeﬁnethe                Data Set    FA   FB    FC    SA
+transition cost function as Ct = c · δ[yi = yi−1],wherec is a
+       δ p      p                                             size(in months) 6    2     4    2.5
+real and [ ]=1if is true and 0 otherwise. This model sim-      # of switches 374  246  1209  286
+ply charges an equal cost for all task switches, even though    #oftasks     83   51    176   8
+it’s possible that some switches are more likely than others.   # of words   575  781  1543  514
+  We assume that the sequence X is short enough that it only
+contains 0 or 1 switches. We are concerned with whether
+there is one switch for sequence X. So we compare the min- 60). Then we generated m observations for task y accord-
+imal cost under the assumption of 0 switches to the minimal ing to its multinomial distribution such that each observation
+cost under the assumption of one switch:              lasts 1 second and contains less than 5 words.
+                                                        The real user data was obtained by deploying TaskTracer
+ α =minC(y1   = y2 = ...= y = a|X),            (4)
+      a                                               on Windows machines in our research group and collecting
+ β =minC(y1   = ...=  yi = a, yi+1 = ...= y = b|X).  data from four users, whom we referred to as FA, FB, FC,
+     i,a=b                                           and SA. The collected data is summarized in Table 1. Each
+                                                (5)   episode in these data sets was hand-labeled with the associ-
+                                                      ated task, although these labels probably exhibit considerable
+We apply the Viterbi algorithm to ﬁnd these minimal costs.
+                                                      levels of noise.
+Given (x1,...,xi),letαij be the minimal cost if we predict
+                                                        We now present the results for two performance metrics:
+the task at time i as yj and predict no switch until time i.Let
+                                                      COAP and precision.
+βij be the minimal cost if we predict the task at time i as yj
+                                                        COAP given the size of the queue. We measure the prob-
+and that one switch has occurred prior to time i. For each yj,
+                                                      ability that segment boundaries are correctly identiﬁed by the
+we initialize α1j = Ca(yj|x1) and β1j =+∞.Fortaskyj,
+                                                                                             [
+if we assume that no switch has occurred until time i,then co-occurrence agreement probability (COAP) Beeferman et
+                                                      al., 1999; McCallum et al., 2000]. The sequence of observa-
+αij is simply the sum of the atemporal costs plus α(i−1)j .If
+we assume that one switch has occurred prior to time i,there tions can be divided into segments using either the observed
+                                         i            or the predicted task switch points. Consider two arbitrary
+are two possibilities: this switch occurred at time or before   t     t                                t
+time i. We then pick the choice with the smaller cost and add time points 1 and 2 in the segmented sequence. Either 1
+                                                      and t2 belong to the same segment, or they belong to different
+the atemporal cost to give βij . Thus, ∀1 <i≤ , we can
+                                                      segments. The COAP is computed by choosing a probabil-
+recursively calculate the cost for each yj at time i as
+                                                      ity distribution D over (t1,t2) and measuring the probability
+  αij = α(i−1)j + Ca(yj|xi),                    (6)   that the observed and the predicted segmentations agree on
+                                                      whether these two points belong to the same or different seg-
+  βij =min{β(i−1)j, min α(i−1)k + c} + Ca(yj|xi). (7)
+                    k=j                              ments. In our case, D is the uniform distribution over all pairs
+                                                      (t1,t2) such that |t1 − t2|≤30 time units. For the synthetic
+                                     X         α =
+The minimal costs over the entire sequence will be    data set, the time unit was 1 second; for the real user data, the
+minj αj    β =minj  βj
+        and             . We set the value of the metric time unit was 60 seconds.
+as their difference:
+                                                        For each dataset, the data is ordered according to time and
+                    Λ=α   − β.                  (8)   divided into three equal time intervals: A, B, and C. We ﬁrst
+This Viterbi search will take O( ·|y|2) time excluding the
+expense for Ca(yj|xi).Instepi we only need to calculate                                  Transition Cost
+                                                                                         Voting
+Ca(yj|xi) for each yj, and these values can be cached for   0.72                         Likelihood Ratio
+future reuse.                                                                            Baseline Method
+
+4  Experimental Results                                     0.68
+We tested the framework and the three task switch metrics on
+
+
+                                       1                   COAP
+synthetic data and on data from four real users.            0.64
+  We generated 20 synthetic datasets using the following
+process. Each dataset contained 8 tasks and 500 distinct
+words. For each task, its multinomial distribution over words 0.6
+was randomly generated so that 150 of the words were ap-
+proximately 7 times more likely to appear than the remaining
+                                                            0.56
+350 words. Then, we sequentially generated 300 episodes:      4   6   8  10  12  14 16  18  20 22  24
+ﬁrst we chose a task y uniformly at random and generated the               The size of the queue
+length of the episode m uniformly in the range (10 ≤ m ≤
+                                                      Figure 3: The average COAP values of the synthetic data as a
+  1Available at http://www.cs.orst.edu/˜shenj/TT Data function of , the length of the observation queue X
+
+                                                IJCAI-07
+                                                  2871      0.79                                                    1
+                                  Transition Cost                                        Transition Cost
+                                  Voting                    0.95                         Voting
+      0.78                        Likelihood Ratio                                       Likelihood Ratio
+                                  Baseline Method            0.9                         Baseline Method
+
+      0.77                                                  0.85
+
+                                                             0.8
+      0.76
+
+
+     COAP                                                   0.75
+                                                           Precision
+
+      0.75                                                   0.7
+
+                                                            0.65
+      0.74
+                                                             0.6
+
+      0.73                                                  0.55
+        4  6   8   10 12  14  16  18 20  22  24               0    0.1  0.2   0.3  0.4  0.5   0.6  0.7
+                    The size of the queue                                     Coverage
+
+Figure 4: The average COAP values of the real user data as a Figure 5: The average precision values as a function of the
+function of                                          coverage for real users given 10 observations, created by
+                                                      varying the prediction threshold.
+train the Single Window Classiﬁer using A. Then for a given
+switch detection algorithm, we vary the threshold and evalu- through the data set. This deﬁnes an initialization period. For
+ate on B to choose the best threshold. Recall that we issue a each day d from d0+1 to the end of the data set, we trained the
+switch alarm when the metric value is larger than the thresh- system on the data from days 0 through d − 1 and then evalu-
+old. Finally, we retrain the SWC using A+B and apply the ated its performance on day d. The precision given coverage
+learned SWC and threshold value to evaluate on C. The re- for  =10informative observations is plotted in Figure 5.
+sults on C are plotted in Figure 3 and 4.               Our framework with any of the metric functions outper-
+  From the plots,  (the size of informative observation forms the baseline method. These results show that using
+queue) is crucial to the accuracy of methods. When  is in- more observations does reduce the false alarms. The minimal
+creased, the COAPs ﬁrst increase and then decrease for all transition cost metric gives the best results for coverage below
+three metric functions. The initial increase is presumably due 40%. Compared to the baseline method, the minimal transi-
+to the increase in the amount of information available. The tion cost metric can improve precision by more than 15%.
+subsequent decrease is presumably due to the fact that when The likelihood ratio metric gives the best results for coverage
+the queue X is too long, it contains more than one task switch, from 40% to 65%. Voting is the worst of the three metrics.
+but our framework assumes only 0 or 1 task switches occur.
+There might be 2 or even more switches when  is large. The
+maximal COAPs are reached when  is around 12 for the syn- 5 Related Work
+thetic data and around 10 for the real user data. The highest Our method of task switch detection is based on task recog-
+COAP value of any metric function is larger than that of the nition and prediction, for which many methods have been de-
+baseline method.                                      veloped (see Shen et al., [2006] for a review). There are also
+  The minimal transition cost metric gives the best perfor- some attempts in understanding the user’s interest in informa-
+mance, particularly on the synthetic data. One reason may be tion retrieval area [Ohsawa and Yachida, 1997].
+that unlike the other metrics, it is not constrained to predict Task switch detection is also related to change-point detec-
+the switch point in the center of the observation queue X. tion [Chen and Gopalakrishnan, 1998; Guralnik and Srivas-
+The likelihood ratio metric is more conservative in predict- tava, 1999]. The standard approach of change-point detec-
+ing switches, since it will not issue any alarm if the predicted tion has been to (a) apriori determine the number of change-
+P (y|xi) is not stable. Thus it misses some real switches, but points that are to be discovered, and (b) decide the function
+it makes fewer false alarms. This sometimes leads to a low that will be used for curve ﬁtting in the interval between suc-
+COAP value. The voting method is the least effective. cessive change-points [Guralnik and Srivastava, 1999].These
+  Precision given coverage. We measured precision and approaches usually do not employ supervised learning tech-
+coverage as follows. If a correct (user-labeled) switch occurs niques. Our switch detection method sheds some light on
+at time t and a switch is predicted to occur between t−60 and such problems: we can hand-label observations and train a
+t + 180, then the ﬁrst such switch prediction is considered to switch detector to predict change points.
+be correct. However, subsequent predictions in the same time Task switch detection is different from novelty detec-
+interval are counted as errors. Precision is the probability that tion [Sch¨olkopf et al., 2000; Campbell and Bennett, 2001;
+a switch prediction is correct. Coverage is the probability that Ma and Perkins, 2003] and ﬁrst story detection [Allan et al.,
+a user-labeled switch is predicted correctly.         2000]. Novelty detection, or anomaly detection, tries to au-
+  We adopted an on-line learning methodology to evaluate tomatically identify novel or abnormal events embedded in a
+the algorithms on the real user data. We divided the data large body of normal data. One application is to liberate sci-
+into days and assign d0 to be the day that is 25% of the way entists from exhaustive examination of data by drawing their
+
+                                                IJCAI-07
+                                                  2872

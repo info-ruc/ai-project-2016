@@ -1,0 +1,345 @@
+      Inferring Complex Agent Motions from Partial Trajectory Observations
+
+         Finnegan Southey                     Wesley Loh                     Dana Wilkinson
+             Google Inc.                  University of Alberta            University of Waterloo
+
+
+                    Abstract                            As an example, consider real-time strategy (RTS) games,
+                                                      a popular genre of commercial video games in which users
+    Tracking the movements of a target based on lim-
+                                                      control armies consisting of tens or even hundreds of units.
+    ited observations plays a role in many interest-
+                                                      The units are largely autonomous and the user provides only
+    ing applications. Existing probabilistic tracking
+                                                      high-level instructions to most units. For instance, a unit can
+    techniques have shown considerable success but
+                                                      be commanded to move to a new location simply by specify-
+    the majority assume simplistic motion models suit-
+                                                      ing the destination. A pathﬁnding routine then computes the
+    able for short-term, local motion prediction. Agent
+                                                      actual path to reach this destination and the unit travels there
+    movements are often governed by more sophisti-
+                                                      automatically. Another key feature of these games is the so-
+    cated mechanisms such as a goal-directed path-
+                                                      called fog of war—a limitation whereby the user can only
+    planning algorithm. In such contexts we must
+                                                      observe activity in the immediate vicinity of their own units.
+    go beyond estimating a target’s current location to
+                                                      This limited ﬁeld of view means that enemy movements can
+    consider its future path and ultimate goal.
+                                                      only be observed when they occur close to an allied unit. This
+    We show how to use complex, “black box” motion    results in a series of short, disconnected observations of en-
+    models to infer distributions over a target’s current emy movements. Additionally, most units of a given type
+    position, origin, and destination, using only lim- (e.g., tanks) are indistinguishable from one another, so it may
+    ited observations of the full path. Our approach ac- be uncertain whether or not two separate observations per-
+    commodates motion models deﬁned over a graph,     tain to the same unit. Several interesting strategic questions
+    including complex pathing algorithms such as A*.  can be asked in relation to these observations. How many en-
+    Robust and practical inference is achieved by using emy units are there? Which observations correspond to which
+    hidden semi-Markov models (HSMMs) and graph       unit? Where is an enemy when unobserved? Where was an
+    abstraction. The method has also been extended to enemy unit coming from and going to?
+    effectively track multiple, indistinguishable agents The method we propose and demonstrate facilitates infer-
+    via a greedy heuristic.                           ence using complex motion models in the form of a “black
+                                                      box”. Given two points, the motion model need only return
+1  Introduction                                       a path; the algorithm producing that path can be arbitrary
+Many interesting applications require the tracking of agents and unknown. Our method infers answers to several of the
+that move in a complex fashion through an environment in above questions, employing abstraction to efﬁciently handle
+which only partial observations are possible. Examples in- large numbers of possible paths and probabilistic models to
+clude real-time strategy games, aerial surveillance, trafﬁc, vi- robustly handle inaccurate motion models or noise in the ob-
+sual tracking with occlusion, and sensor networks. Related servations. It is important to emphasize that the approach
+problems have been well-addressed in robotics and vision do- does not learn a model of the opponent’s motion. Instead, we
+mains where approaches often start by assuming a known mo- use existing motion models to infer complex behaviour. We
+tion model that characterizes the movement in question. For demonstrate our results in a RTS-like context and discuss its
+example, Monte Carlo localization usually employs a motion use in real world domains.
+model for short-term predictions, capturing simple move-
+ments via some tractable mathematical formulation. Unfor- 2 Related Work
+tunately, in many applications, the movements of agents may While there is a great deal of work on tracking, we are un-
+be quite complex and involve long-term goals governed by aware of any work that employs complex black box motion
+sophisticated algorithms such as goal-directed path-planners. models in the manner we describe here. The work of Bruce
+Traditional tracking approaches that rely on simple motion and Gordon on tracking human movements for robotic obsta-
+models may not prove effective. Furthermore, one may wish cle avoidance is close in spirit inasmuch as it works with the
+to draw inferences about the long-term behaviour of the agent assumption that humans will follow optimal, and therefore
+rather than simply track its current location.        potentially complex, paths [Bruce and Gordon, 2004].An-
+
+                                                IJCAI-07
+                                                  2631other closely related project is work on learning goal-driven
+human movements from GPS data [Liao et al., 2004].This
+work also employs hidden semi-Markov models and abstrac-
+tions of the environment, although the details differ substan-
+tially. Similarly, the work described in [Bennewitz et al.,
+2004] attempts to model complex human motion as a hid-
+den Markov model learned from past observations. However,
+all of these examples relied on previous examples of move-
+ments and/or goals in order to learn models. Our work uses
+an existing but potentially very complex motion model and
+can be readily applied to new environments. The indistin-       (a)                        (b)
+guishable multi-agent task we identify here is very similar to Figure 1: (a) Path from an endpoint motion model. (b) Noisy
+that explored by [Sidenbladh and Wirkander, 2003] but they version of the proposed path.
+assume simplistic motion models. Work on multiple hypothe-
+sis tracking [Reid, 1979] and goal recognition also addresses that our observer(s) may be moving through the environment
+similar issues. Finally, Bererton has applied a particle ﬁl- and/or have a varying ﬁeld of view. We use O1:t to denote the
+tering approach to track human players in games to achieve sequence of observations made from timestep 1 to timestep t.
+realistic behaviours for game enemies [Bererton, 2004].
+                                                      4   Inference with Complex Motion Models
+3  Formalism                                          We seek to infer details of target movements given our ob-
+Motion Models  To formalize the discussion, we start with a servations and the parameterized motion model. The overall
+known environment described by a graph G =(V,E),where approach we adopt is Bayesian inference. For now, we will
+the vertices V = {v1, ··· ,vn} correspond to a set of lo- consider only a single target and return to the multiple target
+cations and the set of edges E indicates their connectivity. case presently. We assume that the target is using the mo-
+We assume the availability of a parameterized motion model tion model M with two unknown parameters (the endpoints).
+M  : θ, G → p,whereθ are the parameters and p is a sequence If we can estimate these parameters, we can characterize the
+of vertices from V that speciﬁes a directed path through G. motion of the agent.
+Speciﬁcally, we will consider endpoint motion models that
+take parameters of the form θ =(vi,vj ), where vi,vj ∈ V 4.1 Prior and Posterior
+are endpoints. Figure 1 (a) shows an example graph and path. We start by assuming a prior over endpoint parameters, P (θ),
+Any target we seek to track is assumed to be using M with where θ is a pair specifying the origin and destination ver-
+some speciﬁc, but unknown, endpoint parameters. The model tices. In many applications we may have well-informed pri-
+M  is treated as a “black box” and the mechanism by which ors. For example, in RTS games, targets typically move be-
+M  generates paths is unimportant. We need only be able to tween a handful of locations, such as the players’ bases and
+query M for a path, given some endpoints.             sources of resources. In all results presented here, we employ
+  The availability of such motion models for RTS is quite a uniform prior over endpoints, although our implementation
+immediate as the game provides an algorithm for this pur- accepts more informative priors. Much may be gained by ex-
+pose. Other applications might require constructing or learn- ploiting prior knowledge of potential agent goals.
+ing a motion model (as in [Bennewitz et al., 2004]), but in At any given timestep t, we compute the posterior distri-
+some domains reasonable models may already be available. bution over endpoints, given all past observations, P (θ|O1:t).
+For example, the various online mapping services can pro- By Bayes’ rule, P (θ|O1:t) ∝ P (O1:t|θ)P (θ),givinganun-
+vide road paths between travel locations. Another avenue is normalized version of the target distribution by computing the
+to assume some cost-sensitive pathing algorithm such as A* probability of the observations given the parameters. Note
+search—a very reasonable choice in the case of RTS where that for many purposes, the unnormalized distribution is per-
+most pathing algorithms are variants of A*. Note that most fectly acceptable, but normalization can be applied if neces-
+useful pathing algorithms require edge costs or other infor- sary. We compute the full posterior distribution in our work
+mation beyond the graph itself. Any such extra information here but it is straightforward to compute the max a posteri-
+is assumed to be available along with the graph.      ori estimate of the parameters to identify a “most probable”
+                                                      path. In the simplest scenario, P (O1:t|θ) can be computed for
+                                                                         θ
+Observations  Time is treated as advancing in discrete all possible endpoints . We will address the obvious scaling
+steps. At each time step t, the observations made are de- issues with this approach shortly.
+scribed by a set of vertex-result pairs, Ot. The observation
+results for a vertex vi can be negative (nothing was seen 4.2 Hidden Semi-Markov Model
+there) or positive (a target was seen). For example, O3 = We must now explain how we will compute P (O1:t|θ) for
+{(v2, +), (v5, −)} would mean that, at the third timestep, ver- one particular setting of θ. The black box M is used to gen-
+tices v2 and v5 were under observation, and a target was seen erate the proposed path p corresponding to θ. An obvious
+at v2 while no target was seen at v5. All other vertices were method for calculating the probability would be to perform
+not under observation. This arrangement allows for the fact exact path matching, testing to see whether the observations
+
+                                                IJCAI-07
+                                                  2632            O1:t exactly match what we would expect to see if the target puted as
+            traversed p. This results in a probability of 0 or 1.However,                                    
+                                               M                                                t
+            this approach is not robust. If our model is not perfectly α (S )=        P (d|S )        P (O |S )
+            correct—perhaps because we do not have access to the true   t  t               t              u  t
+            pathing routine but only an approximation—it will lead to               d ⎡       u=t−d+1     ⎤
+            problems. Also, in real-world domains we may have the ad-                  
+                                                                                     ⎣                    ⎦
+            ditional problem of noisy observations, such as erroneously                   P (St|Sj)αt−d(Sj)
+
+            seeing or not seeing the target, or incorrectly identifying its            Sj
+            exact location when seen. Finally, variable movement rates
+            can result in observations inconsistent with p.       Note that the α’s and the distributions used to compute them
+                                                                                                 ˜
+              In order to compensate for these potential inconsistencies, are all speciﬁc to a single HSMM, θ. The conditioning on
+                                                                  ˜
+            we use p as the basis for a noise-tolerant observation model θ was omitted for readability. By computing the α functions
+            instead of using it directly. This model is a hidden semi- for all θ˜’s, we can obtain answers to some of our original
+            Markov model (HSMM) based on p. A HSMM is a discrete  questions, so we explicitly condition on θ˜ hereafter.
+            time model in which a sequence of hidden states (S1, ··· ,St)
+            is visited and observations are emitted depending on the hid-
+            den state (see [Murphy, 2002] for a good overview). HSMMs Endpoint and Filtering Distributions One interesting
+            extend the common hidden Markov model by allowing for a strategic question was “where is the target going to and com-
+                                                                  ing from”. We can obtain the unnormalized distribution over
+            distribution over the time spent in each distinct hidden state.                                      S
+            More precisely, a HSMM consists of:                   endpoints by marginalizing out the hidden state variable t
+                                                                     P (θ|O1:t) ∝ P (O1:t|θ)P (θ)
+              • a set of hidden states (the vertices V in our case)                            
+                                                                                       ˜   ˜                ˜    ˜
+                                                                              ≈ P (O1:t|θ)P (θ)=   P (St,O1:t|θ)P (θ)
+              • a prior over initial hidden state, P (S1 = vi)), ∀vi ∈ V
+                                                                                                St
+              •
+                a transition function—a distribution over successor Another interesting question was “where is the target
+                                                    t P (S   =
+                states given that a transition occurs at time , t+1 now”—the current hidden state of the target. This is often
+                v |S = v ), ∀v ,v ∈ V
+                 i t    j    i j                                  called the ﬁltering distribution and can be computed as
+                                                                                          
+              • an observation function—a distribution over observa-
+                                                                          P (St|O1:t) ∝      P (St,O1:t|θ)P (θ)
+                tions, for each state, P (Ot|St = vi), ∀vi ∈ V
+                                                                                          θ
+              •                                                                                        ˜   ˜
+                a duration function—a distribution over the time to the               ≈      P (St,O1:t|θ)P (θ)
+                                         P (dt|St = vi), ∀vi ∈ V 1
+                next transition, for each state,             .                             θ˜
+            For each proposed endpoint pair θ, we build a correspond- 4.3 Building the HSMMs
+            ing HSMM  whose parameters (the above distributions) we                                           ˜
+                        θ˜                                        We still need to specify how to generate a HSMM θ from a
+            will denote by . We use the distribution of the observations       p        θ
+                      θ˜                                          proposed path based on . In the simplest case, one could
+            given these parameter settings as a noise-tolerant, unnor- construct the transition function so it deterministically gen-
+            malized estimate of the distribution over the original θ param-
+                                                  ˜    ˜          erates p, the observation model to give 0/1 probabilities for
+            eters, P (θ|O1:t) ∝ P (O1:t|θ)P (θ) ≈ P (O1:t|θ)P (θ),where                       p
+              ˜                                                   (not) observing the target where dictates, and the duration
+            P (θ)=P (θ). We will defer explanation of how we construct distribution to give probability 1 to a duration of 1.Thisis
+            θ˜for now, and explain how we compute the probabilities ﬁrst. equivalent to the exact path-matching model. Importantly,
+                                                                  by changing the distributions that make up the HSMM, we
+                                                                  can relax the exact matching in several ways to achieve ro-
+            Inference Inference in HSMMs can be achieved using the bustness. We describe such a relaxation for handling inac-
+            forward-backward algorithm [Murphy, 2002]. Only the “for- curate black boxes and noisy real-world observations imme-
+            ward” part is required to compute most of the distributions diately below. However, relaxations can also facilitate ap-
+            of interest. The forward algorithm computes the joint prob- proximations that are computationally motivated, such as the
+            ability of the hidden state and the history of observations, abstracted graph approximation described in Section 5.
+                     ˜
+            P (St,O1:t|θ), for each time step t, which we will abbre- Noisy Pathing
+                    α  : V  →  [0, 1]              α
+            viate by t              . Each function t is a func-  One way to deal with inaccuracies in M (i.e., differences be-
+                                  α ,s < t
+            tion of earlier functions, s  , so the probability can tween true paths and proposed paths) is to introduce some
+            be efﬁciently updated after each new observation. Setting noise into the transition functions of the HSMMs. This cre-
+            α (v )=P  (S  = v ), ∀v ∈ V             α
+             1  i       1    i   i     , the remaining ’s are com- ates a noisy version of the original model M. In our imple-
+                                                                  mentation, we introduce a small probability of straying from
+              1If the observers are moving then the observation distribution the exact path proposed by M to vertices neighbouring the
+            changes over time (our implementation fully supports this). The vertices in the path, with a high probability of returning to
+            transition and duration functions are stationary.     vertices on the path. This creates a probabilistic “corridor” so
+
+                                                            IJCAI-07
+                                                              2633that small deviations from M will be tolerated. Figure 1 (b) variable amounts of time. Again, we need only change the
+shows an example of this idea.                        duration function for our HSMM to approximately account
+  There are many other possibilities for introducing noise for this. We build this distribution for each abstract vertex
+(e.g., make the probability of error related to the edge weight by generating all base paths covered by the vertex and count-
+of neighbours or distance from vertices in p). We explore ing the number of paths of each length. We then assume a
+only this simple transition noise here. Another, quite distinct, uniform distribution over paths through the abstract vertex.
+option is to introduce noise into the observation function in- The abstraction of graphs and observations may lead to
+stead. Uncertainty in real-world applications may come from discrepancies between abstracted observations and proposed
+M, or the observations, or both. Practically speaking, noisy paths, because the set of proposed paths is computed by M
+transition functions and observations functions can serve to within Gˆ, while a target’s actual path is computed within G.
+address either source of error (e.g., treating errors in proposed As a result, there may be mismatches between the actual path
+paths as though they were observation errors). We have not and abstracted path due to details in M’s algorithm and, par-
+experimented with noisy observation functions but they might ticularly, the abstraction of extra information such as edge
+offer advantages by keeping the HSMM transition functions cost. On the other hand, abstraction can serve to mitigate
+sparse, reducing memory usage and computation.        minor differences between the true motion model and our as-
+                                                      sumedmotionmodelM    since many base level paths will con-
+5  Abstraction                                        form to a single path in Gˆ. The noisy pathing described earlier
+We can perform exact inference simply by considering all is one possible remedy for the former situation.
+endpoint pairs. If the number of possible pairs is prohibitively
+high, we could approximate by Monte Carlo sampling or 6   Multiple Targets
+even employ a form of particle ﬁltering. The former is fairly
+                                                      In general, we expect multiple targets in the world. How-
+straightforward and the latter is certainly possible. However,
+                                                      ever, as mentioned earlier, it may not be possible to distin-
+we will not expand on these options here.
+                                                      guish one target from another. We therefore seek to establish
+  A complementary strategy for reducing computational cost
+                                                      which agents generated which observations. We use the fol-
+is to abstract the original base graph G that describes the en-
+                                       Gˆ =(V,ˆ Eˆ)   lowing natural grouping of observations as a starting point.
+vironment to obtain a smaller abstract graph          While a target is in view, it is assumed that it can be accu-
+that more coarsely models locations in the environment. An rately tracked, and so all consecutive positive observations of
+abstraction φ(G) maps every vertex in V to some member                                   2
+                                  ˆ                   a target are taken to be a single trajectory.
+of the smaller set of abstracted vertices V , thereby reducing We now wish to associate these trajectories with targets.
+the set of possible endpoints. This effectively scales down Consider a set of integer “labels” {1, ··· ,m},wherem is
+the number of HSMMs to store and compute. If the motion the number of trajectories, and a labelling L that maps every
+model M  requires any additional information such as edge observed trajectory onto the set of labels. In place of our ear-
+costs, these must be abstracted as well. In the work presented lier notation for observations, we here denote the trajectories
+here we use clique abstraction [Sturtevant and Buro, 2005], associated with a single label j under labelling L,byYL(j).3
+which averages edge costs from G to produce edge costs for Conceptually, each label corresponds to a distinct target that
+ˆ
+G, but our implementation accepts any graph abstraction pro- generates the trajectories associated with that label. Some la-
+vided. For many purposes the resulting loss in precision is an bellings will propose grouping a set of trajectories under one
+acceptable tradeoff (e.g., it sufﬁces to know that an enemy’s label that could not have been generated by a single target.
+goal is “near” some location).                        Such labellings will have a zero posterior probability. Other
+  Some ﬂexibility is required to handle graph abstraction. labellings will be consistent but will differ in how well they
+First, each vertex in Vˆ corresponds to a set of vertices in V , explain the observations. Ideally then, we want to ﬁnd a la-
+some of which may have been under observation and the rest belling that gives the best explanation—one that maximizes
+unobserved. We abstract our observations O1:t from the ver- the posterior probability of the observations
+                                 ˆ      ˆ       ˆ
+tices in the base graph to observations O1:t = {O1,...,Ot}
+                                                                  max P (YL(1), ··· ,YL(m)|L)P (L)
+such that we record a positive observation at an abstracted        L
+vertex if a target was seen in any of the corresponding base          m
+vertices under observation. These partially-observed abstract ≈   max    P (YL(j)|L)P (L)
+                                                                   L
+vertices introduce uncertainty when a negative observation is         j=1
+made; it is still possible that a target is in one of the unob-       m 
+                                                                                       ˜    ˜
+served base nodes. Fortunately, the use of HSMMs means        =max           P (YL(j)|L, θi)P (θi)P (L)
+that we can incorporate this uncertainty readily by changing       L
+                                                                      j=1 θ˜
+the observation function. We use a simple and obvious model                i
+where the probability of a negative observation at some ab- 2Tracking is easy for RTS but generally hard. Failure to identify
+stracted vertex, given that a target is actually at that vertex, is trajectories will simply fragment what should be one trajectory into
+equal to the proportion of base vertices that are unobserved. several, and so does not pose any insuperable problem.
+  Similarly, the grouping of base vertices into a single ab- 3Computationally, α functions for the negative observations can
+stract vertex means that, even if movements at the base level be computed separately and shared by all positive trajectories, offer-
+take unit time, movement through an abstracted node can take ing a considerable savings in computation and space.
+
+                                                IJCAI-07
+                                                  2634where P (L) is a prior over labellings. This formulation effec-
+tively assumes that the targets associated with the labels gen-
+erate observations independently, an approximation we ac-
+cept for the sake of reducing computation.
+  Maximizing over all possible labellings of the trajectories
+is still expensive, however, so we use the following greedy
+approximation. We start with the labelling L, which gives
+each trajectory a unique label (essentially claiming that each
+was generated by a separate target and that there are m tar-
+gets), and then proceed iteratively. At each step, we select a
+candidate pair of labels j and k to merge, by which we mean
+that the trajectories of both labels are now associated with
+                                                     Figure 2: (a) Penta map showing target’s path from at top
+one of the labels. This gives us a new labelling, L such that
+                                                      right to bottom centre (b) Superimposed images of origin and
+YL (j)=YL(j) ∪ YL(k) and YL (k)=∅. Next, we compare
+                                                     destination posterior distributions
+the likelihoods of the labellings L and L , rejecting the merge
+                                                  
+if L is more likely, or keeping the new labelling L ← L kind we discuss here, our experiments are focused on show-
+otherwise. We then select a new candidate pair and repeat. ing that the approximations we use compare well to the base-
+  We heuristically order the candidate label pairs by com- line and improve on computational costs. We use four dif-
+puting the KL divergence of the endpoint distributions for ferent maps for the most exhaustive tests. The ﬁrst map,
+all pairs of labels and selecting minj,k KL(P (θ|YL(j) 
+ Penta, shown in Figure 2(a), is a 32 × 32 map created for
+P (θ|YL(k)) + KL(P (θ|YL(k) 
+ P (θ|YL(j)).4 If a pair is our experiments speciﬁcally to demonstrate how endpoints
+merged, we update the KL divergences and repeat. If a pair is can be accurately inferred. The other three maps, Adrenaline
+rejected for merging, we select the next smallest divergence, (65 × 65), Harrow (96 × 96), and Borderlands (96 × 96),
+and so on. Merging stops when no candidates remain.   are all maps found in the commercial RTS game “Warcraft
+  Intuitively, this heuristic proposes pairs of labels whose tra- 3”5 by Blizzard Entertainment (see Figures 3, 4, and 5).
+jectories induce similar endpoint distributions (i.e., it prefers Supplemental colour images and animations are available at
+two hypothesized targets with similar origins/destinations http://ijcai2007.googlepages.com/.
+given their separate observations). If the pair’s observations Within these environments, we place observers and targets.
+were in fact generated by one target’s path, then the merge Observers have a 5 × 5 ﬁeld of view centered at their loca-
+should produce high posterior probability. However, it is also tion. Targets move using the PRA* pathﬁnding algorithm de-
+possible that there really were two targets and that when the scribed in [Sturtevant and Buro, 2005],afastvariantofA*
+observations are combined, an inconsistency is detected (e.g., that generates sub-optimal paths similar to A* paths. We can
+two similar paths that overlap in time and so cannot be a sin- test the effect of inaccurate models by comparing the use of
+gle target). The divergence is simply intended to propose can- PRA* for the modelling (a correct assumption) vs. A* (incor-
+didates in an order guided by the similarity of likely paths. rect). In each trial, endpoints are randomly selected for the
+                                                      targets and observers are placed randomly along the paths,
+7  Experimental Results                               guaranteeing at least one observation. The simulation runs
+We have implemented our approach on top of the HOG    until all targets reach their destinations, plus an additional ten
+framework for pathﬁnding research [Sturtevant and Buro, steps. Endpoint and ﬁltering distributions are computed at
+2005].  It provides the simulation, visualization facility, every timestep and results averaged over 50 trials.
+pathﬁnding routines and abstractions. The clique abstraction An example of the posterior distributions over the origin
+we use is hierarchical, providing a succession of abstractions, and destination of a target on Penta is shown in 2(b), ten time
+each abstracting the graph from the previous level. Abstrac- steps after the target (black dot) has completed the journey,
+tion level 0 is the original, unabstracted base graph, level 1 viewed by two different observers (white dots) on the way.
+is an abstraction of that, 2 is abstraction of level 1, etc. The For compactness, the two distributions are superimposed—
+baseline case—no abstraction and a perfect motion model— the shading at the top right is the origin distribution and the
+obtains the true posterior distributions given the observations shading at the bottom center is the destination distribution.
+made. The usefulness of even the baseline case is necessar- To assess what might be called the “accuracy” of the
+ily limited by the available observations. If a target is never method in the single target case, all paths are ranked accord-
+observed, or observed only at points in the trajectory that are ing to their posterior probability at the end of the trial. We
+consistent with a wide variety of paths, then the conclusions report the percentile ranking of the target’s true path, aver-
+will be correspondingly vague.                        aged over all trials (higher is better). Results are reported for
+  Experiments were run to gauge the impact of the approxi- several abstraction levels, for the different modelling assump-
+mations involved in abstraction and the mechanisms used to tions (correct: PRA* vs. incorrect: A*), and for noisy/non-
+handle noise. As we are unaware of any alternative method noisy transition functions. This captures the penalty suffered
+that performs inference with complex motion models of the by abstraction and an inaccurate model. We highlight the
+                                                      baseline case (no abstraction, no noise, and accurate model),
+  4KL divergence is not symmetric so we adopt the common sym-
+metrized version.                                        5http://www.blizzard.com/war3/
+
+                                                IJCAI-07
+                                                  2635

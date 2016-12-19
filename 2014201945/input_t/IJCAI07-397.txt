@@ -1,0 +1,393 @@
+       ProbLog: A Probabilistic Prolog and its Application in Link Discovery
+
+                      Luc De Raedt∗, Angelika Kimmig and Hannu Toivonen†
+                 Machine Learning Lab, Albert-Ludwigs-University Freiburg, Germany
+
+
+                    Abstract                          it seems that there are – despite a great potential – still only
+                                                      few real-life applications of these probabilistic logics. The
+    We introduce ProbLog, a probabilistic extension of reasons for this might well be that the assumptions are too
+    Prolog. A ProbLog program deﬁnes a distribution   strong and sometimes hard to manage by the user, or that the
+    over logic programs by specifying for each clause solvers are often too slow or too limited.
+    the probability that it belongs to a randomly sam-
+                                                        We introduce ProbLog which is – in a sense – the simplest
+    pled program, and these probabilities are mutually
+                                                      probabilistic extension of Prolog one can design. ProbLog is
+    independent. The semantics of ProbLog is then de-
+                                                      essentially Prolog where all clauses are labeled with the prob-
+    ﬁned by the success probability of a query, which
+                                                      ability that they are true, and – similar as pD but unlike the
+    corresponds to the probability that the query suc-
+                                                      other approaches mentioned – these probabilities are mutu-
+    ceeds in a randomly sampled program. The key
+                                                      ally independent. ProbLog has been motivated by the real-life
+    contribution of this paper is the introduction of an
+                                                      application of mining large biological networks where edges
+    effective solver for computing success probabili-
+                                                      are labeled with probabilities. Such networks of biological
+    ties. It essentially combines SLD-resolution with
+                                                      concepts (genes, proteins, phenotypes, etc.) can be extracted
+    methods for computing the probability of Boolean
+                                                      from large public databases, and probabilistic links between
+    formulae. Our implementation further employs
+                                                      concepts can be obtained by various prediction techniques. In
+    an approximation algorithm that combines iterative
+                                                      this and many other applications, probabilistic links are mu-
+    deepening with binary decision diagrams. We re-
+                                                      tually independent and can easily be described in ProbLog.
+    port on experiments in the context of discovering
+    links in real biological networks, a demonstration  A  ProbLog program  speciﬁes a probability distribu-
+    of the practical usefulness of the approach.      tion over all possible non-probabilistic subprograms of the
+                                                      ProbLog program. The success probability of a query is
+                                                      then deﬁned simply as the probability that it succeeds in
+1  Introduction                                       these subprograms. The semantics of ProbLog is not really
+                                                      new, it closely corresponds to that of pD [Fuhr, 2000] and
+Over the past two decades an increasing number of prob-
+                                                      of [Dantsin, 1991]. The key contribution of this paper, how-
+abilistic logics has been developed. The most prominent
+                                                      ever, is the introduction of an effective inference procedure
+examples include PHA [Poole, 1993],PRISM[Sato and
+                                                      for this semantics, and its application to a real-life link dis-
+Kameya, 2001],SLPs[Muggleton, 1996],MLNs[Richard-
+                                                      covery task.
+son and Domingos, 2006] and probabilistic Datalog (pD)
+[Fuhr, 2000]. These frameworks attach probabilities to logi- The success probability of a ProbLog query can be com-
+cal formulae, most often deﬁnite clauses. In addition, they of- puted as the probability of a boolean monotone DNF (Dis-
+ten impose various constraints on probabilities. For instance, junctive Normal Form) formula of binary random variables.
+in SLPs, clauses deﬁning the same predicate are assumed to Unfortunately, the latter problem is NP-hard [Valiant, 1979].
+be mutually exclusive; PRISM and PHA only attach probabil- Since pD employs a naive approach based on inclusion-
+ities to factual information, and again constraints are imposed exclusion for computing the probabilities of these formulae,
+that essentially exclude the possibility that certain combina- the evaluation of about 10 or more conjuncts is infeasible in
+tions of facts are simultaneously true. These assumptions fa- the implementation of pD according to [Fuhr, 2000]. In con-
+cilitate the computation of the probability of queries and sim- trast, ProbLog’s approximation algorithm is able to deal with
+plify the learning algorithms for such representations. One formulae containing up to 100000 formulae. The ProbLog
+approach, the pD formalism of [Fuhr, 2000] that is intimately solver has been motivated by and employs recent advances in
+related to ProbLog, does not impose such restrictions but its binary decision diagrams (BDDs) for dealing with Boolean
+inference engine has severe limitations. At the same time, functions. At the same time, it employs an approximation al-
+                                                      gorithm for computing the success probability along the lines
+  ∗Recently moved to the Katholieke Universiteit Leuven. of [Poole, 1992]. Using this algorithm we report on exper-
+  †Also at University of Helsinki.                    iments in biological networks that demonstrate the practical
+
+                                                IJCAI-07
+                                                  2468usefulness of the approach. Obviously, it is straightforward to interact with each other if they are all expressed in the same
+transfer ProbLog to other link and network mining domains. tissue. Or, two genes are possibly functionally related if they
+  The paper is structured as follows. We describe a moti- have closely related annotations from Gene Ontology3.
+vating application in Section 2. In Section 3, we introduce
+ProbLog and its semantics. We shall assume some familiar- 3ProbLog
+ity with the Prolog programming language, see for instance
+[Flach, 1994] for an introduction. In Section 4, we show how A ProbLog program consists – as Prolog – of a set of deﬁnite
+ProbLog queries can be represented by monotone DNF for- clauses. However, in ProbLog every clause ci is labeled with
+mulae and then computed with BDDs. Section 5 gives an ap- the probability pi.
+proximation algorithm for ProbLog queries, and experiments
+                                                      Example 1  As an example, consider:
+on real biological data are reported in Section 6. Finally, in
+                                                      1.0: likes(X,Y):- friendof(X,Y).
+Sections 7 and 8, we discuss related work and conclude.
+                                                      0.8: likes(X,Y):- friendof(X,Z), likes(Z,Y).
+                                                      0.5: friendof(john,mary).
+2  Example: ProbLog for biological graphs             0.5: friendof(mary,pedro).
+As a motivating application for ProbLog, consider link min- 0.5: friendof(mary,tom).
+ing in large networks of biological concepts. Enormous 0.5: friendof(pedro,tom).
+amounts of molecular biological data are available from pub-
+lic sources, such as Ensembl1, NCBI Entrez2, and many oth- Even though we shall focus on the “pure” subset of Prolog,
+ers. They contain information about various types of ob- i.e. deﬁnite clause logic, ProbLog also allows one to use
+jects, such as genes, proteins, tissues, organisms, biological most built-in predicates in Prolog by assuming that all clauses
+                                                      deﬁning built-in predicates have label 1.
+processes, and molecular functions. Information about their                  =  {   :   ···     :  }
+known or predicted relationships is also available, e.g., that A ProbLog program T p1 c1,  ,pn   cn  now
+                                                      deﬁnes a probability distribution over logic programs L ⊆
+gene A of organism B codes for protein C, which is expressed = { ··· }
+in tissue D, or that genes E and F are likely to be related since LT c1, ,cn in the following way:
+they co-occur often in scientiﬁc articles. Mining this data                      
+has been identiﬁed as an important and challenging task (see,    P (L|T )=    pi       (1 − pi)       (1)
+e.g., [Perez-Iratxeta et al., 2002]).                                     ci∈L  ci∈LT \L
+  Such a collection of interlinked heterogeneous biological Unlike in Prolog, where one is typically interested in de-
+data can be conveniently seen as a weighted graph or net- termining whether a query succeeds or fails, in ProbLog we
+work of biological concepts, where the weight of an edge are interested in computing the probability that it succeeds.
+corresponds to the probability that the corresponding nodes The success probability P (q|T ) of a query q in a ProbLog
+         [                ]
+are related Sevon et al., 2006 . Probabilities of edges can program T is deﬁned by
+be obtained from methods that predict their existence based
+on, e.g., co-occurrence frequencies or sequence similarities.                
+A ProbLog representation of such a graph could in the most                     1     ∃θ : L |= qθ
+                                                                 P (q|L)=
+simple case consist of probabilistic edge/2 facts though ﬁner                  0     otherwise        (2)
+grained representations using relations such as codes/2, ex-
+                                                              P (q, L|T )=P   (q|L) · P (L|T )        (3)
+presses/2 would also be possible.                                             
+  A typical query that a life scientist may want to ask from     P (q|T )=        P (q, M|T )         (4)
+
+such a database of biological concepts is whether a given gene               M⊆LT
+is connected to a given disease. In a probabilistic graph, the
+importance of the connection can be measured as the prob- In other words, the success probability of query q corre-
+ability that a path exists between the two given nodes, as- sponds to the probability that the query q has a proof, given
+suming that each edge is true with the speciﬁed probability, the distribution over logic programs.
+and that edges are mutually independent [Sevon et al., 2006].
+Such queries are easily expressed in logic by deﬁning the 4 Computing success probabilities
+(non-probabilistic) predicate path(N1,N2) in the usual way.
+                                                                               = {   :   ···   :   }
+Now the query ?- path(’gene 620’, ’disease alzheimer’) Given a ProbLog program T  p1  c1,   ,pn  cn and a
+would look for paths between the given nodes. Since edges query q, the trivial way of computing the success probability
+                                                        ( | )
+were assumed probabilistic, this query has a certain success P q T proceeds by enumerating all possible logic programs
+                                                         ⊆
+probability. This probability, deﬁned below, directly corre- M LT (cf. Equation 4). Clearly this is infeasible for all
+sponds to the probability that a path exists between the nodes, but the tiniest programs.
+known as the two-terminal network reliability problem.  We develop a method involving two components. The ﬁrst
+  Obviously, logic – and ProbLog – can easily be used to is concerned with the computation of the proofs of the query
+express much more complex possible relations. For instance, q in the logical part of the theory T ,thatisinLT . Its result
+two proteins that both interact with a third one possibly also will be a monotone DNF formula. The second component
+                                                      computes the probability of this formula.
+  1www.ensembl.org
+  2www.ncbi.nlm.nih.gov/Entrez/                          3www.geneontology.org
+
+                                                IJCAI-07
+                                                  2469                   ?- l(j,t).                                     proofs of the goal q and cl(b) denotes the set of Boolean vari-
+                 l1       l2                                      ables (clauses) used in the proof b. Thus the problem of com-
+             :- fo(j,t). :- fo(j,A),l(A,t).                       puting the success probability of a ProbLog query can be re-
+                          f1                                      duced to that of computing the probability of a DNF formula,
+                         :- l(m,t).                               which is monotone as all variables appear positively.
+                     l1          l2
+               :- fo(m,t).    :- fo(m,B),l(B,t).                  Example 2  Continuing our running example, and using
+                                                                  l1,l2 as names (and Boolean variables) for the two clauses
+                 f3         f2              f3                                      ···
+                  2   :- l(p,t)               :- l(t,t)           deﬁning likes and f1, ,f4 for friendof,
+                    l1       l2             l1      l2              P (likes(john, tom)|T )
+               :- fo(p,t). :- fo(p,C),l(C,t). :- fo(t,t). :- fo(t,E),l(E,t).
+                                                                      = P ((l1 ∧ l2 ∧ f1 ∧ f2 ∧ f4) ∨ (l1 ∧ l2 ∧ f1 ∧ f3)). (6)
+                 f4          f4
+                  2         :- l(t,t)                             Since P (l1)=1, this is equal to
+                         l1        l2                                       ((  ∧   ∧   ∧   ) ∨ ( ∧   ∧   ))
+                     :- fo(t,t). :- fo(t,D),l(D,t).                        P  l2  f1  f2  f4    l2  f1  f3  .     (7)
+                                                                  4.2  Computing the probability of DNF formulae
+            Figure 1: The SLD-tree for the goal likes(john,tom),using Computing the probability of DNF formulae is an NP-hard
+            obvious abbreviations.                                problem even if all variables are independent, as they are in
+                                                                  our case. There are several algorithms for transforming a dis-
+            4.1  ProbLog queries as DNF formulae                  junction of conjunctions into mutually disjoint conjunctions,
+                                                                  for which the probability is obtained simply as a sum. In
+            To study the set of logic programs where a given query can be
+                                                                  the literature, this is sometimes referred to as the problem of
+            proved we consider the logical part LT of the theory T .We
+                                                                  transforming sum-of-products into sum-of-disjoint-products.
+            now show how this set of logic programs can be represented
+                                                                  One basic approach relies on the inclusion-exclusion princi-
+            by a DNF formula.
+                                                                  ple from set theory. It requires the computation of conjunc-
+              We employ SLD-resolution, from which the execution
+                                                                  tive probabilities of all sets of conjunctions appearing in the
+            mechanism of Prolog is derived. As an example, the SLD-
+                                                                  DNF formula. This is clearly intractable in general. More ad-
+            tree for the query ?- likes(john,tom). is depicted in Figure 1.
+                                                                  vanced techniques expand the conjunctions also with negated
+            The paths from the root to individual leaves of the SLD-tree
+                                                                  subformulae, in order to disjoin each of them from all previ-
+            represent either a successful or a failed proof. From a path
+                                                                  ous ones [Luo and Trivedi, 1998]. However, these algorithms
+            that ends in the empty goal denoted by 2, one can construct
+                                                                  seem to be limited to a few dozens of variables and a few
+            an answer substitution θ making the original goal true. The
+                                                                  hundreds of sums. Motivated by the advances made in the
+            other proofs end at an (underlined) goal that fails.
+                                                                  manipulation and representation of Boolean formulae using
+              The standard SLD-resolution computes the SLD-tree in a
+                                                                  binary decision diagrams (BDDs) since their introduction by
+            top-down fashion. It initializes the root of the SLD-tree with
+                                                                  [Bryant, 1986], we employ this class of techniques.
+            the query ?−l1, ··· ,ln to be proven and then recursively gen-
+                                                                    A  BDD   is an efﬁcient graphical representation of a
+            erates a subgoal of the form ? − b1θ, ··· ,bmθ, l2θ, ··· ,lnθ
+                                                                  Boolean function over a set of variables. A BDD represent-
+            for each clause h : −b1, ··· ,bm in the logic program for
+                                                                  ing the formula in Equation 7 is shown in Figure 2. Given
+            which the most general uniﬁer of h and l1 is the substitution
+                                                                  a ﬁxed variable ordering, a Boolean function f can be repre-
+            θ. See e.g. [Flach, 1994] for a more extensive treatment.
+                                                                  sented as a full Boolean decision tree where each node on the
+              Each succesful proof in the SLD-tree has a set of clauses
+                                                                  ith level is labeled with the ith variable and has two children
+            {p1 : d1, ··· ,pk : dk}⊆T employed in that proof. These
+                                                                  called low and high. Each path from the root to some leaf
+            clauses are necessary for the proof, and the proof is indepen-
+                                                                  stands for one complete variable assignment. If variable x
+            dent of other clauses in T . As a consequence, the probability
+                                                                 is assigned 0 (1), the branch to the low (high) child is taken.
+            that this proof succeeds is pi. (In other words, the sum of
+                                    i                            Each leaf is labeled by the outcome of f given the variable
+            probabilities of programs containing these clauses is pi.)
+                                                          i       assignment represented by the corresponding path. Starting
+              Let us now introduce a Boolean random variable bi for each
+                                                                  from such a tree, one obtains a BDD by merging isomorphic
+            clause pi : ci ∈ T , indicating whether ci is in logic program;
+                                                                  subgraphs and deleting redundant nodes until no further re-
+            i.e., bi has probability pi of being true. The probability of a
+                                                                  duction is possible. A node is redundant iff the subgraphs
+            particular proof involving clauses {p1 : d1, ··· ,pk : dk}⊆
+                                                                  rooted at its children are isomorphic. In Figure 2, dashed
+            T is then the probability of the conjunctive formula b1 ∧···∧
+                                                                  edges indicate 0’s and lead to low children, solid ones indi-
+            bk. Since a goal can have multiple proofs, the probability that
+                                                                  cate 1’s and lead to high children.
+            goal q succeeds equals the probability that the disjunction of
+                                                                    In practice, the chosen variable ordering determines the ex-
+            these conjunctions is true. More formally, this yields:
+                                  ⎛               ⎞               tent to which substructures can be shared in the BDD and thus
+                                                                 has an enormous inﬂuence on the size and complexity of the
+                                  ⎝               ⎠
+                       P (q|T )=P               bi          (5)   resulting BDD. State-of-the-art BDD implementations there-
+
+                                    b∈pr(q) bi∈cl(b)              fore employ heuristics to automatically reorder the variables
+                                                                  during BDD construction, which help to control the combi-
+            where we use the convention that pr(q) denotes the set of natorial explosion.
+
+                                                            IJCAI-07
+                                                              2470                            f4                        juncts d1 ∧···∧dk in d. This corresponds to testing whether
+                                          1           {   ···   }⊆{     ···   }
+                      f2          f3                   d1,   ,dk     b1,   ,bn , a kind of subsumption.
+
+                f1
+                                          0             This observation motivates the use of iterative deepening
+          l2                                          instead of depth-ﬁrst search to compute the SLD-tree and the
+                                                      corresponding DNF formula. In this way, it becomes more
+           0     1     2     3      4                 likely that later proofs will be subsumed by already com-
+                                                      puted ones. Iterative deepening essentially proceeds as depth-
+ Figure 2: A BDD representing the Boolean in equation 7. ﬁrst search but does not expand goals in the SLD-tree whose
+                                                      depth exceeds a threshold. It then iteratively increases this
+                                                      depth-bound. Iterative deepening also avoids getting trapped
+  Given a BDD, it is easy to compute the probability of the into possibly inﬁnite paths in the SLD-tree. Instead of using
+corresponding Boolean function by traversing the BDD from a depth-bound one can also employ a probability bound in
+the root node to a leaf. At each inner node, probabilities from ProbLog, resulting in a best-ﬁrst kind of search.
+both children are calculated recursively and combined after-
+                                                        A ﬁnal observation, leading to approximations of success
+wards as it is done in the following procedure. In practice,
+                                                      probabilities, is that an incomplete SLD-tree can be used
+memorization of intermediate results is used to avoid the re-
+                                                      (during iterative deepening) to derive an upper and a lower
+computation at nodes that are shared between multiple paths.
+                                                      bound on the success probability of the query. This obser-
+Probability(input: BDD node n )                       vation and the corresponding algorithm are related to work
+                                                      by [Poole, 1992] in the context of PHA, but adapted towards
+1  if n is the 1-terminal then return 1
+                                                      ProbLog. For ProbLog, the bounds can be obtained by con-
+2  if n is the 0-terminal then return 0
+                                                      structing two DNF formulae from the incomplete SLD-tree.
+3leth  and l be the high and low children of n
+                                                      The ﬁrst DNF formula d1 encodes the successful proofs al-
+4  prob(h):=call Probability(h)
+                                                      ready occurring in the tree. The second DNF formula d2 en-
+5  prob(l):=call Probability(l)
+                                                      codes the successful proofs already occurring in the tree as
+6returnpn  · prob(h)+(1−  pn) · prob(l)
+                                                      well as the proofs that have been cut off. We then have that
+  As we shall see in Section 6, the resulting algorithm can be
+                                                                      ( ) ≤   ( | ) ≤  (  )
+applied to ProbLog programs containing hundreds of clauses          P d1    P q T    P  d2 .          (8)
+(Boolean variables in the BDD) and tens of thousands of
+                                                                                         |=  |=
+proofs (products of variables). In our implementation of This directly follows from the fact that d1 d d2 where d
+ProbLog, we store the conjunctions corresponding to proofs is the Boolean DNF formula corresponding to the full SLD-
+in a preﬁx-tree for reasons of efﬁciency.             tree of the query.
+  One interesting further use of the already constructed BDD
+for a given query q is that it becomes very efﬁcient to answer Example 3 Consider the SLD-tree in Figure 1 only till depth
+                                                                     1                                 2
+conditional probability questions of the form P (q|T,b1∧···∧ 4. In this case, d encodes the left success path while d
+            
+bk) where the bis are possibly negated Booleans representing additionally encodes the paths up to likes(pedro,tom) and
+the truth-values of clauses. To compute the answer, one only likes(tom,tom),i.e.
+needs to reset the probabilities of the corresponding nodes to
+                                                          =(∧        ∧   ∧   )
+1 or 0, and call the procedure Probability.           d1       l1  l2 f1   f3
+                                                      d2  =(l1   ∧ l2 ∧ f1 ∧ f3) ∨ (l2 ∧ f1 ∧ f2) ∨ (l2 ∧ f1 ∧ f3)
+5  An approximation algorithm
+                                                      The formula for the full SLD-tree is given in equation 6.
+In this section we introduce an algorithm for approximating
+the success probability of queries in ProbLog. This is useful Better approximations will be obtained by stretching the
+for large ProbLog programs, since the size of the monotone bound on the depth of SLD-trees. The following algorithm
+DNF formula can explode.                              approximates the success probability of a ProbLog query q
+  A ﬁrst obvious observation leading towards a faster algo- to .
+rithm is that – as in Example 2 – one can remove all Boolean
+variables that correspond to clauses with probability 1. Approximate(query q; program T ; bound )
+  A second and more important observation allows one to
+eliminate complete proofs from the monotone DNF formula. 1 depthbound := 1;
+                                                             :=
+During the computation of the SLD-tree, which proceeds 2  d1    false
+depth-ﬁrst, from left to right in Prolog, we keep track of 3 repeat
+                                                                    :=
+a DNF formula d that represents the DNF of the already 4         d2   d1
+computed proofs. If further proofs are encountered whose 5       call Iterate(q, true, depthbound, d1, d2)
+                                                                    :=
+conjunction b1 ∧ ... ∧ bn is logically entailed by d,i.e. 6      p1   call Probability(d1)
+                                                                    :=
+d |= b1 ∧ ...∧ bn, then these proofs can be removed from 7       p2   call Probability(d2)
+further consideration. Because we work with monotone DNF 8       increment depthbound
+                                                                   −    ≤
+formulae, this condition can be checked efﬁciently by veri- 9 until p2 p1 
+fying that b1 ∧ ... ∧ bn is not entailed by any of the con- 10 return p1, p2
+
+                                                IJCAI-07
+                                                  2471Iterate(query q; conjunction c; depthbound d; DNF d1, d2) cases, results are quite accurate already after levels 6–8. The
+ 1  if q is empty and d1 |= c                        maximal level used over all Gi was 14 clauses, correspond-
+ 2    then d1 := d1 ∨ c                               ing to at most eleven search levels. Running times for one
+ 3         d2 := d2 ∨ c                               subgraph typically range from seconds for small graphs up to
+ 4  elseif d<0 and d1 |= c                           four hours for the largest successful runs. Figure 3(c) shows
+ 5    then d2 := d2 ∨ c                               running times for the 10 random graphs of 1400 edges on a
+ 6    else let q be l, q1, ··· ,qn                    3.2 GHz machine. In our tests, BDD construction typically
+ 7         select rule h : −b1, ··· ,bm               became infeasible if the number of conjunctions used for the
+ 8         such that mgu(h, l)=θ and the rule is      upper bound exceeded 100000. In all those cases, the width
+ 9         represented by Boolean variable b          of the last calculated probability interval was already smaller
+10         d := d − 1                                 than 0.03. Together all these results indicate that the approach
+11         call Iterate(b1θ, ··· ,bmθ, q1θ, ··· ,qnθ;c ∧ b; d) can give good bounds for quite large problems, which an-
+                                                      swers question Q positively.
+Theorem 1 Upon     termination,    the    procedure     A partial explanation of the good scalability is given in Fig-
+Approximate(q, T , ) returns values p1 and p2 such   ure 3(d). It shows the total number of proofs as well as the
+that p1 ≤ P (q|T ) ≤ p2 and p2 − p1 ≤ .              numbers of proofs needed for the bounds ( =0.01)fortwo
+The algorithm may not always terminate for all inputs, but illustrative random sequences of subgraphs. The numbers are
+this is hardly avoidable given that Prolog does not always ter- given as a function of the maximal size of the BDD, used
+minate (even when using iterative deepening).         here as an approximation of the problem complexity. As can
+                                                      be seen, the number of proofs explodes badly, while the num-
+Example 4 Consider calling Approximate with the query bers of proofs needed for the bounds scale up much nicer.
+? − p; the program 1.0 p : −p; and the bound  =0.5.
+The procedure will never terminate (because the SLD-tree is
+inﬁnite and repetetive).                              7   Related Work
+                                                      The ProbLog semantics is not really new, it closely corre-
+6  Experiments                                        sponds to the semantics proposed by [Dantsin, 1991] and of
+                                                      pD [Fuhr, 2000] even though there are some subtle differ-
+We implemented the approximation algorithm in Prolog
+                                                      ences. Whereas ProbLog and the approach by Dantsin em-
+(Yap-5.1.0) and used CUDD4 for BDD operations. Motivated
+                                                      ploy Prolog, pD focusses on Datalog and hence, does not al-
+by the fact that even for simple connection queries, the num-
+                                                      low for functors. Furthermore, the work on pD comes more
+ber of proofs quickly explodes in our biological networks, we
+                                                      from a database perspective and has also devoted a lot of at-
+primarily try to answer the following question:
+                                                      tention to negation. Whereas Dantsin does not report on an
+Q How well does our approximation algorithm scale?    implementation, pD has been implemented in the HySpirit
+  As our test graph G, we used a real biological graph around system, which computes success probabilities in two steps.
+four random Alzheimer genes (HGNC ids 620, 582, 983,  The ﬁrst step employs magic sets to compute the answers to
+and 8744), with 11530 edges and 5220 nodes. The graph the Datalog component of the query, and in a second step em-
+was extracted from NCBI and some other databases by tak- ploys the inclusion-exclusion principle to compute the prob-
+ing the union of subgraphs of radius 3 from the four genes ability of the resulting DNF expressions. This second step
+and producing weights as described in [Sevon et al., 2006]. makes the approach severely limited. Indeed, [Fuhr, 2000]
+As a test case, we focused on evaluating the connection be- states: “Practical experimentation with Hyspirit has shown
+tween two of the genes (620, 983). For scaling experiments, that the evaluation of about 10 or more conjuncts is not fea-
+we randomly subsampled edges from G to obtain subgraphs sible.” In contrast, using ProbLog’s approximation algorithm
+G1 ⊂  G2 ⊂ ... of sizes 200, 400, ..., 5000 edges. Each Gi one can deal with up to 100000 conjuncts as shown in the ex-
+contains the two genes and consists of one connected compo- periments. This is also needed in order to cope with realistic
+nent. Average degree of nodes ranges in Gis approximately applications in link mining.
+from 2 to 3. Subsampling was repeated 10 times.         Second, the ProbLog semantics extends also the distribu-
+  The ProbLog approximation algorithm was then run on the tional semantics by [Sato and Kameya, 2001] and the pro-
+data sets with the goal of obtaining  =0.01 approximations. posal by [Dantsin, 1991] in that it also allows for attaching
+As the minimal length of paths in between those two nodes is probabilities to clauses, not just to ground facts. Although
+4 in the original graph, we initialized the iterative deepening this ability has to be exercised with caution (as the truth of
+threshold (number of used clauses) to 4.              two clauses, or non-ground facts, need not be independent,
+  In this setting, the connection query could be solved to e.g. when one clause subsumes the other one), it does provide
+ =0.01 for graphs with up to 1400 to 4600 edges, depending new abilities, as illustrated in the likes/2 example. More im-
+on the random sample. As an illustrative example, Figure 3(a) portantly, systems such as PRISM [Sato and Kameya, 2001]
+shows the convergence of the bounds for one graph with 1800 and also PHA [Poole, 1993], avoid the combinatorial prob-
+edges. Figure 3(b) shows the average width of the probability lem of the second step by imposing various constraints on the
+interval for the 10 random subgraphs of 1400 edges. In most allowed programs which basically guarantee that the formula
+                                                      describing all proofs of a query is a sum-of-disjoint-products.
+  4http://vlsi.colorado.edu/˜fabio/CUDD               Whereas such conditions may be natural for some types of
+
+                                                IJCAI-07
+                                                  2472

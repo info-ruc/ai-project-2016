@@ -1,0 +1,368 @@
+                   General Game Learning using Knowledge Transfer
+
+                                 Bikramjit Banerjee and Peter Stone
+        Department of Computer Sciences, The University of Texas at Austin; Austin, TX 78712
+                                   {banerjee, pstone}@cs.utexas.edu
+
+
+                    Abstract                          Oftentimes, speciﬁc skills required for target tasks are ac-
+    We present a reinforcement learning game player   quired from specially designed source tasks that are very sim-
+                                                                               [                    ]
+    that can interact with a General Game Playing sys- ilar to the targets themselves Asgharbeygi et al., 2006 .We
+    tem and transfer knowledge learned in one game    consider the more challenging scenario where skills are more
+    to expedite learning in many other games. We      general, and source target pairs bear little resemblance to one
+    use the technique of value-function transfer where another. Speciﬁcally, we consider the genre of 2-player, al-
+    general features are extracted from the state space ternate move, complete information games and require that
+    of a previous game and matched with the com-      knowledge acquired from any such game be transferrable to
+                                                      any other game in the genre.
+    pletely different state space of a new game. To                      λ
+    capture the underlying similarity of vastly disparate We develop a TD( ) based reinforcement learner that
+    state spaces arising from different games, we use automatically discovers structures in the game-tree, that it
+    a game-tree lookahead structure for features. We  uses as features, and acquires values of these features from
+    show that such feature-based value function trans- the learned value-function space. It then uses these values
+    fer learns superior policies faster than a reinforce- learned in one game to initialize parts of the value-function
+    ment learning agent that does not use knowledge   spaces in other games in the genre. The intention is to reuse
+    transfer. Furthermore, knowledge transfer using   portions of the value-function space that are independent of
+    lookahead features can capture opponent-speciﬁc   the game in our chosen genre in order to learn faster in new
+    value-functions, i.e. can exploit an opponent’s   games. This is accomplished by focusing exploration in the
+    weaknesses to learn faster than a reinforcement   complementary regions of the value function space where
+    learner that uses lookahead with minimax (pes-    foresight is not informative in a game-independent way.
+    simistic) search against the same opponent.         We use game-tree lookahead for generating features. We
+                                                      show that features acquired in this way against some oppo-
+                                                      nent are also indicative of how to play against that opponent,
+1  Introduction                                       even in new games. We assume that the Transfer Learner can
+The General Game Playing (GGP) domain, introduced by  identify whether it had played against a given opponent be-
+Pell [1993], allows description of a wide range of games in fore (in the same or a different game) and if so, retrieve the
+a uniform language, called the Game Description Language feature values learned against that opponent for reuse. How-
+(GDL) [Genesereth and Love, 2005]. The challenge is to de- ever, a simple lookahead search player would additionally
+velop a player that can compete effectively in arbitrary games need to know (or learn) the opponent’s strategy to select the
+presented in the GDL format. In this paper we focus on the most effective heuristic. Without the right heuristic, we show
+problem of building a learning agent that can use knowledge that the lookahead search player will not perform as well as
+gained from previous games to learn faster in new games in the Transfer Learner against a given opponent.
+this framework.
+  Knowledge transfer has received signiﬁcant attention re- 2 Reinforcement Learning
+cently in machine learning research [Asgharbeygi et al.,
+                                                      Reinforcement Learning (RL) [Sutton and Barto, 1998] is a
+2006; Taylor and Stone, 2005; Ferns et al., 2006]. Instead
+                                                      machine learning paradigm that enables an agent to make se-
+of developing learning systems dedicated to individual appli-
+                                                      quential decisions in a Markovian environment, the agent’s
+cations, each beginning from scratch, inductve bias is trans-
+                                                      goal being to learn a decision function that optimizes its
+ferred from previous learning tasks (sources) to new, but re-
+                                                      future rewards. Learning techniques emanating from RL
+lated, learning tasks (targets) in order to
+                                                      have been successfully applied to challenging scenarios, such
+  •
+    offset initial performance in the target tasks, compared as game playing (particularly the champion backgammon
+    to learning from scratch, and/or                  player, TD-Gammon [Tesauro, 1994]) involving delayed re-
+  • achieve superior performance faster than learning from wards (rewards only on termination leading to the credit as-
+    scratch.                                          signment problem of which actions were good/bad?). RL
+
+                                                IJCAI-07
+                                                   672problems are usually modeled as Markov Decision Processes 2.2 The GGP Learner
+or MDPs [Sutton and Barto, 1998].AnMDPisgivenbythe    We have developed a complete GGP learner that caters to
+    {S, A, R, T }     S
+tuple          ,where   is the set of environmental states the GGP protocol [GGP, ; Genesereth and Love, 2005].The
+                                   A
+that an agent can be in at any given time, is the set of ac- protocol deﬁnes a match as one instance of a game played
+                               R   S × A →
+tions it can choose from at any state, :      is the  from the start state to a terminal state, between two players
+                  R  s, a
+reward function, i.e., ( ) speciﬁes the reward from the that connect to the game manager (henceforth just the man-
+                                             a ∈ A
+environment that the agent gets for executing action  ager) over a network connection. Each match starts with both
+       s ∈ S  T   S × A × S  →  ,
+in state    ;   :               [0 1] is the state tran- players receiving a GDL ﬁle specifying the description of the
+sition probability function specifying the probability of the game they are going to play and their respective roles in the
+next state in the Markov chain consequential to the agent’s game 1 The game manager then waits for a predeﬁned amount
+selection of an action in a state. The agent’s goal is to learn a of time (Startclock) when the players are allowed to analyze
+                            π  S → A
+policy (action decision function) :   that maximizes  the game. It is possible that both players signal that they are
+                                           s
+the sum of discounted future rewards from any state , ready before the end of this (Startclock) phase, in which case
+ π                                2             the manager terminates this phase and proceeds with the next.
+V  (s)=ET  [R(s, π(s))+γR(s ,π(s ))+γ R(s ,π(s ))+...]
+                                                        In the next phase the manager asks the ﬁrst mover for its
+where s, s,s,...are samplings from the distribution T fol- move, and waits for another while (Playclock). If the move
+lowing the Markov chain with policy π.                is not submitted by this time, the manager selects a move at
+  A common method for learning the value-function, V as random on behalf of that player and moves to the next player,
+deﬁned above, through online interactions with the environ- and this continues. If a move is submitted before the end of a
+ment, is to learn an action-value function Q given by Playclock, the manager moves to the next player early. When
+                           
+                                       π            the manager senses a terminal state, it returns the appropriate
+   Q(s, a)=R(s, a)+maxγ       T (s, a, s )V (s ) (1)
+                      π                               rewards to the players, and terminates the match. In this paper
+                           s                         we consider games where every player unambiguously knows
+  Q can be learned by online dynamic programming using the current state.
+the following update rule                               To measure learning performance, our learner plays a se-
+                                                     ries of matches of the same game against a given opponent,
+  Q(s, a) ← Q(s, a)+α[rsa +maxγQ(s   ,b) − Q(s, a)]
+                             b                        and notes the cumulative average of rewards that it gets from
+  while playing action a =argmaxb Q(s, b) in any state s, the manager. Since the computations for transfer learning
+where α ∈ (0, 1] is the learning rate, rsa is the actual envi- are often expensive, we perform these and the Q-updates for
+                    
+ronmental reward and s ∼ T (s, a, .) is the actual next state all states visited in the course of a match, during the Start-
+resulting from the agent’s choice of action a in state s.The clock of the next match. We keep the sequence of afterstates,
+Q-values are guaranteed to converge to those in Equation 1, σ1,σ2,...,σk (σk being terminal), in memory and use the
+in the limit of inﬁnite exploration of each (s, a), ensured by a fast TD(λ) [Sutton and Barto, 1998] update
+suitable exploration scheme [Sutton and Barto, 1998].                   t−p
+                                                            ΔQ(σp)=αλ      [rt+1 + γQ(σt+1) − Q(σt)]  (2)
+2.1  RL in GGP                                                  t     ,...,k    p     ,...,t   λ  ∈   ,
+                                                      at any time =1        ,for  =1        and     (0. 1],
+In a General Game Playing system, the game manager acts where only rk+1 is potentially non-zero, with Q(σk+1) =0.
+as the environment, and a learner needs to interact with it in Such batch update of Q-values is effectively no different from
+almost the same way as in an MDP as outlined above. Im- online updates since a player cannot face the same afterstate
+portant differences are (1) the game manager returns rewards more than once in a match, unless the game allows noop as a
+only at the end of a game (100 for a win, 50 for a draw, and move. By relegating the bulk of our computation to the Start-
+0 for a loss) with no intermediate rewards, (2) the agent’s ac- clock period, our transfer learner makes rapid moves (involv-
+tion is followed by the opponent’s action which decides the ing simple Q-value lookup) which is useful in large games
+next state that the agent faces. If the opponent chooses its ac- (such as chess derivatrives) where move-time can otherwise
+tion following a stationary (but not necessarily deterministic) exceed the Playclock some times.
+policy, then the learner faces a stationary MDP as deﬁned be-
+fore. If, however, the opponent is adaptive, then the distribu- 3 Features in Value Space
+tion T is effectively non-stationary and the above technique
+                                                      In RL, a feature usually means a property of some states in
+for value function learning is no longer guaranteed to con- S
+verge. In this paper, we focus on stationary (non-adaptive) . For instance, the GPS location is a feature for a mobile
+                                                      robot. If a set of features can be found such that the union
+opponents.                                                                      S
+  Let σ ≡ (s, a) ∈ Σ be the state resulting from the learner’s of their joint values partitions , then each state can be de-
+                a       s                             scribed uniquely in terms of those features. In this work we
+execution of action in state ; this is actually the state that its                                S
+opponent faces for decision making. The state σ, also called use game-speciﬁc features (or simply the state space, )inor-
+an afterstate, can be reached from many different states of der to enable detailed learning within each game, but for the
+                                             | | <
+the learner as a result of different actions. So usually Σ 1In general, the game may not be one that the agent has ever seen
+|S × A|, and it is popular for game playing systems to learn before. In this paper, we consider smaller variants of four popular
+values of afterstates, instead of state-actions. Accordingly, games, Tic-tac-toe, Othello, Connect-4 and Go, but that’s mainly for
+we learn Q(σ).                                        ease of experimentation and presentation.
+
+                                                IJCAI-07
+                                                   673purpose of transfer, we constrain the system to identify game-
+independent features (the feature space) that are nonetheless
+correlated with the value function. These features describe (a)(b)(c)(d)
+the transition structure under an afterstate in the game-tree,
+up to a certain depth, in a game-independent way. For our
+
+purpose, a feature is a game tree template such that if the (e)(f)(g)(h)
+lookahead from a state matches the template, that feature is
+said to be active in that state. A feature is generated/matched
+by starting at the afterstate generated by one move of the
+learner from its current position (opponent’s state shown as a (i)(j)(k)(l)
+red square at the root of each subtree in Figure 1) and expand-
+ing the game tree fully for up to two further moves (one move Figure 2: The 12 features discovered by the learner in Tic-
+of the opponent, followed by one move of itself). The learner tac-toe game. Empty circle/square are terminal states, with
+then classiﬁes each node in this subtree as win, loss, draw or square (circle) meaning a win (loss) for the learner. A crossed
+non-terminal. Both the tree expansion and the determination square is a draw. To be considered a feature there must be at
+of these node classes is enabled by a game simulator (using a least one terminal node at some level.
+Prolog based theorem prover) that the learner generates from
+                                                      is a terminal and consequently, can identify winning moves
+the given game description. Once all nodes in the subtree are
+                                                      1-step ahead.
+classiﬁed, siblings of the same class in the lowermost level
+                                                        Once the training runs are complete in the source game (in
+are coalesced. After this step, all siblings in the next higher
+                                                      our case Tic-tac-toe), we extract feature information from the
+level (i.e. the mid level in Figure 1) that have the same subtree
+                                                      acquired value-function space. This involves matching each
+structure under them are coalesced. The resulting structure is
+                                                      afterstate from the subset of Σ that was actually visited dur-
+a feature that does not incorporate any game-speciﬁc infor-
+                                                      ing source learning, against each of these discovered features
+mation, such as the number of moves available to any player
+                                                      using the simulator for lookahead. If an afterstate σ matches
+in any state, or the semantics of a state. Figure 1 illustrates
+                                                      a feature, we note the value Q(σ) against that feature. The
+this process. Extending this scheme to arbitrary number of
+                                                      value of a feature Fi is then calculated as a weighted aver-
+lookahead levels is straightforward.
+                                                      age val(Fi)=  avgw{Q(σ)|σ matches Fi},wherew  is the
+                                                      weight associated with a σ, specifying the number of times
+                                                      σ was visited during the source game experience. Thus, the
+                                 Originalsubtree
+                                                      abstract features in game-tree space are associated with their
+                                                      values in the source task under the assumption that they will
+                                                      have similar values in the target task.
+                                                        After the feature values have been computed, we use them
+                                                                Q  σ                        σ
+                                 Lowestlevelcoalescing to initialize ( ) in the target game for each that matches
+                                 (intermediatestep)   Fi, i.e., Qinit(σ)=val(Fi)s.t. σ matches Fi, once for each
+                                                      new σ encountered in the target game. During the Startclock
+                                                      of a match, we look at the afterstates visited during the pre-
+                                                      ceding match. If an afterstate has not been visited in any pre-
+                                                      vious match, it is matched against our set of features discov-
+                                                      ered in the source game, and initialized as above. If there is
+                                 Midlevelcoalescing                                       2            λ
+                                 (finalstep)          no match, we initialize to the default value .NexttheTD( )
+                                 producingafeature    updates are done according to Equation 2.
+                                                        The idea behind this transfer mechanism is to save the cost
+                                                      of a few value-backup steps near terminal states (i.e., when
+                                                      the states gain predictive potential) and thus guide exploration
+Figure 1: Illustration of an actual subtree (top) rooted at a to focus more in the regions where foresight is not usually
+given afterstate, matching/generating a feature (bottom). Cir- available. In this way, our transfer learner behaves more like
+cular (green) nodes represent the learner’s states, solid (red) human learners.
+square) nodes are the opponent’s states (or learner’s after-
+states). Empty squares stand for a win for the learner. Characteristics of Feature Transfer
+                                                      The features do not depend on the exact game, as long as it
+  Figure 2 shows the 12 features discovered by our Trans- is within the genre of chosen games. Speciﬁcally, the size
+fer Learner in the Tic-tac-toe game. Note that although the of the board, the number of available actions at each level,
+features are all distinct, the associated semantics can often be the semantics of states or actions, and win/loss criteria have
+overlapping; for instance, Figure 2 (j),(k) and (l) are really been effectively abstracted away by exploiting the GDL. Con-
+variants of the concept “fork opponent”, since the learner’s sider the diverse natures of games in these aspects: in Tic-
+move results in a state for the opponent where no matter what
+move it makes, the learner can win in its next move. The 2The default initialization value δ is the average of the win and
+Transfer Learner also needs to check if the starting afterstate loss rewards, in this case 50.
+
+                                                IJCAI-07
+                                                   674tac-toe the number of available moves steadily diminishes, in 4 Experimental Results
+Connect-4 it diminishes at intervals, while in Othello it may In this section, we report empirical results that isolate the im-
+actually increase. The winning criteria are widely varying in pact of our general game-tree-feature-based transfer scheme
+these games; they are similar in Tic-tac-toe and Connect-4 in a variety of games. We will consider our method to be
+but completely different in Go or Othello. A key motivation a success if it can lead to quicker and/or better asymptotic
+behind this research is to develop simple techniques that can learning in the new games when compared to learning the
+transfer knowledge effectively from one game to a markedly new games from scratch.
+different game which is why we have focused on such a high We extracted the feature values from the Tic-tac-toe game,
+level of abstraction.                                 the source, and tested the Transfer Learner on 3 different tar-
+  The distinct leaf-types used in the features (Figure 2) de- get games: Connect3, CaptureGo and Othello. Connect-3 is
+pend on the possible outcomes of the games from which they a variant of Connect-4 where the board size is 5 × 5 and the
+are acquired. In this paper, we have assumed all games have goal is to make a line of 3 instead of 4 pieces. CaptureGo is a
+3 possible outcomes, viz., win, loss or draw, identiﬁed by variant of Go (or GoMoku) where the board size is 3 × 3 and
+distinct rewards 100, 50 and 0 respectively. If some game of- a match terminates if a player captures an opponent’s piece
+fers a different set of rewards (e.g., {−10, 0, 10, 20, 50})the following the usual rules of Go. If no player has a move but
+Transfer Learner can create a distinct leaf-type for each of there has been no capture yet, then the player with larger terri-
+these outcomes to acquire features from this game. But if it tory wins, just as in the regular version of Go. Othello follows
+is to apply features from previous games to this game, then the same rules as the regular game but is played on a smaller
+it needs to be provided with some equivalence relation that board of size 4 × 4.
+maps these rewards to previous reward sets, e.g., that -10 and For all games, we compared the learning speeds of a base-
+0 in this game corresponds to 0 in the previous games, and so line learner to our Transfer Learner using feature knowledge
+on.                                                   acquired from Tic-tac-toe. The baseline learner uses after-
+  It is worthwhile to note that in several games such as Tic- state TD-learning as in Equation 2 with a value function ini-
+tac-toe and Connect-4, a terminal move by any player can tialized uniformly to the default value. For comparison pur-
+cause its win or a draw, but never a loss for that player. How- poses and to isolate the effect of knowledge transfer from
+ever, in other games such as Go or Othello, a player’s move lookahead search, we also compare with a lookahead learner
+can cause its immediate defeat. The features discovered from that uses the same depth of lookahead as the Transfer Learner,
+Tic-tac-toe naturally cannot capture this aspect; as Figure 2 with minimax search to estimate the value of a new afterstate.
+shows, there are no “win” nodes in the mid-level, or “loss” In this search, non-terminal states at the leaf level are eval-
+nodes in the lowest level. Our Transfer Learner can treat any uated to the default value, while terminals at any level are
+of these games as source, and consequently it can capture a evaluated to their actual values. The value estimate for an
+variety of possible types of features. In fact it can treat ev- afterstate, thus reached, is used to initialize its Q-value for
+ery game as both the application domain for previously ac- TD-learning using the same method as the other 2 learners
+quired features, and at the end, as a source for new features (i.e., Equation 2).
+to carry forward to future games. In this paper, however, we We use three different types of opponents against which
+focus on speciﬁc source-target pairs, and learn against spe- our 3 learners are made to compete in the GGP framework.
+ciﬁc opponents to study the effects of transfer in controlled These are
+experiments.                                          -greedy This opponent uses a small ﬁxed probability,  for
+  One concern when using complex feature spaces for trans- exploration, and otherwise uses the following policy. It
+fer is that the time overhead for computing transfer knowl- looks ahead one full turn and seeks terminal nodes. It
+edge should not overwhelm the learning time. By having a  takes winning moves, avoids losing moves, but other-
+small number of features and limiting the depth of lookahead, wise plays randomly. This is similar to a shortsighted
+we are ensuring a low computational complexity for trans- novice player.
+fer knowledge. Moreover, since a single source game serves
+                                                      Random   This opponent picks actions using a uniform prob-
+many target games, the time spent in acquiring the features is
+                                                          ability distribution over the set of available actions at any
+amortized, so we do not consider this as an added complexity
+                                                          turn.
+to target learning. The limited lookahead depth also serves
+to keep the features somewhat indicative of the outcome of Weak This opponent is the opposite of an -greedy player. It
+the subsequent moves. Note however, this indication is not explores in the same manner, but picks worst moves at
+always unambiguous, e.g., the outcome of Figure 2(g) can- decisive turns. In effect, this opponent plays randomly
+not be speciﬁed without knowing the opponent’s disposition. most of the time, but in the vicinity of a terminal state, it
+This ambiguity justiﬁes transfer learning; if merely looking makes particularly poor decisions.
+ahead would give a concrete idea of the ultimate outcome of The purpose of considering a weak opponent is to study
+playing a in state s irrespective of the opponent’s style of how fast the different learners can learn to exploit certain
+play, then we could well have initialized the corresponding weaknesses in an opponent. Table 1 shows the feature val-
+Q-value in the target game to the known value of that out- ues for the 12 features of Figure 2, computed by the Trans-
+come, perhaps by minimax search. In the experiments, we fer Learner in the Tic-tac-toe game when competing against
+actually show the transfer learner learning faster than RL with each of these 3 types of opponents. Note that the minimax-
+minimax-lookahead, against some opponents.            lookahead learner would initialize the afterstates that would
+
+                                                IJCAI-07
+                                                   675                                                                   99.6
+Table 1: Values of the features (from Figure 2) acquired in
+Tic-tac-toe game against various opponents.                        99.4
+
+                                                                   99.2
+      Feature ID
+      from Figure 2 -greedy  Random   Weak                         99
+      (a)           41.08     46.31    51.62
+                                                                   98.8
+      (b)           43.75     48.81    57.55
+      (c)           54.36     53.75    54.63                       98.6        withtransfer
+                                                                             withouttransfer
+      (d)           61.5      60.11    59.63                                 withlookahead
+                                                                   98.4
+      (e)           43.03     50.41    59.62                    Meancumulativeaverageperformanceover10runs
+
+      (f)           38        43.5     40.77                       98.2
+                                                                      0      1000    2000    3000
+      (g)           40.18     49.43    58.16                                  Matchesplayed
+      (h)           50        50       50
+      (i)           44.64     42.98    48.93          Figure 4: Learning curves for transfer learner, baseline
+      (j)           57.13     58.9     57.48          learner, and RL with lookahead only, in 4 × 4 Othello, all
+      (k)           58.42     54.84    58.28          against -greedy opponent
+      (l)           63.36     54.26    57.45
+                                                                   100
+
+
+have matched these features to the values of 0, 50 or 100.         99.5
+In other words the initializations of the minimax-lookahead
+
+learner are more accurate (since these are the true values for      99
+those states) than the Transfer Learner, assuming the oppo-
+nent is perfectly rational. For all experiments, the learners’     98.5
+parameter values were α =0.3, γ =1.0 (since the task is
+episodic), λ =0.7, and a ﬁxed exploration probability of            98
+ =0.01.
+                                                                   97.5        withtransfer
+
+
+                                                                Meancumulativeaverageperformanceover10runs withouttransfer
+                                                                             withlookahead
+             100
+                                                                    97
+            99.8                                                      0      1000    2000    3000
+                                                                              Matchesplayed
+            99.6
+
+            99.4                                      Figure 5: Learning curves for transfer learner, baseline
+                                                                                           ×
+            99.2                                      learner, and RL with lookahead only, in 3 3 CaptureGo,
+                                                      all against -greedy opponent
+             99
+
+            98.8                                      learners to converge in the Othello game since the terminal
+
+            98.6         withtransfer                 states in this game are not as shallow as in the other games.
+                      withouttransfer
+                       withlookahead
+         Meancumulativeaverageperformanceover10runs 98.4 In order to verify the learning rates against a weak or a ran-
+                                                      dom opponent, we pitted the Transfer Learner and the looka-
+            98.2
+                0      1000   2000    3000            head learner against each of these opponents, in the Othello
+                       Matchesplayed                  game. This game is challenging to both learners because of
+                                                      the depth of the terminal states. The Transfer Learner used the
+Figure 3: Learning curves for transfer learner, baseline
+                                                      feature values learned against each opponent for the matches
+learner, and RL with lookahead only, in 5 × 5 Connect3, all
+                                                      against that opponent. The learning curves are shown in Fig-
+against -greedy opponent
+                                                      ures 6 and 7. Since the opponents are quite unlike what
+  Figures 3, 4 and 5 show the learning curves for the 3 learn- the minimax-lookahead learner assumes, its learning rate is
+ers against the -greedy opponent. The Transfer Learner uses poorer than the Transfer Learner. The Transfer Learner not
+the feature values learned against this player in Tic-tac-toe only learns the values of features, but also learns them in the
+(Table 1). The cumulative average reward from last 2700 of context of an opponent, and can reuse them whenever it is pit-
+3000 matches are averaged over 10 runs and plotted against ted against that opponent in the future. Note that the looka-
+the number of matches in these ﬁgures. Although the Trans- head learner could have used a maxmax heuristic instead of
+fer Learner outperforms the baseline learner, we see that the minimax to learn much faster against the weak opponent, and
+lookahead learner is the ultimate winner since its assumption similarly an avgmax heuristic against the random opponent.
+of a rational opponent is realized in this case, and it uses su- Because of the random policy of this opponent, the learners
+perior initializations compared to the Transfer Learner. Also typically have to deal with enormous sizes of afterstate space
+since all the learners use fast TD methods and afterstate learn- and hence learn much slower (Figure 7) than against other
+ing, their learning rates are high, typically crossing 95% per- opponents in the previous experiments.
+formance level in less than 100 matches. Another thing to These experiments demonstrate that knowledge transfer
+note from Figure 4 is that 3000 matches is insufﬁcient for the would be a beneﬁcial addition to a baseline learner, but that if
+
+                                                IJCAI-07
+                                                   676

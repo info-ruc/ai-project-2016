@@ -1,0 +1,393 @@
+ Stationary Deterministic Policies for Constrained MDPs with Multiple Rewards,
+                                  Costs, and Discount Factors
+                                 Dmitri Dolgov and Edmund Durfee
+                      Department of Electrical Engineering and Computer Science
+                                         University of Michigan
+                                         Ann Arbor, MI 48109
+                                     {ddolgov, durfee}@umich.edu
+
+                    Abstract                            However, there are numerous domains where the classical
+                                                      MDP model proves inadequate, because it can be very dif-
+    We consider the problem of policy optimization    ﬁcult to fold all the relevant feedback from the environment
+    for a resource-limited agent with multiple time-  (i.e., rewards the agent receives and costs it incurs) into a sin-
+    dependent objectives, represented as an MDP with  gle scalar reward function. In particular, the agent’s actions,
+    multiple discount factors in the objective function in addition to producing rewards, might also incur costs that
+    and constraints. We show that limiting search to sta- might be measured very differently from the rewards, making
+    tionary deterministic policies, coupled with a novel it hard or impossible to express both on the same scale. For
+    problem reduction to mixed integer programming,   example, a natural problem for a delivery agent is to maxi-
+    yields an algorithm for ﬁnding such policies that is mize aggregate reward for making deliveries, subject to con-
+    computationally feasible, where no such algorithm straints on the total time spent en route. Problems naturally
+    has heretofore been identiﬁed. In the simpler case modeled as constrained MDPs also often arise in other do-
+    where the constrained MDP has a single discount   mains: for example, in telecommunication applications (e.g.,
+    factor, our technique provides a new way for ﬁnd- [Lazar, 1983]), where it is desirable to maximize throughput
+    ing an optimal deterministic policy, where previous subject to delay constraints.
+    methods could only ﬁnd randomized policies. We
+    analyze the properties of our approach and describe Another situation where the classical MDP model is not
+    implementation results.                           expressive enough is where an agent receives multiple re-
+                                                      ward streams and incurs multiple costs, each with a different
+                                                      discount factor. For example, the delivery agent could face
+1  Introduction                                       a rush-hour situation where the rewards for making deliver-
+Markov decision processes [Bellman, 1957] provide a sim- ies decrease as a function of time (same delivery action pro-
+ple and elegant framework for constructing optimal policies duces lower reward if it is executed at a later time), while
+for agents in stochastic environments. The classical MDP for- the trafﬁc conditions improve with time (same delivery ac-
+mulations usually maximize a measure of the aggregate re- tion can be executed faster at a later time). If the rewards de-
+ward received by the agent. For instance, in widely-used dis- crease and trafﬁc conditions improve on different time scales,
+counted MDPs, the objective is to maximize the expected the problem can be naturally modeled with two discount fac-
+value of a sum of exponentially discounted scalar rewards tors, allowing the agent to evaluate the tradeoffs between
+received by the agent. Such MDPs have a number of very early and late delivery. Problems with multiple discount fac-
+nice properties: they are subject to the principle of local op- tors also frequently arise in other domains: for example, an
+timality, according to which the optimal action for a state is agent can be involved in several ﬁnancial ventures with dif-
+independent of the choice of actions for other states, and the ferent risk levels and time scales, where a model with multiple
+optimal policies for such MDPs are stationary, deterministic, discount factors would allow the decision maker to quantita-
+and do not depend on the initial state of the system. These tively weigh the tradeoffs between shorter- and longer-term
+properties translate into very efﬁcient dynamic-programming investments. Feinberg and Shwartz [1999] describe more ex-
+algorithms for constructing optimal policies for such MDPs amples and provide further justiﬁcation for constrained mod-
+(e.g., [Puterman, 1994]), and policies that are easy to imple- els with several discount factors.
+ment in standard agent architectures.                   The price we have to pay for extending the classical model
+                                                      by introducing constraints and several discount factors is that
+This material is based upon work supported by Honeywell Interna- stationary deterministic policies are no longer guaranteed to
+tional, and by the DARPA/IPTO COORDINATORs program and the      [                             ]
+Air Force Research Laboratory under Contract No. FA8750–05–C– be optimal Feinberg and Shwartz, 1994; 1995 . Searching
+0030. The views and conclusions contained in this document are for an optimal policy in the larger class of non-stationary
+those of the authors, and should not be interpreted as representing randomized policies can dramatically increase problem com-
+the ofﬁcial policies, either expressed or implied, of the Defense Ad- plexity; in fact, the complexity of ﬁnding optimal policies for
+vanced Research Projects Agency or the U.S. Government. this broad class of constrained MDPs with multiple costs, re-wards, and discount factors is not known, and no solution our results can be extended to other optimization criteria (as
+algorithms exist (aside from some very special cases [Fein- discussed in Section 6). A policy is said to be Markovian (or
+berg and Shwartz, 1996]). Furthermore, even if they could be history-independent) if the choice of action does not depend
+found, these non-stationary randomized policies might not be on the history of states and actions encountered in the past,
+reliably executable by basic agent architectures. For example, but only on the current state and time. If, in addition to that,
+[Paruchuri et al., 2004] described how executing randomized the policy does not depend on time, it is called stationary (by
+policies in multiagent systems can be problematic.    deﬁnition, a stationary policy is always Markovian). A deter-
+  In this paper, therefore, we focus on ﬁnding optimal sta- ministic policy always prescribes the execution of the same
+tionary deterministic policies for MDPs with multiple re- action in a state, while a randomized policy chooses actions
+wards, costs, and discount factors. This problem has been according to a probability distribution.
+studied before and has been proven to be NP-complete by A stationary randomized policy π can be described as a
+Feinberg [2000], who formulated it as a non-linear and non- mapping of states to probability distributions over actions:
+convex mathematical program. Unfortunately, aside from π : S × A 7→ [0, 1], where πia deﬁnes the probability that
+intractable techniques of general non-convex optimization, the agent will execute action a when it encounters state i. A
+these problems have heretofore not been practically solvable. deterministic policy can be viewed as a degenerate case of a
+  Our contribution in this paper is to present an approach to randomized policy for which there is only one action for each
+solving this problem that reduces it to a mixed-integer lin- state that has a nonzero probability of being executed.
+ear program – a formulation that, while still NP-complete, A policy π and the initial conditions α : S 7→ [0, 1] that
+has available a wide variety of very efﬁcient solution algo- specify the probability distribution over the state space at time
+rithms and tools that make it practical to often ﬁnd optimal
+                                                      0 (the agent starts in state i with probability αi) together de-
+stationary deterministic policies. As we will show, moreover, termine the evolution of the system and the total expected
+our approach can also be fruitfully employed for the subclass discounted reward the agent will receive:
+of MDPs that have multiple costs, but only a single reward                  ∞
+function and discount factor. For these problems, linear pro-              X   X   t
+                                                                 Uγ (π, α) =      γ ϕi(t)πiaria,      (1)
+gramming can, in polynomial time, ﬁnd optimal stationary                   t=0 i,a
+randomized policies [Kallenberg, 1983; Heyman and Sobel,
+                                                      where ϕ (t) refers to the probability of being in state i at time
+1984], but the problem of ﬁnding optimal stationary deter-   i
+                                                      t, and γ ∈ [0, 1) is the discount factor.
+ministic policies is NP-complete [Feinberg, 2000], with no
+implementable solution algorithms existing previously (aside It is well-known (e.g., [Puterman, 1994]) that, for an un-
+from the general non-linear optimization techniques). We constrained MDP with the total expected discounted reward
+show that our integer-programming-based approach ﬁnds op- optimization criterion, there always exists an optimal policy
+                                                       ∗
+timal stationary deterministic policies, which can then be π that is stationary, deterministic, and uniformly-optimal,
+compared empirically to optimal randomized policies.  where the latter term means that the policy is optimal for
+                                                      all initial probability distributions over the starting state (i.e.,
+  In the remainder of this paper, we ﬁrst (in Section 2) es- ∗
+tablish a baseline by brieﬂy reviewing techniques for solv- Uγ (π , α) ≥ Uγ (π, α) ∀π, α).
+ing unconstrained MDPs. In Section 3, we move on to con- There are several standard ways of solving such MDPs
+strained MDPs, and present our approach to solving con- (e.g., [Puterman, 1994]); some use dynamic programming
+strained MDPs with a single reward, multiple costs, and one (value or policy iteration), others, which are much better
+discount factor for the rewards and costs. We next expand this suited for constrained problems, reduce MDPs to linear pro-
+to the case with multiple rewards and costs, and several dis- grams (LPs). A discounted MDP can be formulated as the fol-
+count factors, in Section 4. Section 5 provides some empirical lowing LP [D’Epenoux, 1963; Kallenberg, 1983] (this max-
+evaluations and observations, and Section 6 discusses our re- imization LP is the dual to the more-commonly used mini-
+sults and some thoughts about applying the same techniques mization LP in the value function coordinates):
+to other ﬂavors of constrained MDPs.                                     X         X
+                                                                            xja − γ    xiapiaj = αj,
+                                                                X       
+                                                           max     riaxia  a        i,a              (2)
+                                                                        
+                                                                i,a
+2  Background: Unconstrained MDPs                                        xia ≥ 0.
+An unconstrained, stationary, discrete-time, fully-observable The set of optimization variables xia is often called the oc-
+MDP can be deﬁned as a 4-tuple hS, A, p, ri, where S = {i} cupation measure of a policy, where xia can be interpreted
+is a ﬁnite set of states the agent can be in; A = {a} is a ﬁnite as the total expected discounted number of times action a is
+                                                                           P
+set of actions the agent can execute; p : S × A × S 7→ [0, 1] executed in state i. Then, xia gives the total expected dis-
+              P                                                              a
+is the stochastic ( j piaj = 1) transition function (piaj is the counted ﬂow through state i, and the constraints in the above
+probability the agent goes to state j if it executes action a in LP can be interpreted as the conservation of ﬂow through
+state i); r : S × A 7→ R is the bounded reward function (the each of the states. An optimal policy can be computed from a
+agent gets a reward of r for executing action a in state i). solution to the above LP as:
+                   ia                                                            X
+  A solution to an MDP is a policy (a procedure for selecting          πia = xia/   xia.              (3)
+an action in every state) that maximizes some measure of ag-                      a
+gregate reward. In this paper we will focus on MDPs with the Although this appears to lead to randomized policies, in the
+total expected discounted reward optimization criterion, but absence of external constraints, and if we use strictly positiveinitial conditions (αi > 0), a basic feasible solution to this limited non-consumable resources is reduced to a MILP. The
+LP always maps to a deterministic policy that is uniformly- following proposition provides the basis for our reduction.
+optimal [Puterman, 1994; Kallenberg, 1983]. This LP (2) for
+                                                      Proposition 1 Consider an MDP hS, A, p, r, αi, a policy π,
+the unconstrained MDP serves as the basis for solving con-
+                                                      its corresponding occupation measure x (given α), a constant
+strained MDPs that we discuss next.
+                                                      X  ≥ xia ∀i ∈ S, a ∈ A, and a set of binary variables ∆ia =
+                                                      {0, 1}, ∀i ∈ S, a ∈ A.
+3  Constrained MDPs                                     If x and ∆ satisfy the following conditions
+                                                                      X
+Suppose that the agent, besides getting rewards for executing            ∆ia ≤ 1,  ∀i ∈ S,            (8)
+actions, also incurs costs: ck : S × A 7→ R, k ∈ [1, K],               a
+      k
+where cia is the cost of type k incurred for executing action a   xia/X ≤ ∆ia,   ∀i ∈ S, a ∈ A        (9)
+in state i (e.g., actions might take time and consume energy, then, for all states i that, under π and α, have a nonzero prob-
+in which case we would say that there are two types of costs).            P
+                                                      ability of being visited ( a xia > 0), π is deterministic, and
+Then, a natural problem to pose is to maximize the expected the following holds:
+discounted reward subject to some upper bounds on the to-
+                                                                       ∆   = 1 ⇔ x   > 0             (10)
+tal expected discounted costs. Let us label the total expected           ia        ia
+discounted cost of type k ∈ [1, K] as:                Proof: Consider a state i∗ that, under policy π and initial dis-
+                      ∞                               tribution α, has a nonzero probability of being visited, i.e.,
+            k        X  X    t        k               P
+          Cγ (π, α) =       γ ϕi(t)πiacia.      (4)     a xi∗a > 0. Then, since the occupation measure is non-
+                     t=0 i,a                          negative, there must be at least one action in this state that
+Then, we can abstractly write the optimization problem with has a non-zero occupation measure:
+                                                                      ∗
+cost constraints as                                                 ∃a  ∈ A  s.t. xi∗a∗ > 0.
+                          k        k
+            max Uγ (π, α)  Cγ (π, α) ≤ bc ,    (5)   Then, (9) forces ∆i∗a∗ = 1, which, due to (8), forces zero
+             π                                                                    ∗
+      k                                               values for all other ∆’s for state i :
+where bc is the upper bound on the cost of type k. If this prob-                       ∗
+lem is feasible, then there always exists an optimal stationary        ∆i∗a = 0  ∀a 6= a .
+policy, and it can be computed as a solution to the following Given (9), this, in turn, means that the occupation measure for
+LP [Kallenberg, 1983; Heyman and Sobel, 1984]:        all other actions has to be zero:
+                                                                                      ∗
+                   X         X                                        xi∗a = 0 ∀a 6= a ,
+                      xja − γ   xiapiaj = αj,
+                                                                                                 π
+                    a        i,a                     which, per (3), translates into the fact that the policy is de-
+         X                                           terministic and ∆ia = 1 ⇔ xia > 0. 
+     max    r  x   X   k       k               (6)
+             ia ia    ciaxia ≤ c ,                     Proposition 1 immediately leads to the following MILP
+                              b
+          i,a      i,a                               whose solution yields optimal stationary deterministic poli-
+                  
+                   xia ≥ 0.                          cies for (5):
+                                                                         X         X
+  Therefore, constrained MDPs of this type can be solved in                 xja − γ    xiapiaj = αj,
+                                                                        
+polynomial time, i.e., adding constraints with the same dis-              a         i,a
+                                                                        
+count factor does not increase the complexity of the MDP.                X   k       k
+                                                                            c  xia ≤ c ,
+However, due to the addition of constraints, the problem (5),                ia     b
+                                                            X  X         i,a
+in general, will not have uniformly-optimal policies. Further- max xiaria                           (11)
+                                                                         X
+more, the LP (6) will yield randomized policies, which (as   i  a           ∆ia ≤ 1,
+argued in Section 1) are often more difﬁcult to implement               
+                                                                          a
+than deterministic ones.                                                
+                                                                         xia/X ≤ ∆ia,
+  Thus, it can be desirable to compute optimal solutions to             
+                                                                         x   ≥ 0,  ∆   ∈ {0, 1},
+(5) from the class of stationary deterministic policies. This,            ia        ia
+however, is a much harder problem: Feinberg [2000] studied where X can be computed in polynomial time by, for exam-
+                                                      ple, solving the LP (2) with the objective function replaced
+this problem, showed that it is NP-complete (using a reduc-  P
+tion similar to [Filar and Krass, 1994]), and reduced it to a by max i,a xia and setting X to its maximum value.
+mathematical program by augmenting (6) with the following The above reduction to an MILP is most valuable for do-
+constraint, ensuring that only one xia per state is nonzero: mains where it is difﬁcult to implement a randomized sta-
+                                                      tionary policy because of an agent’s architectural limitations.
+              |x  − x  0 | = x + x 0            (7)
+                ia    ia    ia    ia                  It is also of interest for domains where such limitations are
+However, the resulting program (6,7) is neither linear nor con-
+                                                      not present, as it can be used for evaluating the quality vs.
+vex, and thus presents signiﬁcant computational challenges.
+                                                      implementation-difﬁculty tradeoffs between randomized and
+  We show how (5) can be reduced to a mixed integer linear deterministic policies during the agent-design phase.
+program (MILP) that is equivalent to (6,7). This is beneﬁ-
+cial because MILPs are well-studied (e.g., [Wolsey, 1998]),
+and there exist efﬁcient implemented algorithms for solving 4 Constrained MDPs with Multiple Discounts
+them. Our reduction uses techniques similar to the ones em- We now turn our attention to the more general case of MDPs
+ployed in [Dolgov and Durfee, 2004b], where an MDP with with multiple streams of rewards and costs, each with its owndiscount factor γn, n ∈ [1, N]. The total expected reward is Because of the synchronization of the different occupation
+a weighted sum of the N discounted reward streams:    measures and the constraint that forces deterministic policies,
+                                 ∞                    this program (13,14) is non-linear and non-convex, and is thus
+         X                X     X   X   t        n
+U(π, α) =    βnUγn (π, α) =   βn       γnϕi(t)πiaria  very difﬁcult to solve.
+          n                n    t=0 i,a                 For ﬁnding optimal stationary deterministic policies, we
+                         th                           present a reduction of the program (12) to a linear integer
+where βn is the weight of the n reward stream that is deﬁned
+by the reward function rn : S×A 7→ R. Similarly, each of the program that is equivalent to (13,14). Just like in the previous
+K total expected costs is a weighted sum of N cost streams: section, this reduction to an MILP allows us to exploit a wide
+                                    ∞                 array of efﬁcient solution techniques and tools. Our reduction
+          X                 X       X
+Ck(π, α) =    β  Ck (π, α) =    β      γt ϕ (t)π ckn  is based on the following proposition.
+               kn γn             kn     n  i   ia ia
+           n                n,i,a   t=0               Proposition 2 Consider an MDP hS, A, p, r, αi with sev-
+                           th
+where βkn is the weight of the n discounted stream of cost eral discount factors γn, n ∈ [1, N], a set of policies
+of type k, deﬁned by the cost function ckn : S × A 7→ R. πn, n ∈ [1, N] with their corresponding occupation mea-
+                                                            n        n                           n
+  Notice that in this MDP with multiple discount factors, we sures x (policy π and discount factor γn deﬁne x ), a con-
+                                                                n
+have N reward functions and KN cost functions (unlike the stant X ≥ xia ∀n ∈ [1, N], i ∈ S, a ∈ A, and a set of binary
+constrained MDP from the previous section that had 1 and K variables ∆ia = {0, 1}.
+reward and cost functions, respectively).               If xn and ∆ satisfy the following conditions
+                                                                      X
+  Our goal is to maximize the total weighted discounted re-              ∆ia ≤ 1,  ∀i ∈ S,           (15)
+ward, subject to constraints on weighted discounted costs:             a
+                 k         k                               n
+    max U(π, α)  C (π, α) ≤ c , ∀k ∈ [1, K].  (12)        x  /X ≤  ∆ia,  ∀n ∈ [1, N], i ∈ S, a ∈ A, (16)
+     π                     b                                ia
+                                                                                    n        P    n
+  Feinberg and Shwartz [1994; 1995] developed a general then, the sets of reachable states I = {i : a xia > 0}
+                                                      deﬁned by all occupation measures are the same, i.e., In =
+theory of constrained MDPs with multiple discount factors 0
+and demonstrated that, in general, optimal policies are nei- In , ∀n, n0 ∈ [1, N]. Furthermore, all πn are deterministic
+                                                          n      n     n0    0
+ther deterministic nor stationary. However, except for some on I , and πia = πia ∀n, n ∈ [1, N].
+special cases [Feinberg and Shwartz, 1996], there are no im-                        ∗
+plementable algorithms for ﬁnding optimal policies for such Proof: Consider an initial state i (i.e., αi∗ > 0). Follow-
+problems. Because of this, and given the complexity of im- ing the argument of Proposition 1, the policy for that state is
+plementing non-stationary randomized policies (even if we deterministic:
+                                                         ∗    n                  n                     ∗
+could ﬁnd them), it is worthwhile to consider the problem ∃a : xi∗a∗ > 0, ∆i∗a∗ = 1; xi∗a = 0, ∆i∗a = 0 ∀a 6= a
+of constructing optimal stationary deterministic policies for This implies that all N occupation measures xn must pre-
+such MDPs. Feinberg [2000] showed that ﬁnding optimal scribe the execution of the same deterministic action a∗ for
+                                                           ∗            n
+policies that belong to the class of stationary (randomized or state i , because all xia are tied to the same ∆ia via (16).
+deterministic) policies is an NP-complete task. He also for- Therefore, all occupation measures xn correspond to the
+mulated the problem of ﬁnding optimal stationary policies as same deterministic policy on the initial states I0 = {i : αi >
+the following mathematical program (again, based on (eq. 6)): 0}. We can then expand this statement by induction to all
+                     X   n      X    n               reachable states. Indeed, clearly the set of states I1 that are
+                        xja − γn    xiapiaj = αj,                                                     n
+                                                     reachable from I0 in one step will be the same for all x .
+                      a          i,a
+                                                     Then, by the same argument as above, all xn map to the same
+                     X      X   kn n    k                                              
+                        βkn    cia xia ≤ c ,         deterministic policy on I1, and so forth.
+     X     X    n n                     b
+ max     βn    r x    n     i,a                        It immediately follows from Proposition 2 that the prob-
+                ia ia 
+      n     i,a       n  X   n     n+1 X    n+1      lem of ﬁnding optimal stationary deterministic policies for an
+                     xia/   xia = x   /    x   ,
+                                   ia       ia       MDP with weighted discounted rewards and constraints (12)
+                          a             a            can be formulated as the following MILP:
+                      n
+                     x  ≥ 0,                                               X   n      X   n
+                       ia                                                      x  − γ     x  p   = α ,
+                                               (13)                             ja   n     ia iaj   j
+                                   n                                        a          i,a
+This program has an occupation measure x for each discount                 
+factor γ , n ∈ [1, N] and expresses the total reward and total              X     X    kn n    k
+      n                                                                        βkn    cia xia ≤ bc ,
+costs as weighted linear functions of these occupation mea-                
+                                                            X     X   n  n  n      i,a
+sures. The ﬁrst set of constraints contains the conservation of max βn riaxia 
+                                                                            xn /X ≤ ∆  ,
+ﬂow constraints for each of the N occupation measures, and   n     i,a      ia       ia
+                                                                            X
+the third set of constraints ensures that all occupation mea-                  ∆   ≤ 1,
+                                                                                ia
+sures map to the same policy (recall (3)).                                  a
+                                                                            n
+  As in the previous section, we can limit the search to deter-             xia ≥ 0, ∆ia ∈ {0, 1},
+ministic policies by imposing the following additional con-                                          (17)
+straint on the occupation measures in (13) [Feinberg, 2000]: where X ≥ max xn is a constant, as in Proposition 2.
+                                                                    ia
+          X   n     n   X     n    n                Although this MILP produces policies that are only opti-
+             xia − xia0  =    xia + xia0     (14)
+           n                n                         mal in the class of stationary deterministic ones, at present 500
+
+ 450 Absolute Value (sample run)
+                           200             MILP time  1                        0.7
+ 400
+
+ 350                                                                           0.6
+                           150                       0.8
+ 300
+                                                                               0.5
+ 250
+                           100                       0.6
+
+                           t,  sec                                             0.4
+ 200
+policy  value
+
+ 150                                                 Relative  Value
+                           50                        0.4                       0.3
+ 100
+                randomized                                                     MILP  time [normalized]
+                                                                               0.2
+                                                     0.2
+ 50             deterministic 0                                    Performance Profile 1
+                                                                                                         1
+  0                                                                                  0.9
+                                                      0                                            0.9
+   0   0.2 0.4 0.6 0.8 1     0   0.2 0.4 0.6 0.8 1     0   20  40  60 80  100      γ                 γ
+                                                                                    2                 1
+          constraint level          constraint level           t bound, sec               0.8 0.8
+            (a)                         (b)                       (c)                         (d)
+  Figure 1: Value of deterministic and randomized policies (a); solution time (b) and proﬁle (c); MDP with two discounts (d).
+
+ time there are (to the best of our knowledge) no practical al- tic policies as functions of the constraint level ([0, 1]), where
+ gorithms for ﬁnding optimal solutions from any larger policy 0 means that only policies that incur zero cost are feasible
+ class for constrained MDPs with multiple discount factors. (strictest possible constraint), whereas 1 means that the upper
+                                                       bound on cost equals the cost of the optimal unconstrained
+ 5  Experimental Observations                          policy (agent is not constrained at all). The ﬁrst observation,
+                                                       as illustrated in Figure 1a, is that the value of stationary deter-
+ We have implemented the MILP algorithm for ﬁnding opti-
+                                                       ministic policies for constrained problems is reasonably close
+ mal stationary deterministic policies for constrained MDPs
+                                                       to optimal. We can also observe that the value of determinis-
+ and empirically evaluated it on a class of test problems. In
+                                                       tic policies changes in a very discrete manner (i.e., it jumps
+ the following discussion, we focus on the constrained MDPs
+                                                       up at certain constraint levels), whereas the value of random-
+ from Section 3, because these problems are better studied,
+                                                       ized policies changes continuously. This is, of course, only
+ and the existing algorithms for ﬁnding optimal randomized
+                                                       natural, given that the space of randomized policies is con-
+ policies can serve as benchmarks, whereas there are no al-
+                                                       tinuous, and randomized policies can gradually increase the
+ ternative algorithms for ﬁnding policies that are optimal for
+                                                       probability of taking “better” actions as cost constraints are
+ general constrained MDPs with multiple discount factors.
+                                                       relaxed. On the other hand, the space of deterministic poli-
+   In our empirical analysis, we tried to answer the follow-
+                                                       cies is discrete, and their quality jumps when the constraints
+ ing questions: 1) how well do deterministic policies perform,
+                                                       are relaxed to permit the agent to switch to a better action.
+ compared to optimal randomized ones, and 2) what is the
+                                                       While the number and the size of these jumps in the value
+ average-case complexity of the resulting MILPs. The answers
+                                                       function depends on the dynamics of the MDP, the high-level
+ to these questions are obviously domain-dependent, so the
+                                                       picture was the same in all of our experiments.
+ following discussion should not be viewed as a comprehen-
+ sive characterization of the behavior of our algorithms on Figure 1b shows the running time of the MILP solver as
+ constrained MDPs. However, we believe that our experiments a function of the constraint level (here and in Figure 1c the
+ provide some interesting observations about such problems. plots contain values averaged over 100 runs, with the error
+   We experimented with a large set of randomly-generated bars showing the standard deviation). The data indicates that
+ problems and with a more meaningful manually-constructed our MILPs (11) have an easy-hard-easy complexity proﬁle,
+ domain, which we randomly perturbed in several ways. The although without a sharp phase transition from hard to easy,
+ big picture resulting from the experiments on the randomly- i.e., the problems very quickly become hard, and then gradu-
+ generated domains was very similar to the one from the ally get easier as cost constraints are relaxed.
+ manually-constructed example, providing a certain measure This complexity proﬁle gives rise to the question regarding
+ of comfort about the stability and validity of our observations. the source of the difﬁculty for solving MILPs in the “hard”
+ We report the results for the manually-constructed domain. region: is it difﬁcult to ﬁnd good feasible solutions, or is it
+   For our test domain, we used a simplistic model of an time-consuming to prove their optimality? Figure 1c suggests
+ autonomous delivery agent, as mentioned in the introduc- that the latter is the case, which can be considered as the more
+ tion (based on the multiagent example from [Dolgov and fortunate outcome, since algorithms with such performance
+ Durfee, 2004b]). In the domain, an agent is operating in a proﬁles can be successfully used in an anytime manner. The
+ grid world with delivery sites placed randomly throughout ﬁgure contains a plot of the quality of the best solution found
+                                                                                                         1
+ the grid. The agent moves around the grid (incurring small as a function of the time bound imposed on the MILP solver
+ negative rewards for every move) and receives positive re- for problems in the hardest constraint region (constraint level
+ wards for making deliveries. The agent’s movement is non- value of 0.13). As the graph shows, very good policies are
+ deterministic, and the agent has some probability of getting usually produced rather quickly.
+ stuck in randomly-placed dangerous locations. The agent also Let us conclude with a somewhat intriguing observation
+ incurs a scalar cost (e.g., time) per move, and the objective is about the MILP solution time for constrained MDPs with
+ to maximize the total expected discounted reward subject to multiple discount factors (Section 4). We generated and
+ an upper bound on the total expected discounted cost. solved a large number of random MDPs with two discount
+   The results of our experiments are summarized in Figure 1.
+ Figure 1a shows the values of randomized and determinis- 1CPLEX 8.1 on a P4 performed the role of the MILP solver.

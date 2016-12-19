@@ -1,0 +1,331 @@
+Peripheral-Foveal Vision for Real-time Object Recognition and Tracking in Video
+
+       Stephen Gould, Joakim Arfvidsson, Adrian Kaehler, Benjamin Sapp, Marius Messner,
+                Gary Bradski, Paul Baumstarck, Sukwon Chung and Andrew Y. Ng
+                                          Stanford University
+                                       Stanford, CA 94305 USA
+
+
+                    Abstract                            Because very little changes in a visual stream from one
+                                                      frame to the next, one expects that it is possible to identify
+    Human object recognition in a physical 3-d envi-  objects or portions of a scene one at a time using the high
+    ronment is still far superior to that of any robotic resolution fovea, while tracking previously identiﬁed objects
+    vision system. We believe that one reason (out    in the peripheral region. The result is that it is possible to
+    of many) for this—one that has not heretofore     use computationally expensive classiﬁcation algorithms on
+    been signiﬁcantly exploited in the artiﬁcial vision the relatively limited portion of the scene on which the fovea
+    literature—is that humans use a fovea to ﬁxate on, is ﬁxated, while accumulating successful classiﬁcations over
+    or near an object, thus obtaining a very high resolu- a series of frames in real-time.
+    tion image of the object and rendering it easy to rec- A great deal has happened in recent years in the area of
+    ognize. In this paper, we present a novel method for location and identiﬁcation of speciﬁc objects or object classes
+    identifying and tracking objects in multi-resolution in images. Much of this work, however, has concentrated on
+    digital video of partially cluttered environments. single frames with the object of interest taking up a signiﬁcant
+    Our method is motivated by biological vision sys- proportion of the ﬁeld-of-view. This allows for accurate and
+    tems and uses a learned “attentive” interest map  robust object recognition, but implies that if we wish to be
+    on a low resolution data stream to direct a high  able to ﬁnd very small objects, we must go to much higher
+    resolution “fovea.” Objects that are recognized in image resolutions.1 In the naive approach, there is signiﬁcant
+    the fovea can then be tracked using peripheral vi- computational cost of going to this higher resolution.
+    sion. Because object recognition is run only on     For continuous video sequences, the standard technique is
+    a small foveal image, our system achieves perfor- simply to treat each frame as a still image, run a classiﬁca-
+    mance in real-time object recognition and tracking tion algorithm over the frame, and then move onto the next
+    that is well beyond simpler systems.              frame, typically using overlap to indicate that an object found
+                                                      in frame n +1is the same object found in frame n, and us-
+1  Introduction                                       ing a Kalman ﬁlter to stabilize these measurements over time.
+The human visual system far outperforms any robotic system The primary difﬁculty that this simple method presents is that
+in terms of object recognition. There are many reasons for a tremendous amount of effort is misdirected at the vast ma-
+this, and in this paper, we focus only on one hypothesis— jority of the scene which does not contain the objects we are
+which has heretofore been little exploited in the computer vi- attempting to locate. Even if the Kalman ﬁlter is used to pre-
+sion literature—that the division of the retina into the foveal dict the new location of an object of interest, there is no way
+and peripheral regions is of key importance to improving per- to detect the appearance of new objects which either enter the
+formance of computer vision systems on continuous video scene, or which are approached by a camera in motion.
+sequences. Brieﬂy, the density of photoreceptor rod and cone The solution we propose is to introduce a peripheral-foveal
+cells varies across the retina. The small central fovea, with model in which attention is directed to a small portion of the
+a high density of color sensitive cone cells, is responsible visual ﬁeld. We propose using a low-resolution, wide-angle
+for detailed vision, while the surrounding periphery, contain- video camera for peripheral vision and a pan-tilt-zoom (PTZ)
+ing a signiﬁcantly lower density of cones and a large num- camera for foveal vision. The PTZ allows very high resolu-
+ber of monochromatic rod cells, is responsible for, among tion on the small portion of the scene in which we are inter-
+other things, detecting motion. Estimates of the equivalent ested at any given time. We refer to the image of the scene
+number of “pixels” in the human eye vary, but based on supplied by the low-resolution, wide-angle camera as the pe-
+spatial acuity of 1/120 degrees [Edelman and Weiss, 1995; ripheral view and the image supplied by the pan-tilt-zoom
+                                            5×108
+Fahle and Poggio, 1981], appears to be on the order of   1Consider, for example, a typical coffee mug at a distance of ﬁve
+pixels. For a more in-depth treatment of human visual per- meters appearing in a standard 320 × 240 resolution, 42◦ ﬁeld-of-
+ception, we refer the reader to one of the many excellent text- view camera. The 95mm tall coffee mug is reduced to a mere 8
+books in the literature, for example [Wandell, 1995]. pixels high, rendering it extremely difﬁcult to recognize.
+
+                                                IJCAI-07
+                                                  2115camera as the foveal view or simply fovea.            outlines related work. In Section 3 we present the probabilis-
+  We use an attentive model to determine regions from the tic framework for our attention model which directs the foveal
+peripheral view on which we wish to perform object classi- gaze. Experimental results from a sample HDV video stream
+ﬁcation. The attentive model is learned from labeled data, as well as real dual-camera hardware are presented in Sec-
+and can be interpreted as a map indicating the probability tion 4. The video streams are of a typical ofﬁce environment
+that any particular pixel is part of an unidentiﬁed object. and contain distractors, as well as objects of various types
+The fovea is then repeatedly directed by choosing a region for which we had previously trained classiﬁers. We show that
+to examine based on the expected reduction in our uncer- the performance of our attention driven system is signiﬁcantly
+tainty about the location of objects in the scene. Identiﬁca- better than naive scanning approaches.
+tion of objects in the foveal view can be performed using
+any of the state-of-the-art object classiﬁcation technologies 2 Related Work
+(for example see [Viola and Jones, 2004; Serre et al., 2004;
+Brubaker et al., 2005]).                              An early computational architecture for explaining the visual
+  The PTZ camera used in real-world robotic applications attention system was proposed by Koch and Ullman (1985) .
+can be modeled for study (with less peak magniﬁcation) using In their model, a scene is analyzed to produce multiple fea-
+a high-deﬁnition video (HDV) camera, with the “foveal” re- ture maps which are combined to form a saliency map. The
+gion selected from the video stream synthetically by extract- single saliency map is then used to bias attention to regions
+ing a small region of the HDV image. The advantage of this of highest activity. Many other researchers, for example [Hu
+second method is that the input data is exactly reproducible. et al., 2004; Privitera and Stark, 2000; Itti et al., 1998],have
+Thus we are able to evaluate different foveal camera motions suggested adjustments and improvements to Koch and Ull-
+on the same recorded video stream. Figure 1 shows our robot man’s model. A review of the various techniques is presented
+mounted with our two different camera setups.         in [Itti and Koch, 2001].
+                                                        A number of systems, inspired by both physiological mod-
+                                                      els and available technologies, have been proposed for ﬁnd-
+                                                      ing objects in a scene based on the idea of visual attention, for
+                                                      example [Tagare et al., 2001] propose a maximum-likelihood
+                                                      decision strategy for ﬁnding a known object in an image.
+                                                        More recently, active vision systems have been proposed
+                                                      for robotic platforms. Instead of viewing a static image of
+                                                      the world, these systems actively change the ﬁeld-of-view to
+                                                      obtain more accurate results. A humanoid system that de-
+                                                      tects and then follows a single known object using peripheral
+                                                      and foveal vision is presented in [Ude et al., 2003]. A sim-
+                                                      ilar hardware system to theirs is proposed in [Bjorkman¨ and
+                                                      Kragic, 2004] for the task of object recognition and pose esti-
+                                                      mation. And in [Orabona et al., 2005] an attention driven sys-
+                                                      tem is described that directs visual exploration for the most
+                                                      salient object in a static scene.
+                                                        An analysis of the relationship between corresponding
+                                                      points in the peripheral and foveal views is presented in [Ude
+                                                      et al., 2006], which also describes how to physically control
+                                                      foveal gaze for rigidly connected binocular cameras.
+
+                                                      3   Visual Attention Model
+Figure 1: STAIR platform (left) includes a low-resolution periph-
+eral camera and high-resolution PTZ camera (top-right), and alter- Our visual system comprises two separate video cameras.
+native setup with HDV camera replacing the PTZ (bottom-right). In A ﬁxed wide-angle camera provides a continuous low-
+our experiments we mount the cameras on a standard tripod instead resolution video stream that constitutes the robot’s peripheral
+of using the robotic platform.                        view of a scene, and a controllable pan-tilt-zoom (PTZ) cam-
+                                                      era provides the robot’s foveal view. The PTZ camera can
+  The robot is part of the STAIR (STanford Artiﬁcial Intelli- be commanded to focus on any region within the peripheral
+gence Robot) project, which has the long-term goal of build- view to obtain a detailed high-resolution image of that area
+ing an intelligent home/ofﬁce assistant that can carry out tasks of the scene. As outlined above, we conduct some of our ex-
+such as cleaning a room after a dinner party, and ﬁnding and periments on recorded high-resolution video streams to allow
+fetching items from around the home or ofﬁce. The ability to for repeatability in comparing different algorithms.
+visually scan its environment and quickly identify objects is Figure 2 shows an example of a peripheral and foveal view
+of one of the key elements needed for a robot to accomplish from a typical ofﬁce scene. The attention system selects a
+such tasks.                                           foveal window from the peripheral view. The corresponding
+  The rest of this paper is organized as follows. Section 2 region from the high-resolution video stream is then used for
+
+                                                IJCAI-07
+                                                  2116Figure 2: Illustration of the peripheral (middle) and foveal (right) views of a scene in our system with attentive map showing regions of high
+interest (left). In our system it takes approximately 0.5 seconds for the PTZ camera to move to a new location and acquire an image.
+
+classiﬁcation. The attentive interest map, generated from fea- over all objects,
+tures extracted from the peripheral view, is used to determine                  
+                                                         H =      H     (ξ (t)) +    H        (ξ (t))
+where to direct the foveal gaze, as we will discuss below.          tracked k          unidentiﬁed k  (1)
+                                                             o ∈T
+  The primary goal of our system is to identify and track ob- k                 ok∈T/
+jects over time. In particular, we would like to minimize our where the ﬁrst summation is over objects being tracked, T ,
+uncertainty in the location of all identiﬁable objects in the and the second summation is over objects in the scene that
+scene in a computationally efﬁcient way. Therefore, the at- have not yet been identiﬁed (and therefore are not being
+tention system should select regions of the scene which are tracked).
+most informative for understanding the robot’s visual envi- Since our system cannot know the total number of objects
+ronment.                                              in the scene, we cannot directly compute the entropy over
+  Our system is able to track previously identiﬁed objects                    H(ξk(t))
+                                                      unidentiﬁed objects, ok∈T/      . Instead, we learn the
+over consecutive frames using peripheral vision, but can only probability P (ok |F) of ﬁnding a previously-unknown ob-
+classify new objects when they appear in the (high-resolution) ject in a given foveal region F of the scene based on features
+     F
+fovea, . Our uncertainty in a tracked object’s position grows extracted from the peripheral view (see the description of our
+with time. Directing the fovea over the expected position of interest model in section 3.2 below). If we detect a new ob-
+the object and re-classifying allows us to update our estimate ject, then one of the terms in the rightmost sum of Eq. (1) is
+of its location. Alternatively, directing the fovea to a different reduced; the expected reduction in our entropy upon taking
+part of the scene allows us to ﬁnd new objects. Thus, since action A2 (and ﬁxating on a region F)is
+the fovea cannot move instantaneously, the attention system              
+needs to periodically decide between the following actions: ΔHA2 = P (ok |F) H     (ξk(t))
+                                                                            unidentiﬁed            
+A1. Conﬁrmation of a tracked object by ﬁxating the fovea                         − Htracked(ξk(t +1)) . (2)
+    over the predicted location of the object to conﬁrm its
+                                                      Here the term H       (ξk(t)) is a constant that reﬂects
+    presence and update our estimate of its position;                unidentiﬁed
+                                                      our uncertainty in the state of untracked objects,3 and
+A2. Search for unidentiﬁed objects by moving the fovea to Htracked(ξk(t +1))is the entropy associated with the Kalman
+    some new part of the scene and running the object clas- ﬁlter that is attached to the object once it has been detected
+    siﬁers over that region.                          (see Section 3.1).
+                                                        As objects are tracked in peripheral vision, our uncertainty
+  Once the decision is made, it takes approximately   in their location grows. We can reduce this uncertainty by
+0.5 seconds—limited by the speed of the PTZ camera—for
+                                                  2   observing the object’s position through re-classiﬁcation of the
+the fovea to move to and acquire an image of the new region. area around its expected location. We use a Kalman ﬁlter to
+During this time we track already identiﬁed objects using pe- track the object, so we can easily compute the reduction in
+ripheral vision. After the fovea is in position we search for
+                                                      entropy from taking action A1 for any object ok ∈T,
+new and tracked objects by scanning over all scales and shifts
+                                                                       1
+within the foveal view as is standard practice for many state- ΔHA1  = 2 (ln |Σk(t)|−ln |Σk(t +1)|)   (3)
+of-the-art object classiﬁers.
+                                                      where Σk(t) and Σk(t +1)are the covariance matrices as-
+  More formally, let ξk(t) denote the state of the k-th object,                       k
+o        t                                            sociated with the Kalman ﬁlter for the -th object before and
+ k, at time . We assume independence of all objects in the after re-classifying the object, respectively.
+scene, so our uncertainty is simply the sum of entropy terms
+                                                         3Our experiments estimated this term assuming a large-variance
+  2In our experiments with single high-resolution video stream, we distribution over the peripheral view of possible object locations; in
+simulate the time required to move the fovea by delaying the image practice, the algorithm’s performance appeared very insensitive to
+selected from the HDV camera by the required number of frames. this parameter.
+
+                                                IJCAI-07
+                                                  2117  In this formalism, we see that by taking action A1 we re- estimation of the object’s state, or occlusion by another ob-
+duce our uncertainty in a tracked object’s position, whereas ject. In this case we assume that we have lost track of the
+by taking action A2 we may reduce our uncertainty over object.
+unidentiﬁed objects. We assume equal costs for each action Since objects are recognized in the foveal view, but are
+and therefore we choose the action which maximizes the ex- tracked in the peripheral view, we need to transform coor-
+pected reduction of the entropy H deﬁned in Eq. (1).  dinates between the two views. Using the well-known stereo
+  We now describe our tracking and interest models in detail. calibration technique of [Zhang, 2000], we compute the ex-
+                                                      trinsic parameters of the PTZ camera with respect to the
+3.1  Object Tracking                                  wide-angle camera. Given that our objects are far away rel-
+We track identiﬁed objects using a Kalman ﬁlter. Because ative to the baseline between the cameras, we found that
+we assume independence of objects, we associate a separate the disparity between corresponding pixels of the objects in
+Kalman ﬁlter with each object. An accurate dynamic model each view is small and can be corrected by local correlation.4
+of objects is outside the current scope of our system, and we This approach provides adequate accuracy for controlling the
+use simplifying assumptions to track each object’s coordi- fovea and ﬁnding the corresponding location of objects be-
+nates in the 2-d image plane. The state of the k-th tracked tween views.
+object is                                               Finally, the entropy of a tracked object’s state is required
+                                                      for deciding between actions. Since the state, ξ(t), is a Gaus-
+                                   T
+              ξk =[xk   yk  x˙ k y˙k]           (4)   sian random vector, it has differential entropy
+                                                                               1       4
+and represents the (x, y)-coordinates and (x, y)-velocity of    Htracked(ξk(t)) = 2 ln(2πe) |Σk(t)|   (8)
+the object.
+                                                            Σ (t) ∈ R4×4
+  On each frame we perform a Kalman ﬁlter motion update where k         is the covariance matrix associated with
+                                                                      k               t
+step using the current estimate of the object’s state (position our estimate of the -th object at time .
+and velocity). The update step is
+                 ⎡               ⎤                    3.2  Interest Model
+                  10ΔT         0
+                                                      To choose which foveal region to examine next (under action
+                 ⎢010ΔT          ⎥
+      ξ (t +1)=                    ξ (t)+η            A2), we need a way to estimate the probability of detecting
+       k         ⎣00     1     0⎦   k     m     (5)
+                                                      a previously unknown object in any region F in the scene.
+                  00     0     1
+                                                      To do so, we deﬁne an “interest model” that rapidly identi-
+                                                      ﬁes pixels which have a high probability of containing objects
+where ηm ∼N(0,  Σm) is the motion model noise, and ΔT
+is the duration of one timestep.                      that we can classify. A useful consequence of this deﬁnition
+  We compute optical ﬂow vectors in the peripheral view is that our model automatically encodes the biological phe-
+generated by the Lucas and Kanade (1981) sparse optical nomena of saliency and inhibition of return—the processes
+ﬂow algorithm. From these ﬂow vectors we measure the ve- by which regions of high visual stimuli are selected for fur-
+                                                      ther investigation, and by which recently attended regions are
+locity of each tracked object, zv(t), by averaging the optical
+                                                                                         [          ]
+ﬂow within the object’s bounding box. We then perform a prevented from being attended again (see Klein, 2000 for a
+Kalman ﬁlter observation update, assuming a velocity obser- detailed review).
+vation measurement model                                In our approach, for each pixel in our peripheral view, we
+                                                    estimate the probability of it belonging to an unidentiﬁed ob-
+                   0010                               ject. We then build up a map of regions in the scene where the
+           zv(t)=              ξk(t)+ηv         (6)
+                   0001                               density of interest is high. From this interest map our atten-
+                                                      tion system determines where to direct the fovea to achieve
+where ηv ∼N(0,  Σv) is the velocity measurement model maximum beneﬁt as described above.
+noise.                                                  More formally, we deﬁne a pixel to be interesting if it is
+  When the object appears in the foveal view, i.e., after tak- part of an unknown, yet classiﬁable object. Here classiﬁable,
+ing action A1, the classiﬁcation system returns an estimate, means that the object belongs to one of the object classes
+zp(t), of the object’s position, which we use to perform a cor- that our classiﬁcation system has been trained to recognize.
+responding Kalman ﬁlter observation update to greatly reduce We model interestingness, y(t), of every pixel in the periph-
+our uncertainty in its location accumulated during tracking. eral view, x(t), at time t using a dynamic Bayesian network
+Our position measurement observation model is given by (DBN), a fragment of which is shown in Figure 3. For the
+                                                    (i, j)       y  (t)=1
+                   1000                                   -th pixel, i,j     if that pixel is interesting at time
+           zp(t)=              ξk(t)+ηp         (7)   t, and 0 otherwise. Each pixel also has associated with it a
+                   0100                                                                   n
+                                                      vector of observed features φi,j(x(t)) ∈ R .
+where ηp ∼N(0,  Σp) is the position measurement model
+                                                         4We resize the image from the PTZ camera to the size it would
+noise.                                                appear in the peripheral view. We then compute the cross-correlation
+  We incorporate into the position measurement model the of the resized PTZ image with the peripheral image, and take the
+special case of not being able to re-classify the object even actual location of the fovea to be the location with maximum cross-
+though the object is expected to appear in the foveal view. correlation in a small area around its expected location in the periph-
+For example, this may be due to misclassiﬁcation error, poor eral view.
+
+                                                IJCAI-07
+                                                  2118    yi-1,j-1(t-1)                                     procedure we can hand label a single training video and auto-
+    yi-1,j(t-1)                                       matically generate data for learning the interest model given
+  yi-1,j+1(t-1)                                       any speciﬁc combination of classiﬁers and foveal movement
+                                                      policies.
+
+     yi,j-1(t-1)                                        We adapt the parameters of our probabilistic models so
+     yi,j(t-1)                                        as to maximize the likelihood of the training data described
+                               yi,j(t)
+   yi,j+1(t-1)                                        above. Our interest model is trained over a 450 frame video
+                                                      sequence, i.e., 30 seconds at 15 frames per second. Figure 4
+
+    yi+1,j-1(t-1)                                     shows an example of a learned interest map, in which the
+    yi+1,j(t-1)                                       algorithm automatically selected the mugs as the most inter-
+  yi+1,j+1(t-1)                                       esting region.
+                                           i,j(x(t))
+
+Figure 3: Fragment of dynamic Bayesian network for modeling at-
+tentive interest.
+
+  The interest belief state over the entire frame at time t
+is P (y(t) | y(0), x(0),...,x(t)). Exact inference in this
+graphical model is intractable, so we apply approximate infer-
+ence to estimate this probability. Space constraints preclude a
+full discussion, but brieﬂy, we applied Assumed Density Fil-
+                                                      Figure 4: Learned interest. The righthand panel shows the proba-
+tering/the Boyen-Koller (1998) algorithm, and approximate bility of interest for each pixel in the peripheral image (left).
+this distribution using a factored representation over individ-
+ual pixels, P (y(t)) ≈ i,j P (yi,j (t)). In our experiments,
+this inference algorithm appeared to perform well.
+  In our model, the interest for a pixel depends both on 4 Experimental Results
+the interest in the pixel’s (motion compensated) neighbor- We evaluate the performance of the visual attention system
+hood, N(i, j), at the previous time-step and features ex- by measuring the percentage of times that a classiﬁable object
+tracted from the current frame. The parameterizations for appearing in the scene is correctly identiﬁed. We also count
+both P yi,j(t) | yN(i,j)(t − 1) and P (yi,j (t) | φi,j (x(t))) the number of false-positives being tracked per frame. We
+are given by logistic functions (with learned parameters), and compare our attention driven method for directing the fovea
+we use Bayes rule to compute P (φi,j(x(t)) | yi,j(t)) needed to three naive approaches:
+in the DBN belief update. Using this model of the interest (i) ﬁxing the foveal gaze to the center of view,
+map, we estimate the probability of ﬁnding an object in a
+given foveal region, P (ok |F), by computing the mean of (ii) linearly scanning over the scene from top-left to bottom-
+the probability of every pixel in the foveal region being inter- right, and,
+esting.5                                              (iii) randomly moving the fovea around the scene.
+  The features φi,j used to predict interest in a pixel are ex-
+                                                        Our classiﬁers are trained on image patches of roughly
+tracted over a local image patch and include Harris corner
+                                                      100 × 100 pixels depending on the object class being trained.
+features, horizontal and vertical edge density, saturation and
+                                                      For each object class we use between 200 and 500 positive
+color values, duration that the pixel has been part of a tracked
+                                                      training examples and 10, 000 negative examples. Our set
+object, and weighted decay of the number of times the fovea
+                                                      of negative examples contained examples of other objects,
+had previously ﬁxated on a region containing the pixel.
+                                                      as well as random images. We extract a subset of C1 fea-
+3.3  Learning the Interest Model                      tures (see [Serre et al., 2004]) from the images and learn a
+                                                      boosted decision tree classiﬁer for each object. This seemed
+Recall that we deﬁne a pixel to be interesting if it is part of an
+                                                      to give good performance (comparable to state-of-the-art sys-
+as yet unclassiﬁed object. In order to generate training data so
+                                                      tems) for recognizing a variety of objects. The image patch
+that we can learn the parameters of our interest model, we ﬁrst
+                                                      size was chosen for each object so as to achieve good classi-
+hand label all classiﬁable objects in a low-resolution training
+                                                      ﬁcation accuracy while not being so large so as to prevent us
+video sequence. Now as our system begins to recognize and
+                                                      from classifying small objects in the scene.
+track objects, the pixels associated with those objects are no
+                                                        We   conduct two  experiments using recorded high-
+longer interesting, by our deﬁnition. Thus, we generate our
+                                                      deﬁnition video streams, the ﬁrst assuming perfect classiﬁ-
+training data by annotating as interesting only those pixels
+                                                      cation (i.e., no false-positives and no false-negatives, so that
+marked interesting in our hand labeled training video but that
+                                                      every time the fovea ﬁxates on an object we correctly classify
+are not part of objects currently being tracked. Using this
+                                                      the object), and the second using actual trained state-of-the-
+  5Although one can envisage signiﬁcantly better estimates, for ex- art classiﬁers. In addition to the different fovea control algo-
+ample using logistic regression to recalibrate these probabilities, the rithms, we also compare our method against performing ob-
+algorithm’s performance appeared fairly insensitive to this choice. ject classiﬁcation on full frames for both low-resolution and
+
+                                                IJCAI-07
+                                                  2119

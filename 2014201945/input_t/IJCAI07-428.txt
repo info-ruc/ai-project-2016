@@ -1,0 +1,426 @@
+       Learning “Forgiving” Hash Functions: Algorithms and Large Scale Tests  
+
+                                  Shumeet Baluja & Michele Covell 
+                                              Google, Inc. 
+                       1600 Amphitheatre Parkway, Mountain View, CA. 94043 
+                                     {shumeet,covell}@google.com 
+
+
+                    Abstract                          While our system can easily be incorporated into those de-
+                                                      signed for longer snippet recognition, by testing on short 
+    The problem of efficiently finding similar items in snippets we highlight the fundamental retrieval issues that 
+    a large corpus of high-dimensional data points 
+                                                      are often otherwise masked through the use of extra tempo-
+    arises in many real-world tasks, such as music, im-
+                                                      ral coherency constraints made possible with longer snip-
+    age, and video retrieval.  Beyond the scaling diffi- pets.  Further, we will demonstrate improved performance 
+    culties that arise with lookups in large data sets, the 
+                                                      on the retrieval of both short and long snippets. 
+    complexity in these domains is exacerbated by an 
+    imprecise definition of similarity. In this paper, we 1.1 Background 
+    describe a method to learn a similarity function 
+    from only weakly labeled positive examples.  Once Generally stated, we need to learn how to retrieve examples 
+    learned, this similarity function is used as the basis from a database that are similar to a probe example in a 
+    of a hash function to severely constrain the number manner that is both efficient and compact.  One way to do 
+    of points considered for each lookup.  Tested on a this is to learn a distance metric that (ideally) forces the 
+    large real-world audio dataset, only a tiny fraction smallest distance between points that are known to be dis-
+    of the points (~0.27%) are ever considered for each similar to be larger than the largest distance between points 
+    lookup.  To increase efficiency, no comparisons in that are known to be similar [Hastie & Tibrishani, 1996; 
+    the original high-dimensional space of points are Shental et al., 2002; Bar-Hillel et al., 2002;  Tsang et al., 
+    required.  The performance far surpasses, in terms 2005].  These methods can be used with k-nearest neighbors 
+    of both efficiency and accuracy, a state-of-the-art (knn) approaches.  knn approaches are well suited to our 
+    Locality-Sensitive-Hashing based technique for the task: They work with many classes and are able to dynami-
+    same problem and data set.                        cally add new classes without retraining.   Approximate knn 
+                                                      is efficiently implemented through Locality-Sensitive Hash-
+                                                      ing (LSH) [Gionis et al., 1999].  LSH and other hash func-
+1   Introduction                                      tions are sublinear in the number of elements examined 
+This work is motivated by the need to retrieve similar audio, compared to the size of the database.   
+image, and video data from extensive corpora of data.   The LSH works for points with feature vectors that can be 
+large number of elements in the corpora, the high dimen- compared in a Euclidean space.  The general idea is to parti-
+sionality of the points, and the imprecise nature of “similar” tion the feature vectors into l subvectors and to hash each 
+make this task challenging in real world systems.     point into l separate hash tables, each hash table using one 
+  Throughout this paper, we ground our discussion in a of the subvectors as input to the hash function. Candidate 
+real-world task: given an extremely short (~1.4 second) au-
+dio “snippet” sampled from anywhere within a large data-
+base of songs, determine from which song that audio snippet 
+came.   We will use our system for retrieval from a database 
+of 6,500 songs with 200 snippets extracted from each song, 
+resulting in 1,300,000 snippets (Figure 1). The short dura-
+tion of the snippets makes this particularly challenging.  
+  The task of distortion-robust fingerprinting of music has 
+been widely examined.  Many published systems created to 
+this point attempt to match much longer song snippets, some 
+report results on smaller datasets, and others use prior prob-
+abilities to scale their systems  [Ke et al., 2005; Haitsma & Figure 1:   A typical spectrogram and extracted snippets;  note the 
+Kalker, 2002; Burges et al., 2003; Shazam, 2005].   We as- overlap. The task: given any snippet, find others from the same song.   
+sume a uniform prior and match extremely small snippets.   
+
+
+                                                IJCAI-07
+                                                  2663neighbors can then be efficiently retrieved by partitioning from all the songs with which we expect to use it.  Effec-
+the probe feature vector and collecting the entries in the tively, this means that the learned function must maintain 
+corresponding hash bins.  The final list of potential entropy in the hashes for even new samples.  Whether or not 
+neighbors can be created by vote counting, with each hash the songs have been seen before, they must be well distrib-
+casting votes for the entries of its indexed bin, and retaining uted across the hash bins.  If entropy is not maintained, 
+the candidates that receive some minimum number of votes, points will be hashed to a small number of bins, thereby 
+vt.  If vt = 1, this takes the union of the candidate lists.  If vt = rendering the hash ineffective.   
+l, this takes the intersection.                         The requirement to explicitly control entropy throughout 
+  This idea has been extended by [Shakhnarovich, 2006] to training is a primary concern.   In the next section, we dem-
+Parameter-Sensitive Hashing (PSH).  To remove the Euclid- onstrate the use of a neural network with multiple outputs to 
+ean requirement,  PSH uses paired examples, both positive learn a hash function. Entropy is explicitly controlled by 
+(similar) and negative (dissimilar) to learn the l hash func- carefully constructing the outputs of the training examples.   
+tions that best cluster the two halves of each positive exam- Other learning methods could also have been used; how-
+ple while best separating the two halves of each negative ever, neural networks [Hertz et al., 1991; Pollack, 1990] are 
+example.   This approach is closest to the one presented suited to this task since, as we will show, controlling the 
+here. One difference is the choice of learning constraints.  entropy of each output and between outputs (to reduce cor-
+[Shakhnarovich, 2006] used positive examples (similar relation) is possible.  The incremental training of the net-
+pairs) and explicitly provided negative examples (dissimilar work provides an opportunity to dynamically set the target 
+pairs) to induce the learning algorithm to find a hash func- outputs to give similar songs similar target outputs. 
+tion.  The unstated assumption is that any hash function that 
+adequately learns the negative examples will provide  2.1 Explicitly Maintaining Entropy in Training 
+(nearly) equal occupancy on the various hash bins so that We train a neural network to take as input an audio spectro-
+the validation step does not then process unpredictably large gram and to output a bin location where similar audio spec-
+numbers of potential neighbors. In our work, the learning trograms will be hashed.  We represent the outputs of the 
+function is created using only weakly labeled positive ex- neural network in binary notation; for these experiments, we 
+amples (similar pairs) coupled with a forced constraint to- create a hash table with 1024 bins and therefore train the 
+wards maximum entropy (nearly uniform occupancy).  We network with 10 binary target outputs.1 
+do not explicitly create negative examples (dissimilar pairs), For training, we select 10 consecutive snippets from 1024 
+but instead rely on our maximum-entropy constraint to pro- songs, sampled 116 ms apart (total 10,240 snippets).   Each 
+vide that separation.  As will be shown, our learning con- snippet from the same song is labeled with the same target 
+straints have the advantage of allowing for similarities be- song code.  This is a weak label.  Although the snippets that 
+tween only nominally distinct samples, without requiring are temporally close may be ‘similar’, there is no guarantee 
+the learning structure to attempt to discover minor (or non- that snippets that are further apart will be similar – even if 
+existent) differences in these close examples.        they are from the same song.  Moreover, snippets from dif-
+  The remainder of this paper is organized as follows.  The ferent songs may be more similar than snippets from the 
+next section will describe the properties we need for learn- same song. However, we do not require this detailed label-
+ing a hash function, the training procedure and the analysis.  ing; such labels would be infeasible to obtain for large sets. 
+Section 3 shows how the system can be scaled to handle  The primary difficulty in training arises in finding suit-
+large amounts of data.  Section 4 demonstrates this con- able target outputs for each network.  Every snippet of a 
+cretely on a real-world audio-retrieval task. Section 5 closes song is labeled with the same target output.  The target out-
+the paper with conclusions and future work.           put for each song is assigned randomly, chosen without re-
+                                                      placement from Ρ()S , where S is 10 bits – i.e., each song 
+2   Learning Hash Functions                           is assigned a different set of 10 bits and Ρ()S  is the power 
+                                                      set, containing 210 different sets of 10 bits.  Sampling with-
+  All deterministic hash functions map the same point to 
+                                                      out replacement is a crucial component of this procedure.  
+the same bin.  Our goal is to create a hash function that also 
+groups “similar” points in the same bin, where similar is Measured over the training set, the target outputs will have 
+                                                      maximal entropy.  Because we will be using the outputs as a 
+defined by the task.  We call this a forgiving hash function 
+                                                      hash, maintaining high entropy is crucial to preserving a 
+in that it forgives differences that are small with respect to 
+the implicit distance function being calculated.      good distribution in the hash bins. The drawback of this 
+                                                      randomized target assignment is that different songs that 
+  To learn a forgiving hash function for this task, we need 
+                                                      sound similar may have entirely different output representa-
+to satisfy several objectives:  (1) The hash function must be 
+able to work without explicitly defining a distance metric.  tions (large Hamming distance between their target outputs).  
+                                                      If we force the network to learn these artificial distinctions, 
+(2) The hash function must learn with only weakly labeled 
+                                                      we may hinder or entirely prevent the network from being 
+examples; in our task, we have indications of what points 
+are similar (the song label), but we do not have information able to correctly perform the mapping.      
+of which parts of songs sound similar to other parts.  (3) 
+The hash function must be able to generalize beyond the                                                  
+                                                         1  1024 is a small number of bins for a hash table that will hold millions 
+examples given; we will not be able to train it on samples of items; in Section 2.3, we will show how to efficiently scale the size. 
+
+
+                                                IJCAI-07
+                                                  2664  Instead of statically assigning the outputs, the target out- Training Progress  (Correct out of 10 bits)
+puts shift throughout training.  After every few epochs of 8
+                                                                                             With Reordering 
+weight updates, we measure the network’s response to each 7.5                                (59 hidden) 
+of the training samples.  We then dynamically reassign the 
+                                           ()            7                                   With Reordering 
+target outputs for each song to the member from Ρ S  that                                    (5 hidden) 
+is closest to the network’s response, aggregated over that 6.5
+
+song’s snippets. During this process, we maintain two con- 6
+straints: all snippets from each song must have the same                                     W/O Reordering 
+                                                        5.5                                  (59 hidden) 
+
+output and no two songs can have the same target (so that Correct  Outputs
+                                                         5                                   W/O Reordering 
+each member of Ρ()S  is assigned once).  This is a suitable                                  (5 hidden) 
+procedure since the specific outputs of the network are not 4.5
+
+of interest, only the high-entropy distribution of them and 4
+the fact that same-song snippets map to the same outputs.     1 80159 238 317 396 475 554 633 712791 870 949
+  By letting the network adapt its outputs in this manner,               Epoch
+the outputs across training examples can be effectively reor- Figure 3:   Training with and without output reordering, for small and 
+                                                       large networks.   Note that without output reordering, the number of 
+dered to avoid forcing artificial distinctions.  Through this correct outputs ~5.6/10.  With reordering, it approaches 7.5.    
+process, the outputs are effectively being reordered to per-
+form a weak form of clustering of songs: similar songs are 
+likely to have small Hamming distances in target outputs.   lookup, indicating how well the candidates are distributed, 
+More details of a similar dynamic reordering can be found with respect to queries) and (2) the number of hashed bins 
+in [Caruana et al., 1996].  The training procedure is summa- that include a snippet from the same song (indicating accu-
+rized in Figure 2.   Figure 3 shows the progress of the train- racy). In this section, we use a simple recall criterion:  of the 
+ing procedure through epochs and compares it to training snippets in the hashed bin, are any from the correct song.  
+                      2
+without output reordering .  Note that without reordering, Note that this is a very loose indicator of performance; in 
+the smaller network’s performance was barely above ran- Section 3, when we utilize multiple hashes, we will make 
+dom: 5.4/10.  The larger network without reordering per- this constraint much tighter. 
+forms marginally better (5.6/10).  However, both networks For these exploratory experiments, we trained 58 net-
+trained with output reordering learn a mapping more consis- works, 2 with 5 hidden units, 2 with 7 hidden units, etc, up 
+tently than networks without reordering (7.0/10 and 7.5/10). to 2 with 61 hidden units.  Each was then used to hash ap-
+                                                      proximately 38,000 snippets (drawn from 3,800 songs with 
+2.2 Using the Outputs as Hash-Keys                    10 snippets each).  These 3800 songs formed our test set for 
+In this section, we take a first look at how the network’s this stage, and were independent from the 1024-song train-
+outputs perform when used as hash keys.  There are two ing set.  For this test, we removed the query q from the da-
+metrics that are of primary interest in measuring perform- tabase and determined in which bin it would hash by propa-
+ance: (1) the number of candidates found in each hashed bin gating it through the networks.  After propagation, for each 
+(that is, how many candidates must be considered at each of the 10 network outputs, if the output was greater than the 
+                                                      median response of that output (as ascertained from the 
+  SELECT M=2n songs and DEFINE B(t) = tth binary code training set), it was assigned +1; otherwise, it was assigned 
+  FOREACH (song Sm)                                   0.  The median was chosen as the threshold to ensure that 
+    │FOR (Xm iterations ) { ADD snippet Sm,x  to training set } the network has an even distribution of 0/+1 responses. The 
+                 ∈     n         ⇔
+    │SELECT target Tm  {0,1}  s.t. Tm1 = Tm2  m1 = m 2 10 outputs were treated as a binary number representing the 
+  FOR (Idyn iterations)                               hash bin.   
+    │TRAIN network for Edyn epochs (Edyn passes through data) Figure 4 shows the total number of candidates (both cor-
+    │FOREACH (song Sm)                                rect and incorrect) found in the hashed bin (on average) as a 
+    │  │SET  A  = Σ O(S ) / X   
+           m  x∈Xm   m,x  m                           function of the number of hidden units in the network.   
+    │  │ (where O(Sm,x) = actual network output for snippet Sm,x) Figure 4 also shows the percentage of lookups that resulted 
+    │SET Ut = { t | 0 < t ≤ M} (the unassigned binary codes)  in a bin which contained a snippet from the correct song.   
+    │SET Us = {s | 0 < s ≤ M } (the unassigned songs) To understand Figure 4, the raw numbers are important to 
+    │FOR (M  iterations) 
+                                                      examine.  Looking at the middle of the graph, every query 
+    │  │FIND (s, t) = arg min s∈U  ,t∈U   || B(t) - As ||2  
+                       s  t                           on average was hashed into a bin with approximately 200 
+    │  │SET Ts = B(t) 
+    │  │REMOVE s from U   and REMOVE t from U         other snippets (~0.5% of the database).  In ~78% of the re-
+                   s                t                 trievals, the hash bin contained a snippet from the correct 
+  TRAIN network for Efixed epochs 
+                                                      song.  Note that if the hashes were completely random, we 
+  Settings used:                                      would expect to find a snippet from the same song less than 
+  n=10 M= 1024, Xm =10 (∀m), Edyn =10,  Idyn =50, Efixed=500 1% of the time.   Figure 4 also shows the negative effects of 
+                                                      poorer training on the small networks.   Returning to Figure 
+ Figure 2:  Training algorithm and parameter settings used. 
+                                                      3, we see that even with the output reassignment, the small 
+2 Standard back-propagation (BP) was used to train the networks [Hertz et networks (“5 hidden”) lags behind the large networks (“59 
+al., 1989].   Parameters for BP: learning rate 0.00025, momentum = 0. 
+
+
+                                                IJCAI-07
+                                                  2665                Performance vs. Hidden Units                   Training with and without reordering & random weights
+  600                                         81%
+                                                         90%
+                       Candidates
+                       Matches                80%        80%
+  500                                                                                             with 
+   Bin
+  d                                                      70%                                      reordering  
+                                              79%
+  400
+                                                         60%
+
+
+   in  Hashe                                  78%
+
+
+  d                                                      50%
+  300
+                                                                                                  without 
+                                              77%        40%
+                                                                                                  reordering  
+  200                                                    30%
+  ates  Foun
+                                                  Bins with Correct Matches  Correct   with  Bins
+                                              76%        Matches  Correct  with  Bins
+  d
+                                                 d
+                                                        d
+  i
+  d                                                      20%                                      random 
+  100
+
+
+  Can                                         75%
+
+
+                                                  Hashe                                           weights  
+                                                         Hashe 10%
+                                                 %
+                                                        %
+    0                                         74%         0%
+     5   11  1723293541           47  53    61
+                                                           5 7 1 3 7 9 3 5 9 1  7 1 3 7     5 9 1
+                                                               1 1 1 1 2 2 2 3 35 3 4 4 4 49 53 5 5 6
+                      Hidden Units
+                                                                           Hidden Units
+  Figure 4:   Performance of networks in terms of candidates found in 
+                                                        Figure 5:   Performance of training procedures.  Measured by % of 
+  hashed bin and % of queries finding matches from the same song in queries finding the same song in the bin to which it is hashed.  Avg # 
+  the bin to which it is hashed.                        of snippets examined per bin for the training w/reordering is: 174; for 
+                                                        static-output training:  123; and for random networks: 123.    
+hidden”) by about ½ bit of accuracy.  The effect of the 
+poorer training is seen in the larger number of candidates in mum-correlation selection, and (3) minimum-mutual-
+the hashed bin coupled with the small absolute change in information selection.  Both of the last two methods are 
+recall (from ~80% to ~76%) given by the networks with 5-9 chosen in a greedy manner [Chow & Liu, 1969].  By ac-
+hidden units (Figure 4).     However, by using only networks counting for mutual information, we explicitly attempt to 
+with 11 or more hidden units, we can reduce the number of spread the samples across bins by ensuring that the com-
+candidates by ~70% (from ~500 to ~150) with minor impact bined entropy of the hash-index bits remains high.  This 
+on the recall rate (< 2%).                            method had a slight advantage over the others, so this will 
+   In Figure 5, we compare the performance of using the be used going forward. 
+outputs of the networks trained with and without output 
+           3                                            We are no longer constrained to using only 10 bits since 
+reassignment , and using networks with random weights.  we can pick an arbitrary number of outputs from the net-
+Note that using random weights is not the same as random work ensemble for our hash function.  Figure 6 shows the 
+hashing; by passing snippets through the network, it will be performance in terms of the number of candidates in each of 
+more likely to map similar snippets to the same bin; how- the hashed bins and correct matches, as a function of bits 
+ever, the weightings and combinations of the inputs will not that are used for the hash (or equivalently, the number of 
+be tuned to the task.  As can be seen in Figure 5, for every total hash bins).   Figure 6 also shows two other crucial re-
+lookup, there is a higher probability of finding a snippet sults.  The first is that by selecting the hash bits from multi-
+from the same song using the fully trained networks, over ple networks, we decrease the number of candidates even 
+networks with static-output training or with no training.   when using the same number of bins (1024).  The number of 
+                                                      candidates in each hashed bin decreased by 50% - from 200 
+2.3 Using the Networks in Practice                    (Figure 3) to 90 (Figure 4, column 1).   Second, when in-
+In the previous section, we analyzed the performance of creasing the number of bins from 1024 (210) to 4,194,304 
+each of the networks in terms of the average number of can- (222), we see a decrease in the number of candidates from 90 
+didates in the hashed bins and the accuracy of lookups.  In to 5 per hashed bin.   Although there is also a decrease in the 
+this section, we combine the outputs of the networks to cre- number of correct matches, it is not proportional; it de-
+ate a large-scale hashing system.   So far, each of the net- creases by ~50% (instead of decreasing by 94% as does the 
+works was trained with only 10 outputs, allowing 1024 bins number of candidates).   In the next section, we describe 
+in the hash.   A naïve way to scale the hash to a larger num- how to take advantage of the small number of candidates 
+ber of bins is to train the network with more outputs.  How- and regain the loss in matches.  
+ever, because larger networks necessitate more training data, 
+this becomes computationally prohibitive.4                              Performance vs. Hash Bins
+                                                        100                                          80%
+                                                                              Candidates
+  Instead, we use two facts: that training networks is a ran- 90
+                                                                              Matches                70%
+
+domized process dependent on the initial weights, and that  Bin 80
+                                                        d                                            60%
+networks with different architectures may learn different 70
+mappings.  Hence, given that we have already trained multi- 60                                       50%
+                                                         in  Hashe
+ple networks, we can select bits for our hash from any of the d 50                                   40%
+networks’ outputs. Numerous methods can be used to select 40                                         30%
+                                                                                                         Bins with Correct Matches  Correct  with  Bins
+                                                        ates Foun ates
+
+                                                         30                                             d
+                                                        d
+which outputs are used for a hash.  We explored three meth- i                                        20%
+                                                        d 20
+
+
+ods of selecting the outputs: (1) random selection, (2) mini-                                            Hashe
+                                                        Can 10                                       10%
+                                                                                                        %
+                                                         0                                           0%
+   3 Fig. 3 provided a comparison of two training methods for two sizes 1,024 4,096 16,384 65,536 262,144 1,048,576 4,194,304
+                                                                            # of Hash Bins
+of networks.  Fig. 5 shows the effects of using the outputs of networks, 
+trained with 3 methods, as hashes for the test data, as network size grows. Figure 6:   As we increase the number of bins by 4096×, the matches 
+   4 Depending on # of hidden units, training ranged from hours to days.  decrease by 50%.  Meanwhile, the candidates decrease from ~90 to ~5.  
+
+
+                                                IJCAI-07
+                                                  26663  A Complete Hashing System                          original high-dimensional spectrogram representation.  
+From the previous sections, when a new query, q, arrives, it After passing through the networks, the snippet is repre-
+                                                      sented by the quantized binary outputs: the original repre-
+is passed into an ensemble of networks from which select 
+                                                      sentation is no longer needed.  
+outputs are used to determine a single hash location in a 
+single hash table.  Analogous to LSH, we can also general-  As can be seen in Figure 7A, the top line is the perform-
+                                                      ance of the system with l=22 hashes; with only 1,024 bins, 
+ize to l hash tables, with l distinct hash functions.   To do 
+                                                      the number of candidates is unacceptably large: over 2,000.   
+this, we simply select from the unused outputs of the net-
+work ensemble to build another hash function that indexes With smaller numbers of hashes (shown in the lower lines), 
+                                                      the number of candidates decreases.  As expected, looking 
+into another hash table.   Now, when q arrives, it is passed 
+                                                      towards the right of the graph, as the number of bins in-
+through all of the networks. The outputs of the networks, if 
+they have been selected into one of l hashes, are used to creases, the number of candidates decreases rapidly for all 
+                                                      of the settings of l considered. 
+determine the bin of that hash.  In Figure 7, we experiment 
+                                                       Figure 7B provides the most important results.   For the 
+with the settings for l (1-22) and # of network outputs per 
+hash (10-22:  1024 – 4,194,304 bins per hash).        top line (22 hashes), as the number of bins increases, the 
+                                                      ability to find the best match barely decreases – despite the 
+ In the previous section, we measured the recall as being 
+                                                      large drop in the number of candidates (Figure 7A).  By 
+whether the hashed bin contained a snippet from the correct 
+song.  Here, we tighten the definition of success to be the examining only 200-250 candidates per query (~0.6% of the 
+                                                      database), we achieve between 80-90% accuracy (l > 14).   
+one we use in the final system.  We rank order the snippets 
+                                                        In Figure 7B, note that for the lowest two lines (l=1,3), as 
+in the database according to how many of the l hash bins 
+provided by the l hashes contain each snippet.   The top the number of bins increases, the accuracy rises – in almost 
+                                                      every other case, it decreases.  The increase with l=1-3 oc-
+ranked snippet is the one that occurs most frequently. We 
+                                                      curs because there are a large number of ties (many songs 
+declare success if the top snippet comes from the same song 
+as query q.  Note we never perform comparisons in the have the same support) and we break ties with random se-
+
+
+                                     A.               Unique Candidates Across All Hashes 
+                                                   Shown for System with l =1-22 Sets of Hashes
+
+                                           2500
+                                                 22
+
+                                                 20
+                                          s
+                                           2000  18
+
+                                                 16
+
+                                           1500  14
+
+                                                 12
+                                          ates  across  all  Hashe
+
+                                          d      10
+                                          i 1000
+                                          d
+                                                 8
+
+                                                 6
+   Figure 7:   Performance of sys-          500  5
+                                          Unique  Can
+   tems with (l=1..22) hashes, as a              3
+   function of the number of bins.               1
+                                             0
+                                                 1,024   4,096  16,384  65,536 262,144 1,048,576 4,194,304
+   A: # of candidates considered                                       Hash Bins
+   (smaller better). 
+                                                               Match in Top Position
+                                                     Shown for System with l =1-22 Sets of Hashes
+   B:  % of times correct song iden- B. 
+                                            100%
+   tified (higher better).                      22
+                                                18
+                                                16
+                                           n
+                                                14
+                                                12
+                                            75% 10
+                                                 8
+
+                                                 6
+                                                 5
+
+                                            50%
+
+                                                 3
+
+
+                                           Queries with Match in Top Positioin  Top   Match with Queries  25%
+                                           %
+
+
+                                                 1
+                                             0%
+                                                  1,024  4,096  16,384  65,536 262,144 1,048,576 4,194,304
+                                                                       Hash Bins
+
+
+                                                IJCAI-07
+                                                  2667

@@ -1,0 +1,322 @@
+  Semi-Supervised Learning of Attribute-Value Pairs from Product Descriptions
+
+                   Katharina Probst, Rayid Ghani, Marko Krema, Andrew Fano
+                             Accenture Technology Labs, Chicago, IL, USA
+                                                Yan Liu
+                            Carnegie Mellon University, Pittsburgh, PA, USA
+
+
+                    Abstract                          the retailer is able to describe the shoe not only with a prod-
+                                                      uct number, but with a set of attribute-value pairs, such as
+    We describe an approach to extract attribute-value material: lightweight mesh nylon, sole: low proﬁle, lacing
+    pairs from product descriptions. This allows us to system: standard. This would enable the retailer to use data
+    represent products as sets of such attribute-value from other products having similar attributes. While many re-
+    pairs to augment product databases. Such a rep-   tailers have recently realized this and are working towards en-
+    resentation is useful for a variety of tasks where riching product databases with attribute-value pairs, the work
+    treating a product as a set of attribute-value pairs is currently being done completely manually: by looking at
+    is more useful than as an atomic entity. Examples product descriptions that are available in an internal database
+    of such applications include product recommenda-  or on the web or by looking at the actual physical product
+    tions, product comparison, and demand forecast-   packaging in the store. The work presented in this paper
+    ing. We formulate the extraction as a classiﬁca-  is motivated by the need to make the process of extracting
+    tion problem and use a semi-supervised algorithm  attribute-value pairs from product descriptions more efﬁcient
+    (co-EM) along with (Na¨ıve Bayes). The extraction and cheaper by developing an interactive tool that can help
+    system requires very little initial user supervision: human experts with this task.
+    using unlabeled data, we automatically extract an   The task we tackle in this paper requires a system that can
+    initial seed list that serves as training data for the process textual product descriptions and extract relevant at-
+    supervised and semi-supervised classiﬁcation algo- tributes and values, and then form pairs by associating values
+    rithms. Finally, the extracted attributes and values with the attributes they describe. This is accomplished with
+    are linked to form pairs using dependency informa- minimal human supervision. We describe the components of
+    tion and co-location scores. We present promising our system and show experimental results on a web catalog
+    results on product descriptions in two categories of of sporting goods products.
+    sporting goods.
+                                                      2   Related Work
+1  Introduction                                       While we are not aware of any system that addresses the
+Retailers have been collecting a large amount of sales data task described in this paper, much research has been done
+containing customer information and related transactions. on extracting information from text documents. One task that
+These data warehouses also contain product information has received attention recently is that of extracting product
+which is often very sparse and limited. Most retailers treat features and their polarity from online user reviews. Liu et
+their products as atomic entities with very few related at- al. [Liu and Cheng, 2005] describe a system that focuses on
+tributes (typically brand, size, or color). This hinders the extracting relevant product attributes, such as focus for digital
+effectiveness of many applications that businesses currently cameras. These attributes are extracted by use of a rule miner,
+use transactional data for such as product recommendation, and are restricted to noun phrases. In a second phase, the
+demand forecasting, assortment optimization, and assortment system extracts polarized descriptors, e.g., good, too small,
+comparison. If a business could represent their products in etc. [Popescu and Etzioni, 2005] describe a similar approach:
+terms of attributes and attribute values, all of the above appli- they approach the task by ﬁrst extracting noun phrases as can-
+cations could be improved signiﬁcantly.               didate attributes, and then computing the mutual information
+  Suppose, for example, that a sporting retailer wanted to between the noun phrases and salient context patterns. Our
+forecast sales of a speciﬁc running shoe. Typically, they work is related in that in both cases, a product is expressed as
+would look at the sales of the same product from the same a vector of attributes. However, our work focuses not only
+time last year and adjust that based on new information. Now on attributes, but also on values, and on pairing attributes
+suppose that the shoe is described with the following at- with values. Furthermore, the attributes that are extracted
+tributes: Lightweight mesh nylon material, Low Proﬁle Sole, from user reviews are often different than the attributes of the
+Standard lacing system. Improved forecasting is possible if products that retailers would mention. For example, a review
+
+                                                IJCAI-07
+                                                  2838might mention photo quality as an attribute but speciﬁcations 4 rolls white athletic tape
+of cameras would tend to use megapixels or lens manufac- Extended Torsion bar
+turer in the speciﬁcations.                              Audio/Video Input Jack
+  Information extraction for ﬁlling templates, e.g., [Seymore Vulcanized latex outsole construction is
+et al., 1999; Peng and McCallum, 2004], is related to the ap- lightweight and ﬂexible
+proach in this paper in that we extract certain parts of the It can be seen from these examples that the entries are not
+text as relevant facts. It however differs from such tasks in often full sentences. This makes the extraction task more dif-
+several ways, notably because we do not have a deﬁnitive ﬁcult, because most of the phrases contain a number of mod-
+list of ‘template slots’ available. Recent work in bootstrap- iﬁers, e.g., cutter being modiﬁed both by 1 and by tape.For
+ping for information extraction using semi-supervised learn- this reason, there is often no deﬁnitive answer as to what the
+ing has focused on named entity extraction [Jones, 2005; extracted attribute-value pair should be, even for humans in-
+Collins and Singer, 1999; Ghani and Jones, 2002],which specting the data. For instance, should the system extract cut-
+is related to part of the work presented here (classifying the ter as an attribute with two separate values, 1 and tape,or
+words/phrase as attributes or values or as neither).  should it rather extract tape cutter as an attribute and 1 as
+                                                      a value? To answer this question, it is important to keep in
+                                                      mind the goal of the system to express each product as a vec-
+3  Overview of the Attribute Extraction               tor of attribute-value pairs, and to compare products. For this
+   System                                             reason, it is more important that the system is consistent than
+Our system consists of ﬁve modules:                   which of the valid answers it gives.
+                                                        The data is ﬁrst tagged with parts of speech (POS) using
+ 1. Data Collection from an internal database containing the Brill tagger [Brill, 1995] and stemmed with the Porter
+    product information/descriptions or from the web using stemmer [Porter, 1980]. We also replace all numbers with the
+    web crawlers and wrappers.                        unique token #number# and all measures (e.g., liter, kg)by
+                                                      the unique token #measure#.
+ 2. Seed Generation, i.e., automatically creating seed
+    attribute-value pairs.                            5   Seed Generation
+ 3. Attribute-Value Entity Extraction from unlabeled  Once the data is collected and processed, the next step is
+    product descriptions. This tasks lends itself naturally to to provide labeled seeds for the learning algorithms to learn
+    classiﬁcation. We chose a supervised algorithm (Na¨ıve from. The extraction algorithm is seeded in two ways: with
+    Bayes) as well as a semi-supervised algorithm (co-EM). a list of known attributes and values, as well as with an unsu-
+ 4. Attribute-Value Pair Relationship Extraction, i.e., pervised, automated algorithm that extracts a set of seed pairs
+    forming pairs from extracted attributes and values. We from the unlabeled data. Both of these seeding mechanisms
+    use a dependency parser (Minipar, [Lin, 1998])aswell are designed to facilitate scaling to other domains.
+    as co-location scores.                              We also experimented with labeled training data: some of
+                                                      the data that we used in our experiments exhibits structural
+ 5. User Interaction via active learning to allow users to
+                                                      patterns that clearly indicate attribute-value pairs separated
+    correct the results as well as provide additional training
+                                                      by colons, e.g., length: 5 inches. Such structural cues can
+    data for the system to learn from.
+                                                      be used to obtain labeled training data. In our experiments,
+  The modular design allows us to break the problem into however, the labeled pairs were not very useful. The results
+smaller steps, each of which can be addressed by various ap- obtained with the automatically extracted pairs are compara-
+proaches. We only focus on tasks 1-4 in this paper and de- ble to the ones obtained when the given attribute-value pairs
+scribe our approach to each of the four tasks in greater detail. were used. In the case of comparable results, we prefer the
+We are currently investigating the user interaction phase. unsupervised approach because it does not rely on the struc-
+                                                      ture of the data and is domain-independent.
+                                                        We use a very small amount of labeled training data in the
+4  Data and Preprocessing                             form of generic and domain-speciﬁc value lists that are read-
+For the experiments reported in this paper, we developed a ily available. We use four lists: one each for colors, materials,
+web crawler that traverses retailer web sites and extracts prod- countries, and units of measure. We also use a list of domain-
+uct descriptions. We crawled the web site of a sporting goods speciﬁc (in our case, sports) values: this list consists of sports
+retailer1, concentrating on the domains of tennis and football. teams (such as Pittsburgh Steelers), and contains 82 entries.
+We believe that sporting goods is an interesting and relatively In addition to the above lists, we automatically extract a
+challenging domain because the attributes are not easy and small number of attribute-value seed pairs in an unsuper-
+straightforward to detect. For example, a baseball bat would vised way as described in the following. Extracting attribute-
+have non-obvious attributes and values such as aerodynamic value pairs is related to the problem of phrase recognition in
+construction, curved hitting surface, etc. The web crawler that both methods aim at extracting pairs of highly correlated
+gives us a set of product descriptions, which we use as (unla- words. There are however differences between the two prob-
+beled) training data. Some examples are:              lems. Consider the following two sets of phrases:
+                                                        back pockets, front pockets,andzip pockets
+  1www.dickssportinggoods.com                           vs.
+
+                                                IJCAI-07
+                                                  2839  Pittsburgh Steelers, Chicago Bears                              value            attribute
+  The ﬁrst set contains an example of an attribute with sev-      carrying, storage case
+eral possible values. The second set contains phrases that are    main, racquet    compartment
+not attribute-value pairs. The biggest difference between the     welt, side-seam, key pocket
+two lists is that attributes generally have more than one possi-
+ble value but do not occur with a very large number of words. Table 1: Automatically extracted seed attribute-value pairs
+For this reason, two words that always occur together and
+common words such as the are not good attribute candidates.
+                                                      name pairs, e.g., Smith is extracted as an attribute as it occurs
+  In order to exploit these observations, we consider all bi-
+                                                      as part of many phrases and fulﬁlls our criteria (Joe Smith,
+grams wiwi+1 as candidates for pairs, where wi is a candidate
+                                                      Mike Smith, etc.) after many ﬁrst names. Our unsupervised
+value, and wi+1 is a candidate attribute. Although it is not
+                                                      seed generation algorithm gets about 65% accuracy in the ten-
+always the case that the modifying value occurs (directly) be-
+                                                      nis category and about 68% accuracy in the football category.
+fore its attribute, this heuristic allows us to extract seeds with
+                                                      We have experimented with manually correcting the seeds by
+high precision. Suppose word w (in position i +1) occurs
+                                                      eliminating all those that were incorrect. This did not result
+with n unique words w1...n in position i.Werankthewords
+                                                      in any improvement of the ﬁnal extraction performance, lead-
+w1...n by their conditional probability p(wj|w),wj ∈ w1...n,
+                                                      ing us to conclude that our algorithm is robust to noise and is
+where the word wj with the highest conditional probability is
+                                                      able to deal with noisy seeds.
+ranked highest.
+  The words wj that have the highest conditional probabil-
+ity are candidates for values for the candidate attribute w. 6 Attribute and Value Extraction
+Clearly, however, not all words are good candidate attributes. After generating initial seeds, the next step is to use the seeds
+We observed that attributes generally have more than one as labeled training data to train the learning algorithms and
+value and typically do not occur with a wide range of words. extract attributes and values from the unlabeled data. We for-
+For example, frequent words such as the occur with many mulate the extraction as a classiﬁcation problem where each
+different words. This is indicated by their conditional prob- word or phrase can be classiﬁed as an attribute or a value
+ability mass being distributed over a large number of words. (or as neither). We treat this as a supervised learning prob-
+We are interested in cases where few words account for a high lem and use Na¨ıve Bayes as our ﬁrst approach. The initial
+proportion of the probability mass. For example, both Steel- seed training data is generated as described in the previous
+ers and on will not be good candidates for being attributes. section and serves as labeled data which Na¨ıve Bayes uses
+Steelers only occurs after Pittsburgh so all of the conditional to train a classiﬁer. Since our goal is to create a system
+probability mass will be distributed on one value whereas on that minimizes human effort required to train the system, we
+occurs with many words with the mass distributed over too use semi-supervised learning to improve the performance of
+many values. This intuition can be captured in two phases: Na¨ıve Bayes by exploiting large amounts of unlabeled data
+in the ﬁrst phase, we retain enough words wj to account for available for free on the Web. Gathering product descriptions
+apartz,0  <z<1      of the conditional probability mass (from retail websites) is a relatively cheap process using sim-
+k
+  j=1 p(wj|w). In the experiments reported here, z was set ple web crawlers. The expensive part is labeling the words
+to 0.5.                                               in the descriptions as attributes or values. We augment the
+  In the second phase, we compute the cumulative modiﬁed initial seeds (labeled data) with the all the unlabeled prod-
+mutual information for all candidate attribute-value pairs. We uct descriptions collected in the data collection phase and use
+again consider the perspective of the candidate attribute. If semi-supervised learning (co-EM [Nigam and Ghani, 2000]
+there are a few words that together have a high mutual in- with Na¨ıve Bayes) to improve attribute-value extraction per-
+formation with the candidate attribute, then we are likely to formance. The classiﬁcation algorithm is described in the
+have found an attribute and (some of) its values. We deﬁne sections below.
+the cumulative modiﬁed mutual information as follows:
+                    k                                 6.1  Initial labeling
+  Let p(w, w1...k)= j=1 p(w, wj ).Then
+                                                      The initial labeling of data items (words or phrases) is based
+                             p w, w1...k              on whether they match the labeled data. We deﬁne four
+  cmi w    w           P      (      )
+     ( 1...k; )=log      k                            classes to classify words into: unassigned, attribute, value,
+                   (λ ∗  j=1 p(wj )) ∗ ((λ − 1) ∗ p(w))
+                                                      or neither. The initial label for each word defaults to unas-
+  λ is a user-speciﬁed parameter, where 0 <λ<1.We     signed. If the unlabeled example does not match the labeled
+have experimented with several values, and have found that data, this default remains as input for the classiﬁcation algo-
+setting λ close to 1 yields robust results. Table 1 lists several rithm. If the unlabeled example does match the labeled data,
+examples of extracted attribute-value pairs.          then we simply assign it that label. By contrast, words that
+  As we can observe from the table, our unsupervised seed appear on a stoplist are tagged as neither.
+generation algorithm captures the intuition we described ear-
+lier and extracts high-quality seeds for training the system. 6.2 Na¨ıve Bayes Classiﬁcation
+We expect to reﬁne this method in the future. Currently, not We apply the training seeds to the unlabeled data in order
+all extracted pairs are actual attribute-value pairs. One typi- to assign labels to as many words as possible, as described
+cal example of an extracted incorrect pair are ﬁrst name - last in the previous section. These labeled words are then used
+
+                                                IJCAI-07
+                                                  2840as training data for Na¨ıve Bayes that classiﬁes each word or probabilities P (view2i|ck) are estimated using the current
+phrase in the unlabeled data as an attribute, a value, or neither. labels in the other view as well as the number of times the
+  The features used for classiﬁcation are the words of each view2 data element view2i occurs with each view1 data el-
+unlabeled data item, the surrounding 8 words, and their cor- ement. The opposite direction is done analogously. After co-
+responding parts of speech. With this feature set, we capture EM is run for a pre-speciﬁed number of iterations, we assign
+not only each word, but also its context as well as the parts of ﬁnal co-EM probability distributions to all view1i,view2j
+speech in its context. This is similar to earlier work in extract- pairs as follows:
+ing named entities using labeled and unlabeled data [Ghani
+             ]
+and Jones, 2002 .                                                             P (ck|view1i)+P (ck|view2j )
+                                                        P (ck|view1i,view2j )=
+6.3  co-EM for Attribute Extraction                                                       2
+Since labeling attributes and values is an expensive process, It should be noted that even words that are tagged with
+we would like to reduce the amount of labeled data required high probability as attributes or values are not necessarily ex-
+to train accurate classiﬁers. Gathering unlabeled product de- tracted as part of an attribute-value pair in the next phase.
+scriptions is cheap. This allows us to use the semi-supervised They will generally only be extracted if they form part of a
+learning setting by combining small amounts of labeled data pair, as described below.
+with large amounts of unlabeled data. We use the multi-view
+or co-training [Blum and Mitchell, 1998] setting, where each
+example can be described by multiple views (e.g., the word 7 Finding Attribute-Value Pairs
+itself and the context in which it occurs). It has been shown The classiﬁcation phase assigns a probability distribution
+that such multi-view algorithms often outperform a single- over all the labels to each word (or phrase). This is not
+view EM algorithm for information extraction tasks [Jones, enough: often, subsequent words that are tagged with the
+2005].                                                same label should be merged to form an attribute or value
+  The speciﬁc algorithm we use is co-EM: a multi-view phrase. Additionally, the system must establish links be-
+semi-supervised learning algorithm, proposed by [Nigam tween attributes and their corresponding values, so as to form
+and Ghani, 2000], that combines features from  both   attribute-value pairs, especially for product descriptions that
+co-training [Blum and Mitchell, 1998] and Expectation- contain more than one attribute and/or value. We accomplish
+Maximization (EM). co-EM is iterative, like EM, but uses merging and linking using the following steps:
+the feature split present in the data, like co-training. The sep- • Step 1: Link if attributes and values match a seed pair.
+aration into feature sets we use is that of the word to be clas-
+siﬁed and the context in which it occurs. Co-EM with Na¨ıve • Step 2: Merge words of the same label into phrases if
+Bayes has been applied to classiﬁcation, e.g., by [Nigam and their correlation scores exceed a threshold.
+Ghani, 2000], but so far as we are aware, not in the context • Step 3: Link if there is a syntactic dependency from the
+of information extraction. To express the data in two views, value to the attribute (as given by Minipar [Lin, 1998]).
+each word is expressed in view1 by the stemmed word itself, •
+plus the part of speech as assigned by the Brill tagger. The Step 4: Link if attribute and value phrases exceed a co-
+view2 for this data item is a context of window size 8, i.e. up location threshold.
+to 4 words (plus parts of speech) before and up to 4 words • Step 5: Link if attribute and value phrases are adjacent.
+(plus parts of speech) after the word or phrase in view1.By • Step 6: Add implicit attributes material, country, color.
+default, all words are processed into view1 as single words.
+                                                        •
+Phrases that are recognized with correlation scores (Yule’s Q, Step 7: Extract binary attributes, i.e., attributes without
+χ2, and pointwise mutual information) are treated as an entity values, if the attribute phrase appears frequently or if the
+and thus as a single view1 data item.                     unlabeled data item consists of only one word.
+  co-EM proceeds by initializing the view1 classiﬁer using The steps described here are heuristics and by no means
+the labeled data only. Then this classiﬁer is used to proba- the only approach that can be taken to linking. We chose
+bilistically label all the unlabeled data. The context (view2) this order to follow the intuition that pairs should be linked
+classiﬁer is then trained using the original labeled data plus ﬁrst by known pairs, then by syntactic dependencies which
+the unlabeled data with the labels provided by the view1 clas- are often indicative, and if those two fail, then they should
+siﬁer. Similarly, the view2 classiﬁer then relabels the data ﬁnally be linked by co-location information as a fallback. Co-
+for use by the view1 classiﬁer, and this process iterates for a location information is clearly less indicative than syntactic
+number of iterations or until the classiﬁers converge. dependencies, but can cover cases that dependencies do not
+  More speciﬁcally, labeling a view2 training example using capture.
+the current view1 classiﬁer is done as follows:         In the process of establishing attribute-value pairs, we ex-
+                                                      clude words of certain parts of speech, namely most closed-
+          P c |view  ∝ P c  ∗ P view |c
+           ( k    2i)    ( k)  (    2i k)             class items such as prepositions and conjunctions.
+if view2i does not match the labeled training data. Other- In step 6, the system ‘extracts’ information that is not ex-
+wise, the initial labeling is used.                   plicit in the data. The attributes (country, color, and/or mate-
+  P (ck) is the class probability for class ck, which is esti- rial) are added to any existing attribute words for this value
+mated using the current labels in the other view. The word if the value is on the list of known countries, colors, and/or
+
+                                                IJCAI-07
+                                                  2841materials. Assigning attributes from known lists is an initial pair in multiple ways, e.g., with navigation menu as the at-
+approach to extracting non-explicit attributes. In the future, tribute and Audio/JPEG as the value, or with menu as the
+we will explore this issue in greater details.        attribute and Audio/JPEG navigation as the value. For this
+  After all seven pair identiﬁcation steps, some attribute or reason, we give partial credit to an automatically extracted
+value phrases can remain unafﬁliated. Some of them are valid attribute-value pair, even if it does not completely match the
+attributes with binary values. For instance, the data item Im- human annotation.
+ported is a valid attribute with the possible values true or
+false. We extract only those attributes that are single word 8.1 Precision and Recall
+data items as well as those attributes that occur frequently in
+                                                      Whenever the system extracts a partially correct pair for an
+the data as a phrase.
+                                                      example that is also given by the human annotator, the pair is
+                                                      considered recalled. The results for this metric can be found
+8  Evaluation                                         in table 3.
+In this section, we present evaluation results for experiments
+performed on tennis and football categories. The tennis cat-             Seeds     NB        coEM
+egory contains 3194 unlabeled data items (i.e., individual Recall Tennis 27.62     36.40     69.87
+phrases from the lists in the product descriptions), the foot- Recall Football 32.69 47.12   78.85
+ball category 72825 items. Unsupervised seed extraction re-
+sulted in 169 attribute-value pairs for the tennis category and Table 3: Recall for Tennis and Football Categories
+180 pairs for football.
+  Table 2 shows a sample list of extracted attribute-value Recall differs greatly between system settings. More
+pairs (i.e., the output of the full system), together with the speciﬁcally, co-EM results in recalling a much larger num-
+phrases that they were extracted from.                ber of pairs, whereas seed generation and Na¨ıve Bayes yield
+ Full Example       Attribute      Value              relatively poor recall performance. Seed generation was not
+ 1 1/2-inch polycotton polycotton blend 11/2-inch     expected to yield high recall, as only few pairs were extracted.
+ blend tape         tape                              In addition, the results show that co-EM is more effective at
+ 1 roll underwrap   underwrap      1roll              extrapolating from few seed examples to achieve higher recall
+ 1 tape cutter      tape cutter    1                  than Na¨ıve Bayes.
+ Extended Torsion bar bar          Torsion              In order to measure precision, we evaluate how many au-
+ Synthetic leather up- #material# upper leather       tomatically extracted pairs match manual pairs completely,
+ per                                                  partially, or not at all. The percentage of pairs that are fully
+ Metal ghillies     #material#     Metal              or partially correct is useful as a metric especially in the con-
+                    ghillies                          text of human post-processing: partially correct pairs are cor-
+ adiWear tough rubber rubber outsole adiWear          rected faster than completely incorrect pairs. Table 4 lists
+ outsole                           tough              results for this metric for both categories. The results show
+ Imported           Imported       #true#             no conclusive difference between the three systems: co-EM
+ Dual-density padding padding      Dual-density
+ with Kinetofoam                                      achieves a higher percentage of fully correct pairs, while the
+ Contains 2 BIOﬂex  BIOﬂex concen- 2                  other two result in a total higher percentage of fully or par-
+ concentric circle mag- tric circle magnet            tially correct pairs.
+ net
+ 93% nylon, 7% span- #material#    93%    nylon                          Seeds     NB        coEM
+ dex                               7% spandex          % fully correct Ten- 20.29  21.28     26.60
+ 10-second  start-up start-up time de- 10-second       nis
+ time delay         lay                                %  full or part cor- 98.56  98.94     96.81
+                                                       rect Tennis
+Table 2: Examples of extracted pairs for system run with co- % incorrect Tennis 1.44 1.06    3.19
+EM                                                     %   fully correct 15.38     14.44     17.65
+                                                       Football
+  We ran our system in the following three settings to gauge % full or part cor- 96.15 90.40 89.59
+the effectiveness of each component: 1) only using the auto- rect Football
+matically generated seeds and the generic lists (‘Seeds’ in the % incorrect Foot- 3.85 9.60  10.41
+tables), 2) with the baseline Na¨ıve Bayes classiﬁer (‘NB’), ball
+and 3) co-EM with Na¨ıve Bayes (‘coEM’). In order to make
+the experiments comparable, we do not vary pre-processing Table 4: Precision for Tennis and Football Categories
+or seed generation, and keep the pair identiﬁcation (linking)
+steps constant as well.                                 Currently, however, our system places higher importance
+  The evaluation of this task is not straightforward since peo- on recall than on precision. Furthermore, co-EM results in
+ple often do not agree on what the ‘correct’ attribute-value reasonable levels of precision, and therefore offers a the best
+pair should be. Consider the example Audio/JPEG naviga- balance of the proposed algorithms. The F-1 measure, as
+tion menu. This phrase can be expressed as an attribute-value shown in table 5, supports this intuition.
+
+                                                IJCAI-07
+                                                  2842

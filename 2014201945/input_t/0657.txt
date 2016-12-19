@@ -1,0 +1,2205 @@
+             Signal-to-Score      Music   Transcription     using   Graphical     Models
+
+                                    Emir  Kapanci   and  Avi Pfeffer
+                                           Harvard University
+                             Division of Engineering  and Applied  Sciences
+
+
+                                33 Oxford  Street, Cambridge, MA   02138
+                                     
+
+
+                                     kapanci,avi ¡ @eecs.harvard.edu
+
+                    Abstract                            The third level is the target representation of transcrip-
+                                                      tion. Previous authors [Raphael, 2002b; Cemgil and Kappen,
+    We present a transcription system that takes a music 2003] have proposed using graphical models for automated
+    signal as input and returns its musical score. Two music transcription, but their systems take MIDI data as input
+    stages of processing are used. The ﬁrst employs   and only go from the second to the third level. Our goal is to
+    a fundamental frequency detector and an onset de- build an end-to-end transcription system that goes all the way
+    tector to transform input signals into a sequence from a ﬁrst level audio signal to a third level musical score. In
+    of sound events. The onset detection is inherently this work we focus on monophonic transcription from a com-
+    noisy. This paper focuses on the second stage, go- plex instrument such as voice. Monophonic transcription is a
+    ing from sound events to a notated score. We use a difﬁcult enough task, and well worthy of study. It raises many
+    family of graphical models for this task. We allow issues that need to be addressed before polyphonic transcrip-
+    the results of onset detection to be noisy, necessi- tion can be attempted. Going from level 1 to 3 is a much more
+    tating a search over possible segmentations of the challenging task than going from level 2 to 3. In going from
+    sound events. We use a large corpus of monophonic level 2 to 3, there is a one-to-one mapping between musical
+    vocal music to evaluate our system. Our results   events. Furthermore, the input is often MIDI data where the
+    show that our approach is well-suited to the prob- pitch is given and does not need to be detected. Therefore the
+    lem of music transcription. The initial onset detec- only work that needs to be done is to track the tempo of the
+    tion reduces the number of observations and makes music, thereby transforming actual onset times and durations
+    the system less instrument speciﬁc. The search over into notated rhythmic positions and durations.
+    segmentations corrects the errors in the onset de-
+    tection. Without such reasoning, these errors are   Going from level 1 directly to level 3 is too hard. Frames
+    magniﬁed in subsequent rhythm transcription.      are too small a unit and even short music signals will be repre-
+                                                      sented by very long sequences of frames. Each musical event
+                                                      consists of many frames that need to be grouped together.
+1  Introduction                                       Furthermore, the information in a frame needs to be summa-
+Music transcription is the task of transforming a music signal rized. Instead of a frequency-amplitude spectrum, we need to
+into a symbolic representation of the musical events it con- know the fundamental frequency of a given frame. Therefore
+tains. There are three levels of representation of music that we use a preprocessing step in which we go from level 1 to
+are relevant here. On the third level is the musical score in level 2. This step consists of a fundamental frequency detec-
+common music notation. This consists of musical events with tor, which determines the fundamental frequency sounding
+attributes notated pitch (such as “A” in octave 4), notated du- in each frame, and an onset detector, which detects the be-
+ration (such as quarter note), and notated rhythmic position ginnings of musical events from the frame sequence. Once
+(such as the ﬁrst beat of measure 22). On the second level is a musical event has been identiﬁed, an overall pitch for the
+the representation of performance in terms of sound events. event can be deduced by analyzing all the frames constituting
+This is the level of MIDI data. The rhythmic attributes of the event. We have previously built an onset detector capable
+events on this level are the actual onset time (such as 3.4 sec- of handling the soft onsets prevalent in vocal music, in which
+onds from the beginning of the piece) and the actual duration there is a smooth pitch change, or a vowel change [Kapanci
+(such as 0.5 seconds). The pitch attribute on this level could and Pfeffer, 2004]. While achieving state-of-the-art perfor-
+be discrete (such as MIDI note 66) or continuous (such as mance, it is not completely reliable, and no perfect onset de-
+66.46). On the ﬁrst level is the representation of the sound tector exists. It might miss some onsets, causing it to merge
+signal. It is a common practice to transform the signal into musical events, while reporting other spurious onsets, causing
+a sequence of frames (through short-time Fourier transform), it to separate events. Furthermore, the pitch data produced by
+which are snapshots of the signal over a short period of time the onset detector is continuous-valued and noisy.
+(e.g. 20 msecs). A frame captures the composition of the This paper focuses on the transformation from level 2 to 3
+sound by specifying the amplitude for every frequency. when the level 2 input is noisy. We do not assume a one-to-one mapping between events at the two levels. Instead, we For our onset detector, we use our previously published
+allow for the possibility that reported onsets are false posi- hierarchical method that detects onsets in a signal by com-
+tives. The onset detector can be tuned to trade off the rate of paring frames one to another [Kapanci and Pfeffer, 2004]. A
+false positives with false negatives. We use a setting with a comparison function based on the fundamental frequencies
+very low false negative rate, so that most of the errors in onset and amplitudes returns the dissimilarity of two frames. If this
+detection are false positives. We also detect the pitch, allow- value is above a threshold, an onset is declared over the region
+ing the tuning of the performance to change over time. So we delimited by the two frames. The system begins by compar-
+need to simultaneously (1) detect false positives in the seg- ing adjacent frames, and then gradually increases the distance
+mentation, (2) do tempo tracking and rhythm transcription, between the compared frames. By comparing frames some
+and (3) do tuning tracking and pitch transcription.   distance apart, the detector is able to detect soft onsets that
+  We propose a family of graphical models to accomplish happen smoothly over time.
+these tasks. In the models, the properties of sound events de- To reduce the number of missed onsets, we use a low dis-
+pend probabilistically on the properties of notated events to similarity threshold. That way, we get many extraneous on-
+which they are related. Because there may be false onsets, sets (false positives) which need to be eliminated in later
+several sound events may actually be related to the same no- stages, but missed onsets (false negatives) are infrequent. In
+tated event. The segmentation determines which sound events our experiments, 40% of the onsets were extraneous, while
+are grouped together into a single note event, and therefore only 1.39% of the onsets were missed.
+it determines the structure of the graphical model. We have Once the onsets are marked, the signal is segmented by
+a different graphical model corresponding to each possible cutting it at these onsets. A continuous pitch attribute is com-
+segmentation. We use Markov Chain Monte Carlo (MCMC)  puted for each event by the average fundamental frequency.
+sampling to search over the different structures and parame- The comparison value for each detected onset is also stored to
+ters.                                                 be used in assigning a prior segmentation probability to each
+
+
+  We evaluate our model using a corpus of monophonic vo- observation  >¦ , as described in the next section.
+cal music. Our results show that in the absence of perfect
+onset detectors, reasoning about segmentation is necessary 3 Model
+for a signal-to-score system. Without such reasoning, the er-
+rors in the segmentation are magniﬁed in subsequent rhythm The likelihood of a sequence of observed sound events is
+transcription. We also show that the transcription beneﬁts given by a family of graphical models. Due to the possi-
+from musical knowledge, which is easily incorporated into bility of false onsets, there are many possible groupings of
+our graphical model as prior distributions over the scores. sound events (observations) into note events. The segmenta-
+                                                      tion determines which sound events are grouped together, and
+
+
+2  Problem   Statement                                therefore it determines the structure of the graphical model.
+
+
+                                                                            ¡¤£ 
+                                                      For each segmentation  , the likelihood model deﬁnes
+
+
+The input of our system is a music signal, and the output is                              
+
+
+                                                                                                 
+
+
+                                                                                    ¥     ¨¡¤£ ¥ 
+@¡£ ¥
+
+
+                                                      the probability of observations  ?¡¤£         given
+                                                             
+
+
+
+
+a musical score. The music signal is ﬁrst processed using          
+
+
+                                                       ¡¤£ A ¡£  ¡£ 
+                                                              
+
+
+                                                                       . The probabilistic dependency of sound
+                                                 ¥
+an onset detector to yield the sound event observations  ¢¡¤£
+                                                      events on the notated events is the same in different struc-
+
+for the graphical model. Each sound observation  §¦ con-
+
+
+                                                      tures. The difference is in the connections between the two
+                                           
+¦
+sists of an observed duration ¨©¦ and a frequency . The
+
+
+                                                      layers as illustrated in Figures 1 and 2: the leaf nodes corre-
+
+
+                                       ¡¤£ 
+task is to ﬁnd a segmentation ¡£ and a score . Each
+
+
+                                                      spond to the observations, and the segmentation determines
+                                      ¢
+score event  consists of a notated duration and a pitch
+
+
+
+
+                                                     the structure of the graph above them. The mapping between
+
+
+                          
+
+
+  . The segmentation variable  is the number of observed
+                                                                                               
+
+
+                                                      observation indexes ( B s) and note event indexes ( s) is given
+
+
+                 
+                                                          
+
+
+
+events related to the th score event. Thus the segmentation                                MQ¡
+
+
+                                                                                               R
+
+
+                                                                                           RTS
+
+
+                                                            .EDGFH$& 'JIKML      7P
+
+
+
+
+                                                                                              
+                                                         C B              ¦N      O
+determines the mapping between score events and observed by                  , where         ¡  .
+
+
+                                                        The tempo and tuning are continuous processes changing
+                                              
+events.  is the number of observations (ﬁxed), while is
+the number of note events (dependent on the segmentation). smoothly over time: we model both as ﬁrst-order Gaussian
+
+
+                                                      processes (Equations 2 and 5). The tempo determines how
+
+
+                                   ¡¤£ 
+  The goal is to ﬁnd the segmentation  and the score
+
+
+                                                      notated durations become observed durations: the notated du-
+  
+¡¤£ that maximize the posterior probability of the segmen-
+tation and score given the observed data:             ration is multiplied by the tempo to produce the observed
+
+
+                                                      duration. In addition, we model the fact that durations will
+
+
+                        
+
+
+    ¡£  ¡£ ! "¤#%$&' ¡¤£ 4 ¡¤£ 65 ¡¤£ ¥
+
+
+                                 
+
+
+                                                     deviate without reﬂecting a change in tempo. This is accom-
+
+
+                ()+* ,.- /0)1* ,32
+                                                                                                  K
+
+
+                                                      plished, ﬁrst of all, by including a Gaussian noise UWV in the
+
+
+                                      
+
+
+       7 "¤#.$80'    5                  
+
+
+                     ¥ 0¡¤£  ¡¤£  ;¡¤£  ¡¤£ 
+
+
+                   :¡£                         (1)   model for the observed duration (Equation 4).
+
+
+          )+* , )1* ,92          2     2
+
+
+             - /
+         (                                              We  further model the fact that as the tempo remains con-
+assuming independence of the prior distributions over score stant, successive deviations are likely to compensate for each
+
+
+and segmentation. The graphical model detailed in section other, so that a note that sounds for shorter than its written
+
+
+         
+
+
+           ¡¤£ ¥5 ¡¤£ < ¡¤£ =
+
+
+                  
+
+
+3 deﬁnes                . We have a style speciﬁc score duration will be followed by a note that sounds for longer,
+
+
+                                 
+
+
+        2
+
+
+                                      
+
+
+                                  ¡£ 
+
+
+prior ¡¤£ , and a segmentation prior  based on the  and vice versa. This may be the result of both intentional and
+                                 2
+
+
+onset 2 detector’s outputs. The output of the system is the score unintentional deviations. It is common in various styles to in-
+
+
+
+
+
+ 
+  
+
+
+ ¡¤£ and the mapping of observations to the score events tentionally produce this effect. For example, in swing rhythm,
+
+
+
+
+
+ 
+  
+ ¡£ . We evaluate it using a metric presented in Section 5. given two successive eighth notes, the ﬁrst is lengthened and                                                                                 
+         ρ        ρ       ρ                             Note that we don’t observe  directly, but only through
+
+
+           k-1     k       k+1
+
+
+                                                                                                      
+
+
+                                                                  ¦                                 
+
+
+                                                      the durations ¨ of the individual sound events, where
+
+
+                                                           )
+
+
+                                                        IK#)
+
+
+                                                         S
+
+
+                                                      P
+                                                                ¦
+
+
+
+
+              ω        ω       ω                               ¨
+                                                           ¡#* IK
+                                                        ¦        . On the other hand, the model directly speciﬁes
+               k-1      k       k+1
+
+
+
+                                                      the observed frequency 
+>¦ of the individual sound events.
+
+
+                                                                                  
+
+
+                                                                                      ¥+¥¢¥
+
+
+                                                                                          
+                                                                                          :
+                 λ        λ       λ                     We  deﬁne the rhythm prior J¡        by a Hidden
+
+
+                  k-1      k       k+1                                           2
+                                                      Markov  Model (HMM),  learned ofﬂine using rhythm se-
+                                                      quences of a corpus of music in the same style as our evalu-
+
+
+              τ        τ       τ                                                        B
+               k-1      k       k+1                   ation data. For the pitch prior we use an -gram model (with
+
+
+                                                      B =3), which assumes that each element in a sequence only
+
+
+         …                 …            …
+
+
+                                                                               D
+                                                                           ,£
+                                                      depends on the previous B elements. We deﬁne the prior
+     tS − +1 tS   tS +1 tS +2 tS +  tS + +1 tS +
+      k 1    k     k     k     k 1   k 1    k 2       over intervals rather than individual pitches since this allows
+                                                      for generalization to different keys. The probabilities in the
+               Figure 1: Rhythm Model
+
+                                                      model are estimated ofﬂine by the B -gram frequencies in the
+                                                      training data.
+          π        π       π
+          k+1       k       k+1                         The segmentation prior indicates, for each observed sound
+                                                      event, the probability that there is truly an onset immedi-
+              δ        δ       δ
+              k-1        k      k+1                   ately after the event. To obtain the segmentation prior, we
+                                                      use the dissimilarity values returned by the onset detector
+
+
+                                                      at each observation. The goal is to individually estimate
+
+
+                                                       
+
+
+                                                              5 - 
+                                                               ¦
+     f +    f     f +  f +    f     f  +   f                ¦
+
+
+     Sk−1 1 … Sk  Sk 1  Sk 2 … Sk+1  Sk+1 1 … Sk+2      onset    , the probability that there is an actual onset
+
+
+                                                      2
+
+
+                                                                                                    -
+                                                                   B
+                                                      right after the th observation, given its dissimilarity ¦ to
+                Figure 2: Pitch Model                 the following observation. Although not a formal density
+                                                      estimation method, sigmoid ﬁtting provides an appropriate
+                                                      solution [Platt, 1999]. This was suggested to transform a
+the second is shortened. As another example, double-dotting classiﬁer’s output values into probabilities. Using a training
+
+
+is a common effect in Baroque music. Here a dotted note is corpus for onset detection, we learned the following func-
+
+
+                                                                        
+
+
+                                                                             §0¥ 132 §¦¥ ©
+4
+
+
+                                                                                          Q ¡
+
+
+
+
+                                                             -§6 D F/.
+                                                                                -F     
+
+
+                                                                          £
+lengthened and the subsequent note is shortened. This com- tion: 
+                          . The shape of
+pensation model is also a natural model of unintentional de- the function makes sense:2 as the dissimilarity increases, it
+viation. The performer is likely to maintain a constant beat, assigns increasing probabilities in [0,1] to the presence of
+
+
+so that the notes that subdivide a beat have a given amount of an onset. In order to avoid probabilities close to 0 and 1,
+
+
+                                                                                   
+
+
+                                                                                           ¤¥ ©
+
+
+                                                                                    -§
+
+
+time to ﬁll. As a result, shorter notes will be compensated for we used a weighted average of 
+ and as our prior:
+
+
+                                                                       
+
+
+
+
+                                                                              ¤¦¥¨§76,¤¥ ©
+                                                                    ¤¦¥ 5
+
+
+
+
+                                                                         -  F
+                                                              5 - .
+
+
+                                                                       
+
+
+
+                                                                          ¦
+                                                               ¦
+by longer notes to ﬁll up the required time. We capture this onset ¦                  .
+
+
+effect by including a ﬁrst-order stealing process (Equation 3), 2 Once individual segmentation priors of all observations are
+
+
+                                                                                                     
+which allows successive durations to deviate in opposite di-                                        ¡£
+                                                      computed, the prior probability of a segmentation  is
+
+
+rections without affecting the overall tempo. This is accom- computed by multiplying these together:
+
+
+                                                                        ¡             ¥Q ¡
+
+
+plished by having a negative value for the stealing coefﬁcient       ¥Q
+
+
+                                                                     8                8
+
+
+             ¤¦¥¨§
+©
+
+
+                                                                                           
+
+
+ ¢¡
+                                                                                    6
+
+
+
+  . The value £  was used in our experiments. Given the
+
+
+
+
+                                                            5 - .                       D
+                                                                                5 -                 5 - ©
+
+
+                                                        0¡£  ¡¤£ ¥                      £
+
+
+                                                                                 ¦                 ¦  ¦
+
+
+                                                                          onset ¦              onset
+
+
+                                                      2                 2                    2
+
+
+                                                                 S     S          S     S
+
+
+note duration ¢ s, the observed durations depend linearly on
+
+
+                                                                  ¡ 9 :<; :<; * ¡  ¡ 9 :<; :<; * ¡
+
+
+                                                                ¦    ¦3=> ¦ =   ¦    ¦3=  ¦  =
+the tempo and stealing processes (Equation 4).
+  For the pitch process, the tuning is an additive offset that is
+added to the notated pitch to produce the observed frequency 4 Inference
+(Equation 6). In addition, we allow the frequency to deviate Our goal is to compute the maximum a posteriori (MAP)
+
+
+independent of the tuning, so Equation 6 includes a Gaussian segmentation-score conﬁguration as given in Equation 1. Let
+
+
+                                                      ?
+
+
+         U¢
+
+
+noise term  . The noise terms in Equations 4 and 6 model be the set of possible note durations and @ the set of pos-
+                                                                                                  ¥
+
+
+observational errors as well as local deviations.     sible pitches. For a given observation sequence  ¢¡£ , there
+
+
+                                                                                      
+
+
+                                                                                       ?
+
+
+                                                         §                                6
+
+
+                                                          ¥Q¡                                 
+
+
+                                         ¤
+
+
+                                                                                       5 5  5  5 
+
+
+                                                      are      possible segmentations and    @    possible
+
+
+                     MQ¡ F K
+
+
+                            U     
+
+
+    Tempo:                       for           (2)
+                                                                                   
+
+
+
+                                          ¤           scores for each segmentation with note events. The expo-
+
+
+                      ¢¡       ¡
+
+
+                                                                               
+
+
+                      MQ ¡ F K
+
+
+                             U       
+
+
+   Stealing:                      for          (3)
+
+
+                                                                                        
+
+
+                                                                                    ¡£ 
+
+
+                                                      nential number of the possible ¡£ pairs makes exact
+
+
+                        
+
+
+                           F     F
+
+
+                   M        ? U K
+  Duration:                           V         (4)   computation of the MAP conﬁguration intractable. We there-
+
+
+                                         ¤            fore use MCMC methods [Gilks et al., 1996] to sample from
+
+
+                   = MQ ¡.F K
+
+
+                            U     
+
+
+    Tuning:                      for           (5)
+                                             
+
+
+
+
+                                                     the space of possible pairs.
+
+
+                 9F   F                   
+
+
+                         U  B     C B
+ Frequency: 
+¦                     s.t.        (6)
+
+
+                                                        Our inference procedure is similar to the handling of ref-
+
+
+                                        
+
+
+                                          ¤
+
+
+                                             ¡
+
+
+                          D>             
+
+
+                                         ¢
+
+
+  We  assume that    is       ,    is         ,      erence uncertainty in ﬁrst-order probabilistic models [Pasula
+
+
+                                   
+
+
+     ¤               ¤                ¤
+
+
+                             ¡            ¡
+
+
+           K       !    K        !    K
+
+
+           U           U               U V
+
+
+is       ,     is         ,    is         ,     is   and Russell, 2001]. We alternate between MCMC steps to
+
+
+                                  
+
+
+   ¤              ¤                 ¤
+
+
+    !   K       !               ! 
+
+
+      V  U"              U#      
+       ,    is         and    is         , all inde- change the segmentation, and Gibbs steps to sample the dura-
+
+
+pendent of each other. The variance values used in the ex- tion and pitch for a given segmentation. When changing the
+
+
+                      ¤            ¤           ¤
+
+
+                        Q%$         Q'&         Q ¡
+
+
+                            ¡
+
+
+                    D         D         D
+                                        
+
+
+periments were:          ,           ,           ,   segmentation, reversible jump MCMC [Green, 1995] is em-
+
+
+       ¤           ¤            ¤          ¤
+
+
+         Q%(         Q%&         Q%$         Q'$
+
+
+              ¡
+
+
+!    D     !     D    !     D    !    D
+
+
+                          V           
+
+
+          ,           ,           ,           and    ployed since the model dimension changes whenever we split
+
+
+      ¤
+
+
+       Q¡
+
+
+!   D
+         .                                           or merge events.
+
+4.1  Reversible Jump  MCMC                            currently assigned to a note,  is a random variable with uni-
+
+
+                                                                     
+
+
+                                                                              ¡
+
+
+                                                                        
+
+
+                                                                      
+                                                                             (
+MCMC   methods are used to generate samples from a com- form density split   Q¡ . Since merging is a determin-
+                                                      istic move, we don’t have a random variable in Equation 9 so
+
+
+
+
+plex target distribution where analytical or numerical tech-            
+
+
+                                                                         (. D
+
+
+niques are not applicable. In our case, the target is the pos- we simply have merge  . Finally, it’s easy to see from
+
+
+                                                                               -              -
+
+
+                                                                                      - .          - .
+
+
+                                                                                :   ;       :  ;
+                                                                                                    =
+
+
+                                                                                 merge =       split
+
+
+                                                                                   -           - -
+
+
+terior distribution of the transcription given the observations,                  -
+
+
+                                                                                    .             .
+
+
+
+
+                                                 
+ ¡      
+                                                                                                
+
+
+
+                                                      Equations 9 and 10 that both      and          are
+
+
+              
+
+
+   5 3     5 
+
+
+               
+
+
+                                                  
+
+
+                                                                                        "            "
+                                                                                             "
+
+
+                  , and we are trying to ﬁnd the mode                          "
+
+
+2       2
+
+
+                                                                                        "            "
+                                                                                             "
+
+
+of this distribution. There are well-known methods to con- equal to 1.         "
+
+
+
+
+                                                                                        "            "
+                                                                               "             "
+struct a Markov chain whose stationary distribution is guaran- Putting everything together, we have the following two ac-
+
+
+teed to be the target distribution. In the Metropolis-Hastings ceptance probabilities for merge and split moves:
+
+
+                                                                              ¥          
+
+
+                                                                                                   Q¡
+
+
+                                                                 ¢
+
+
+                                                              ¡   
+
+
+                                                                                   5          D;
+
+
+                                                                                              £
+algorithm, the candidate samples are generated from a pro-             ¦¨§'/
+
+
+                                                         ¤                              split
+
+
+                ¡ £¢  
+
+
+                                                                             2   2     2
+
+
+
+
+                                                                                  ¡ 
+                                                                                         
+
+
+                                                                 . $    D>
+                                                                                    ¢
+
+
+                                                          merge                           ¢
+
+
+                   5 
+
+
+posal distribution   and are accepted with probability
+
+
+
+
+                                                                                        5
+                                                                                           
+                                                                                         
+
+
+
+                                                                                             merge   0
+
+
+     ¢
+
+
+ ¥   
+
+
+
+
+
+
+                                                                                 2
+                                                                                      2
+                                                                                            2
+
+
+            ¦¨§
+©
+
+
+                   ;  ;¨ 
+
+
+                      =¥  =
+
+
+¤
+
+
+         $    D@
+
+
+                                                                                                    (11)
+
+
+                                                                                  ¥     
+
+
+                   ;  ;  
+
+
+                      ¡   =
+
+
+                      =      . This is not applicable
+
+
+                         
+
+
+      ¡ 
+
+
+                                                                ¢
+
+
+                  
+
+
+                                                             ¡   
+
+
+                                                                                       5 
+
+
+                                                                                        
+                                                                      ¦¨§'/
+
+
+
+
+                                                         ¤                                  merge
+
+
+                                                                                 2   2     2
+
+
+        5 
+
+
+         
+
+
+
+
+                                                                             ¥            
+                                                                                    
+
+
+                                                                . $    D>
+                                                                               ¢
+
+
+when       does not have a ﬁxed dimensionality, such as in                           ¢
+                                                                                                    ¡
+
+
+                                                          split                                    Q
+
+
+     2
+
+
+
+
+
+
+                                                                                                DM
+                                                                                   5
+                                                                                      
+
+
+                                                                                              £
+                                                                                   
+
+
+
+                                                                                        split        0
+
+
+                                                                            2
+                                                                                2
+our problem: different segmentations may correspond to dif-                            2
+
+
+ferent numbers of notes, and therefore have different numbers                                        (12)
+                                                             
+of parameters. The reversible jump MCMC method allows us where  is either the total number of observations associated
+to sample from a target distribution even when the dimension- with the two notes we are merging, or it is the number of
+ality of the model is not ﬁxed. The acceptance probability of observations associated with the note we are splitting.
+
+
+moving from one model to another model of different dimen- 4.2 Generating Samples
+                                                                            R
+
+
+sion is given by:                                                                R
+
+
+                                                                         
+
+
+
+
+                                                                           ;
+                                                                                ;
+
+
+
+
+                                                                            =
+                                                                                 =
+
+
+           ¢
+
+
+       ¡   
+
+
+                 ¦¨§
+
+
+                   ©
+
+
+
+
+
+
+                                                                       
+                                                                              
+                                                                                   
+
+
+
+
+                                                                    1     
+                                                                               
+
+
+
+
+                                                                           ¡£ 
+                                                                                ¡£ 
+
+
+  ¤                                               Given a sample                , new samples are gener-
+
+
+
+
+                    D@
+          . $
+
+
+                                                     ated as follows:
+
+
+
+
+
+
+                         ¡ ¢ ¢
+           ¥ £¢                       ¥ 
+   ¥¢
+
+
+                                 $
+
+
+
+
+                     
+                                  
+
+
+
+                                                        1. Pick an index  .
+
+
+
+
+
+
+                             
+             5                           
+      
+
+
+                                  C
+
+
+
+
+                      
+                                     
+
+
+
+
+
+
+                2
+       2
+  2
+
+
+
+
+
+
+                         ¥ 
+           ¡ 
+     !                              
+
+
+                                    $ $
+
+
+
+
+                                               (7)
+
+
+
+
+                  
+         
+
+
+                                                                      
+
+
+
+
+
+
+
+
+                           #"
+             5 
+       
+                                           "
+
+
+              
+                        
+
+
+                                                       2. Resample the th note, keeping the segmentation and all
+
+
+
+
+
+
+               2
+        2
+   2
+
+
+
+
+                                "
+                                            "
+
+
+          %¢
+
+
+
+
+                                                             R
+                                                                       R
+                                "
+
+
+
+
+                                            "         other notes the same:
+
+
+
+
+                                                             ; * ¡
+                                                                      ;
+
+
+
+
+                                                                =
+                                                                        =
+                                "
+
+
+where  and    are model indicators that determine the" num-
+
+
+
+
+                                                            2      3
+                                                                      2
+
+
+                ¢
+
+
+                                             
+
+
+                                                                                  D;:
+
+
+
+
+
+
+                                                            
+                                                                     
+                                                                             547698 %<
+
+
+
+
+                                                             R
+                                                                       R
+
+
+
+
+                                                             ; * ¡
+                                                                       ;
+                                                                =
+
+
+ber of notes, and are the parameter vectors of sizes and                =
+
+
+&¢            ¥                           
+
+
+                                                                   3
+
+
+
+
+                                                            2
+                                                                      2
+
+
+                                                                                  D;:
+
+
+
+
+
+
+                                                           
+                                                                     
+                                                                             547698 %<¥=£>0@?
+
+
+
+   respectively,  is the prior probability of model , and
+
+
+                                                                             R
+
+
+                                           '¢
+
+
+             2
+
+
+                                                                                      
+
+
+                                                                            ; * ¡
+
+
+                                                                               =
+
+
+ 
+
+
+    
+
+
+                                                                                        J5 ¡£ < Q? ¡¤£ ¥ 
+
+
+                                                                                                 
+
+
+     is the probability of moving from model to . The                      
+
+
+
+
+                     ¢  ¢
+                                                                            
+
+
+            ¥       ¥ 
+
+
+                                                          Sample a value for    from                   .
+
+
+2
+
+
+
+
+                                                                  R
+                                                                        R
+
+
+        
+
+
+                                                                                     2
+
+
+                                                                
+
+
+
+
+                                                                  ; * ¡
+                                                                        ; * ¡
+
+
+
+
+                                                                     =
+                                                                           =
+
+
+                 ( 
+       C
+
+
+function                 is a mapping between the pa-
+
+
+
+
+
+
+                                                             
+                                                                      
+                                                                            
+
+
+
+
+                                                                 
+                                                                      
+
+
+                                                                  ¡¤£ 
+                                                                         
+                                                        Let             ¡¤£  . It is accepted automatically as a
+
+
+rameters of the two models. This mapping may entail random
+                                    &¢
+                                )¢                    sample since it was generated by Gibbs sampling.
+
+
+decisions to generate the parameters of given the cur-
+                 
+
+
+rent parameters   of . These decisions are denoted by the 3. Change segmentation in one of two ways:
+
+
+                                         ¥ 
+
+
+                                      *
+
+
+                                                                                       
+
+
+                                           
+                                                       a. With probability  , merge the th note with its suc-
+
+
+variable , whose probability distribution is  .                          merge
+                                                                        2
+
+
+
+  Since we assume that the segmentation, rhythm and pitch cessor:       ¢
+
+
+                                                                           3
+
+
+                                                                                  D
+
+
+                                                                              £
+
+
+                                                                               R     R
+
+
+priors are independent, for the ﬁrst two terms of the fraction       R
+
+
+                                                                     ; * $    ;     ;
+
+
+                                                                        =       =    =
+
+
+                                                                           3
+
+
+                                                                                 F
+
+
+                                                                                 
+
+
+                                                                                   "* ¡
+
+
+in Equation 7 we have:                                               
+
+
+
+
+
+
+
+
+                                                              R
+                                                                    R
+                                                                                R
+                                                                                    R
+
+
+
+
+
+
+
+
+                                                             ; * $
+                                                                    ; * $
+                                                                                ;
+                                                                                    ;
+
+
+
+
+
+
+
+
+                                                                 =
+                                                                       =
+                                                                                 =
+                                                                                     =
+
+
+
+
+
+
+
+
+
+
+                                         
+                                 
+                             
+                      !
+       ¥    ¡ 
+
+
+                                                                           3
+
+
+
+
+
+
+
+
+                                                             2
+                                                                    2
+                                                                               2
+                                                                                   2
+
+
+            
+
+
+                                 
+
+
+
+
+
+
+                                                                  
+                                                                                  
+                                                                                                D:   D
+
+
+
+
+
+
+
+
+
+
+                                                           >;
+                                                                  
+                                                                        ?     >;
+                                                                                  
+                                                                                      ?    5476A8  £ <
+
+
+
+
+
+
+
+
+
+
+                                       5  
+                                   
+                              
+                          
+               5 ,+
+
+
+
+
+
+
+
+
+                                       
+                             
+                         
+                 
+
+
+
+
+                                                              R
+                                                                    R           R
+
+
+                                                (8)                                  R
+
+
+                                                                                                        ¢
+
+
+
+
+
+
+                                                             ; * $
+                                                                    ; * $       ;
+                                                                                     ;
+
+
+
+
+
+
+                                                                 =
+                                                                       =         =
+                                                                                      =
+
+
+
+
+
+
+
+
+
+
+                                    2
+                               2
+                           2
+           2         2
+      2
+
+
+                                                                           3
+
+
+
+
+
+
+                                                             2
+                                                                    2          2
+                                                                                    2
+
+
+
+
+                                                                  
+                                                                                                 F D;:
+
+
+
+
+
+
+                                                           >;
+                                                                       ?     >;
+                                                                                       ?  5476A8    <
+
+
+
+
+                                                                                * ¡
+                                                                                     * ¡
+
+
+
+The terms in the right hand side of Equation 8 are respectively           R
+
+
+                                                                          ; * $
+
+
+                                                                             =
+                                                                        
+
+
+
+given by the segmentation prior, the rhythm prior, the pitch Pick a value for  using Gibbs sampling.
+
+
+                                                                                D
+                                                                                                  
+
+
+prior and the likelihood model.                         b. With probability split £  merge, split the th note
+
+
+                                                                         2
+                                                                                    2
+
+
+
+  During our sampling, we allow two kinds of moves that into two at B , an integer chosen uniformly at random from
+
+
+                                                       D>  D                   D
+
+
+                                                          £  <                
+
+
+change the model dimension: merging two neighboring notes 8    (only possible if   ).
+
+
+                                                                        ¢
+
+
+                                                                           3
+
+
+                                                                                F D
+                                                                             
+
+
+together, or splitting a single note into two. The rhythm and         
+
+
+                                                                     R
+
+
+                                                                     ; * $
+
+
+                                                                        =
+
+
+                                                                           3
+                                                                             B
+
+
+pitch components are sampled using Gibbs sampling without           
+
+
+                                                                     
+
+
+                                                                     R         R
+
+
+                                                                     ; * $    ;
+                                                                        =
+
+
+a change in model dimension, so we don’t discuss the ac-                        =
+
+
+                                                                           3
+
+
+
+
+                                                                            
+                                                                                 £9B
+
+
+
+
+                                                                     "* ¡
+                                                                              
+
+
+
+
+                                                              R     R           R
+                                                                                    R
+
+
+
+
+                                                             ; * $  ; * $       ;
+                                                                                    ;
+
+
+                                                                 =     =
+                                                                                 =
+
+
+ceptance probability for those here and instead focus on the                         =
+
+
+                          
+
+
+
+
+
+
+                                                             2      2      3
+                                                                               2
+                                                                                   2
+
+
+
+
+
+
+                                                                  
+                                                                                  
+                                                                                                D;:   D
+
+
+
+
+
+
+                                                           >;         ?     >;
+                                                                                  
+                                                                                      ?    )476A8  £ <
+
+
+                     
+
+
+                                                                    R           R    R
+
+
+segmentation component of . We have two possible values       R
+
+
+                             &¢  
+
+
+                                                                                                        ¢
+
+
+                                                             ; * $  ; * $       ;    ;              §
+
+
+
+
+                                                                 =     =
+                                                                                 =    =
+
+
+    
+
+
+                                                                           3
+
+
+
+
+                                                             2      2
+                                                                               2    2
+
+
+                                   F7D
+
+
+                                                                                                F  :
+
+
+                                                           >;         ?     >;      ?  )476A8    <
+
+
+       
+
+
+                                                                                  ¡  Q¡
+
+
+for    : it is equal to split when      and to merge                            Q
+
+
+     &¢  
+
+
+   2               2                          2
+
+
+                                                                                     R          R
+
+
+                                                                                     ; * $      ; * $
+
+
+                                                                                        =          =
+
+
+              D
+
+
+                                C        C
+
+
+when         £  . The two functions merge and split deﬁne
+
+
+                                                                                             
+
+
+                                                                                               "* ¡
+                                                           Jointly sample values for     and        from
+
+
+the mappings between the models before and after, where the 
+
+
+                                                               5               
+
+
+                                                           "* ¡ 0¡£    :¡¤£ ¥
+
+
+                                                                      Q ;  £ "* ¡
+                                                                            =      .
+
+
+
+move is a merge and a split respectively:             2
+
+
+                                                                     R      R
+
+
+                                                               £¢  
+
+
+                                                                     ; * $ ; * $
+
+
+                                                                        =     =
+
+
+                          
+
+
+                                                                             
+
+
+                                                                         
+
+
+                                                                     ¡£  ¡¤£ 
+
+
+                      .    F     
+
+
+                  0¡ <$  0¡  +$ 0¡
+
+
+
+             C                                          4. Let                  . It is a candidate sample that
+
+
+                                                                             
+
+
+              merge                             (9)                                 
+                           
+
+
+                                                     has a different segmentation than . The acceptance proba-
+
+
+                                                               £¢
+
+
+                      .   
+
+
+                             £
+               C split                         (10)   bility of as the next sample is given by one of Equations
+In Equation 10, because we choose the splitting point ran- 11 and 12, decided by whether it corresponds to a merge or a
+domly from all possible boundaries between the observations split move.
+
+  In step 1 above, although we could pick a random  , pro- audio fragments were removed from the ﬁrst part for the pur-
+
+
+                                ¥ ¥ ¥
+
+
+                              D> 
+                                   
+cessing the events sequentially (   ) allows compu-  pose of tuning the eight variance parameters of the graphical
+
+
+tational savings. We can factorize the likelihood as: model and the two sigmoid parameters of the segmentation
+                      
+
+
+                                                     prior. These were not used in the evaluation.
+
+
+                            )
+
+
+     ¡£ ¥&5 ¡¤£  ¡¤£ . ¡£ IK ) 5 ¡¤£ : ¡¤£ 
+
+
+                              
+
+
+  2                  2
+
+
+          
+     ¡ £¢
+
+
+     6                                                5.2  Evaluation Metric
+
+
+                 )
+
+
+            ¡#* IK#) £ ¥&5 "* ¡¤£ & "* ¡¤£ &¥¤ W£ #-¦¤  £ 
+
+
+                          
+
+
+                                               (13)
+
+
+         2
+
+
+         * ,
+
+
+         K
+
+
+                                                                       
+                 
+
+
+
+                                                                                         ¡¤£ 
+
+
+                                                      Given the true score ¡¤£ and segmentation  for obser-
+
+
+                                                              §¡£ ¥                                
+
+
+                                                                                                     
+
+
+      ¤
+
+
+                                       
+
+
+                                                                                                     ¡£ 
+where  denotes the hidden variables , , and . The ﬁrst vations   , we evaluate the system’s result ¡£ and
+
+
+factor is computed incrementally as new samples are taken as follows:
+
+
+    ED
+          
+for    to  . The second factor depends only on the future Segmentation: We count the number of correct onset/no-
+
+
+observations, and can be efﬁciently computed in advance for onset decisions over the number of possible segmentation lo-
+
+
+                                                                  D
+
+
+                                                               £
+
+
+all  s by a backward ﬁltering pass.                  cations (    ).
+
+
+        
+
+
+         ¡£  ¡£ 
+             
+
+
+  Given          , the relationships between the continu- Musical Score: Since the system’s segmentation might be
+
+
+                                                                                                     
+
+
+                                                                                                      
+                                                                                                       
+
+
+ous variables of our model are linear, and the additive change different from the reference segmentation, comparing ¡£
+                                                               
+
+
+or noise variables are all Gaussian. So, it is a linear dynami-  
+
+
+
+                                                                 ¡¤£ 
+                                                      directly to   is not very meaningful. We instead evalu-
+cal system where the integration over the hidden variables (in ate the score by looking at the number of rhythm and pitch
+Equation 13) can be computed analytically using Kalman ﬁl- errors remaining once the segmentation errors are ﬁxed. For
+tering. All the necessary probabilities can be represented by instance if a half note is transcribed as two successive quarter
+Gaussian potentials, over which multiplication, conditioning notes of the same pitch, we consider this to be a segmentation
+
+
+and marginalization are three basic operations.       error (extra onset), and not a rhythm transcription error. Sim-
+                                          
+  A problem with this individual sampling of  s is that ilarly, if two successive quarter notes of the same pitch are
+sometimes the neighboring notes will be such that it is very transcribed as a half note, this is only a segmentation error
+unlikely to sample a good value for either one with the cur- (missed onset). If, on the other hand, two successive quarter
+rent assignment of the other. To overcome such deadlocks, we
+
+
+
+
+                                                     notes of different pitches are transcribed as a half note, there
+
+
+                               § "* ¡W
+                                 
+randomly sample some score pairs      jointly in Step is a pitch error in addition to the segmentation error. This is
+2. Steps 3 and 4 are not performed for joint samples. Ideally, because even after correcting the missed onset by splitting the
+one would like to sample all events jointly given a segmenta- half note in two, our transcription would have a pitch different
+tion, but this would result in an exponential sampling space. from the real score.
+
+
+  We deﬁne an MCMC   iteration as one sequence of sam-  Returning to the extra onset case, if a half note is tran-
+
+
+             D
+                  
+plings from    to  . After some iterations, we randomly scribed as two separate quarter notes of different pitches,
+
+
+propose a global sampling step. We have two global oper- then when the segmentation error is corrected the two quarter
+                                                 D
+ations: one that shifts all the pitches in the sample by § , notes are replaced by a half note with a single pitch. We need
+and one that halves or doubles all durations. If the result of
+
+
+                            ?                         to choose one of the pitches of the two quarter notes as the
+
+
+halving produces a duration not in , we randomly select the
+
+
+
+
+               ?©¨
+
+
+                    ¤                                 pitch of the half note. There may or may not be a pitch er-
+                     ?
+closest element in >  . When a zero duration is assigned ror in addition to the segmentation error, depending on which
+to an observation, it is grouped with one of its neighbors. In pitch is chosen for the half note. We choose to go with the
+the experiments we used 20 chains with 250 iterations per pitch whose related observation is longer in duration. If this
+chain. Each chain starts with an initial sample that is ob- is equal to the real pitch, there is no pitch error. This general-
+tained by matching the observations as closely as possible: If izes naturally to cases where a single true note is transcribed
+the segmentation prior of an observation is less than 0.5, we as multiple notes.
+group it with its successor. The durations are rounded to the
+
+                ?                                       For the evaluation of durations, if a note is transcribed as
+closest duration in , and the frequencies are rounded to the multiple notes (extra onsets), we compare the sum of these
+
+closest pitch in @ . Starting with this sample, as opposed to a durations to the reference duration. If multiple notes are tran-
+random one, allows us to get to a good transcription faster. scribed as a single note (missed onset), we compare the dura-
+                                                      tion of this note to the sum of the reference durations. We can
+5  Experiments                                        extend this idea to evaluate cases of misplaced onsets, where
+5.1  Training and Evaluation Data                     the computed transcription contains an onset in a different
+A corpus of monophonic vocal music was used to evaluate place from the reference transcription. In both the reference
+the system and its various components. The corpus consisted and computed transcriptions, we only keep the onsets that ap-
+of two parts. One part contained both scores and audio data, pear in both, and compute durations for these new segments
+and was used to evaluate the system. The test data had a to- by summing the durations of their constituents. These are
+tal duration of 60 minutes, composed of 55 audio segments then compared to evaluate the rhythm transcription.
+containing a total of 3606 notes. All pieces were by the Re-
+naissance composer G.P. Palestrina (16th century), and sung 5.3 Results
+by the same singer. The second part of the corpus consisted We present the results for the evaluation of our system in Ta-
+only of scores without audio data. This part was used to learn bles 1 and 2. Table 1 contains the results obtained by the sam-
+the rhythm and pitch priors. There were 78 pieces by Palest- pling process described in Section 4. This process generates
+rina in this part, none of which appeared in the ﬁrst part. Two samples from the posterior distribution of the transcription.
