@@ -1,0 +1,347 @@
+              Planning with Continuous Resources in Stochastic Domains
+              Mausam                     Emmanuel Benazera∗                   Eric A. Hansen
+     Dept. of Computer Science   Ronen Brafman†, Nicolas Meuleau†       Dept. of Computer Science
+          and Engineering            NASA Ames Research Center                and Engineering
+      University of Washington              Mail Stop 269-3             Mississippi State University
+       Seattle, WA 981952350         Moffet Field, CA 94035-1000        Mississippi State, MS 39762
+      mausam@cs.washington.edu         {ebenazer, brafman, nmeuleau}       hansen@cse.msstate.edu
+                                           @email.arc.nasa.gov
+
+                    Abstract                          possible [Pedersen et al., 2005]. As a result, it is expected
+                                                      that space scientists will request a large number of potential
+    We consider the problem of optimal planning       tasks for future rovers to perform, more than may be feasible,
+    in stochastic domains with resource constraints,  presenting an oversubscribed planning problem.
+    where resources are continuous and the choice of
+                                                        Working in this application domain, our goal is to provide a
+    action at each step may depend on the current
+                                                      planning algorithm that can generate reliable contingent plans
+    resource level. Our principal contribution is the
+                                                      that respond to different events and action outcomes. Such
+    HAO* algorithm, a generalization of the AO* algo-
+                                                      plans must optimize the expected value of the experiments
+    rithm that performs search in a hybrid state space
+                                                      conducted by the rover, while being aware of its time, energy,
+    that is modeled using both discrete and continu-
+                                                      and memory constraints. In particular, we must pay atten-
+    ous state variables. The search algorithm leverages
+                                                      tion to the fact that given any initial state, there are multiple
+    knowledge of the starting state to focus computa-
+                                                      locations the rover could reach, and many experiments the
+    tional effort on the relevant parts of the state space.
+                                                      rover could conduct, most combinations of which are infea-
+    We claim that this approach is especially effective
+                                                      sible due to resource constraints. To address this problem
+    when resource limitations contribute to reachabil-
+                                                      we need a faithful model of the rover’s domain, and an al-
+    ity constraints. Experimental results show its ef-
+                                                      gorithm that can generate optimal or near-optimal plans for
+    fectiveness in the domain that motivates our re-
+                                                      such domains. General features of our problem include: (1)
+    search – automated planning for planetary explo-
+                                                      a concrete starting state; (2) continuous resources (including
+    ration rovers.
+                                                      time) with stochastic consumption; (3) uncertain action ef-
+                                                      fects; (4) several possible one-time-rewards, only a subset of
+1  Introduction                                       which are achievable in a single run. This type of problem is
+                                                      of general interest, and includes a large class of (stochastic)
+Control of planetary exploration rovers presents several im- logistics problems, among others.
+portant challenges for research in automated planning. Be-
+cause of difﬁculties inherent in communicating with devices Past work has dealt with some features of this problem.
+on other planets, remote rovers must operate autonomously Related work on MDPs with resource constraints includes the
+over substantial periods of time [Bresina et al., 2002]. The model of constrained MDPs developed in the OR community
+planetary surfaces on which they operate are very uncertain [Altman, 1999]. A constrained MDP is solved by a linear
+environments: there is a great deal of uncertainty about the program that includes constraints on resource consumption,
+duration, energy consumption, and outcome of a rover’s ac- and ﬁnds the best feasible policy, given an initial state and re-
+tions. Currently, instructions sent to planetary rovers are in source allocation. A drawback of the constrained MDP model
+the form of a simple plan for attaining a single goal (e.g., is that it does not include resources in the state space, and
+photographing some interesting rock). The rover attempts thus, a policy cannot be conditioned on resource availability.
+to carry this out, and, when done, remains idle. If it fails Moreover, it does not model stochastic resource consumption.
+early on, it makes no attempt to recover and possibly achieve In the area of decision-theoretic planning, several techniques
+an alternative goal. This may have a serious impact on mis- have been proposed to handle uncertain continuous variables
+sions. For example, it has been estimated that the 1997 Mars (e.g. [Feng et al., 2004; Younes and Simmons, 2004; Guestrin
+Pathﬁnder rover spent between 40% and 75% of its time do- et al., 2004]). Smith 2004 and van den Briel et al. 2004 con-
+ing nothing because plans did not execute as expected. The sider the problem of over-subscription planning, i.e., plan-
+current MER rovers (aka Spirit and Opportunity) require an ning with a large set of goals which is not entirely achievable.
+average of 3 days to visit a single rock, but in future missions, They provide techniques for selecting a subset of goals for
+multiple rock visits in a single communication cycle will be which to plan, but they deal only with deterministic domains.
+                                                      Finally, Meuleau et al. 2004 present preliminary experiments
+  ∗ Research Institute for Advanced Computer Science. towards scaling up decision-theoretic approaches to planetary
+  † QSS Group Inc.                                    rover problems.  Our contribution in this paper is an implemented algorithm, notational convenience, we model the discrete component as
+Hybrid AO* (HAO*), that handles all of these problems to- a single variable n.
+gether: oversubscription planning, uncertainty, and limited A Markov state s ∈ S is a pair (n, x) where n ∈ N is the
+continuous resources. Of these, the most essential features discrete variable, and x = (xi) is a vector of continuous vari-
+of our algorithm are its ability to handle hybrid state-spaces ables. TheN domain of each xi is an interval Xi of the real line,
+and to utilize the fact that many states are unreachable due to and X = i Xi is the hypercube over which the continuous
+resource constraints.                                 variables are deﬁned. We assume an explicit initial state, de-
+  In our approach, resources are included in the state descrip- noted (n0, x0), and one or more absorbing terminal states.
+tion. This allows decisions to be made based on resource One terminal state corresponds to the situation in which all
+availability, and it allows a stochastic resource consumption goals have been achieved. Others model situations in which
+model (as opposed to constrained MDPs). Although this in- resources have been exhausted or an action has resulted in
+creases the size of the state space, we assume that the value some error condition that requires executing a safe sequence
+functions may be represented compactly. We use the work by the rover and terminating plan execution.
+of Feng et al. (2004) on piecewise constant and linear ap- Actions can have executability constraints. For example,
+proximations of dynamic programming (DP) in our imple- an action cannot be executed in a state that does not have its
+mentation. However, standard DP does not exploit the fact minimum resource requirements. An(x) denotes the set of
+that the reachable state space is much smaller than the com- actions executable in state (n, x).
+plete state space, especially in the presence of resource con- State transition probabilities are given by the function
+straints. Our contribution is to show how to use the for- Pr(s0 | s, a), where s = (n, x) denotes the state before action
+ward heuristic search algorithm called AO* [Pearl, 1984; a and s0 = (n0, x0) denotes the state after action a, also called
+Hansen and Zilberstein, 2001] to solve MDPs with resource the arrival state. Following [Feng et al., 2004], the probabili-
+constraints and continuous resource variables. Unlike DP, ties are decomposed into:
+forward search keeps track of the trajectory from the start
+                                                                                  0
+state to each reachable state, and thus it can check whether the • the discrete marginals Pr(n |n, x, a). For all (n, x, a),
+                                                          P          0
+trajectory is feasible or violates a resource constraint. This al- n0∈N Pr(n |n, x, a) = 1;
+lows heuristic search to prune infeasible trajectories and can                         0        0
+                                                        • the continuousR conditionals Pr(x |n, x, a, n ). For all
+dramatically reduce the number of states that must be consid- (n, x, a, n0), Pr(x0|n, x, a, n0)dx0 = 1.
+ered to ﬁnd an optimal policy. This is particularly important         x0∈X
+in our domain where the discrete state space is huge (expo- Any transition that results in negative value for some contin-
+nential in the number of goals), yet the portion reachable from uous variable is viewed as a transition into a terminal state.
+any initial state is relatively small because of the resource The reward of a transition is a function of the arrival
+constraints. It is well-known that heuristic search can be more state only. More complex dependencies are possible, but
+efﬁcient than DP because it leverages a search heuristic and this is sufﬁcient for our goal-based domain models. We let
+reachability constraints to focus computation on the relevant Rn(x) ≥ 0 denote the reward associated with a transition to
+parts of the state space. We show that for problems with re- state (n, x).
+source constraints, this advantage can be even greater than In our application domain, continuous variables model
+usual because resource constraints further limit reachability. non-replenishable resources. This translates into the general
+  The paper is structured as follows: In Section 2 we describe assumption that the value of the continuous variables is non-
+the basic action and goal model. In Section 3 we explain our increasing. Moreover, we assume that each action has some
+planning algorithm, HAO*. Initial experimental results are minimum positive consumption of at least one resource. We
+described in Section 4, and we conclude in Section 5. do not utilize this assumption directly. However, it has two
+                                                      implications upon which the correctness of our approach de-
+2  Problem Deﬁnition and Solution Approach            pends: (1) the values of the continuous variables are a-priori
+                                                      bounded, and (2) the number of possible steps in any execu-
+2.1  Problem Formulation                              tion of a plan is bounded, which we refer to by saying the
+We consider a Markov decision process (MDP) with both problem has a bounded horizon. Note that the actual num-
+continuous and discrete state variables (also called a hy- ber of steps until termination can vary depending on actual
+brid MDP  [Guestrin et al., 2004] or Generalized State resource consumption.
+MDP  [Younes and Simmons, 2004]). Each state corresponds Given an initial state (n0, x0), the objective is to ﬁnd a
+to an assignment to a set of state variables. These variables policy that maximizes expected cumulative reward.1 In our
+may be discrete or continuous. Continuous variables typically application, this is equal to the sum of the rewards for the
+represent resources, where one possible type of resource is goals achieved before running out of a resource. Note that
+time. Discrete variables model other aspects of the state, in- there is no direct incentive to save resources: an optimal solu-
+cluding (in our application) the set of goals achieved so far by tion would save resources only if this allows achieving more
+the rover. (Keeping track of already-achieved goals ensures goals. Therefore, we stay in a standard decision-theoretic
+a Markovian reward structure, since we reward achievement framework. This problem is solved by solving Bellman’s op-
+of a goal only if it was not achieved in the past.) Although
+our models typically contain multiple discrete variables, this 1Our algorithm can easily be extended to deal with an uncertain
+plays no role in the description of our algorithm, and so, for starting state, as long as its probability distribution is known.timality equation, which takes the following form:    or time is remaining. To address this problem and still ﬁnd
+                                                      an optimal solution, we associate a value estimate with each
+  V 0(x) = 0 ,
+   n               "                                  of the Markov states in an aggregate. That is, we attach to
+                     X                                each search node a value function (function of the continu-
+    t+1                      0
+  Vn   (x) =  max        Pr(n |, n, x, a)             ous variables) instead of the simple scalar value used by stan-
+            a∈A  (x)                            (1)
+                n    n0∈N                             dard AO*. Following the approach of [Feng et al., 2004], this
+   Z                                       ¸          value function can be represented and computed efﬁciently
+          0         0 ¡     0     t  0 ¢  0
+      Pr(x | n, x, a, n ) Rn0 (x ) + Vn0 (x ) dx .    due to the continuous nature of these states and the simplify-
+    x0                                                ing assumptions made about the transition functions. Using
+Note that the index t represents the iteration or time-step of these value estimates, we can associate different actions with
+DP, and does not necessarily correspond to time in the plan- different Markov states within the aggregate state correspond-
+ning problem. The duration of actions is one of the biggest ing to a search node.
+sources of uncertainty in our rover problems, and we typically In order to select which node on the fringe of the search
+model time as one of the continuous resources xi.     graph to expand, we also need to associate a scalar value with
+                                                      each search node. Thus, we maintain for a search node both
+2.2  Solution Approach                                a heuristic estimate of the value function (which is used to
+Feng et al. describe a dynamic programming (DP) algorithm make action selections), and a heuristic estimate of the prior-
+that solves this Bellman optimality equation. In particular, ity which is used to decide which search node to expand next.
+they show that the continuous integral over x0 can be com- Details are given in the following section.
+puted exactly, as long as the transition function satisﬁes cer- We note that LAO*, a generalization of AO*, allows for
+tain conditions. This algorithm is rather involved, so we will policies that contain “loops” in order to specify behavior over
+treat it as a black-box in our algorithm. In fact, it can be an inﬁnite horizon [Hansen and Zilberstein, 2001]. We could
+replaced by any other method for carrying out this compu- use similar ideas to extend LAO* to our setting. However,
+tation. This also simpliﬁes the description of our algorithm we need not consider loops for two reasons: (1) our prob-
+in the next section and allows us to focus on our contribu- lems have a bounded horizon; (2) an optimal policy will not
+tion. We do explain the ideas and the assumptions behind the contain any intentional loop because returning to the same
+algorithm of Feng et al. in Section 3.3.              discrete state with fewer resources cannot buy us anything.
+  The difﬁculty we address in this paper is the potentially Our current implementation assumes any loop is intentional
+huge size of the state space, which makes DP infeasible. and discards actions that create such a loop.
+One reason for this size is the existence of continuous vari-
+ables. But even if we only consider the discrete compo- 3 Hybrid AO*
+nent of the state space, the size of the state space is expo-
+                                                      A simple way of understanding HAO* is as an AO* variant
+nential in the number of propositional variables comprising
+                                                      where states with identical discrete component are expanded
+the discrete component. To address this issue, we use for-
+                                                      in unison. HAO* works with two graphs:
+ward heuristic search in the form of a novel variant of the
+AO* algorithm. Recall that AO* is an algorithm for search- • The explicit graph describes all the states that have been
+ing AND/OR graphs [Pearl, 1984; Hansen and Zilberstein,   generated so far and the AND/OR edges that connect
+2001]. Such graphs arise in problems where there are choices them. The nodes of the explicit graph are stored in two
+(the OR components), and each choice can have multiple con- lists: OPEN and CLOSED.
+sequences (the AND component), as is the case in planning • The greedy policy (or partial solution) graph, denoted
+under uncertainty. AO* can be very effective in solving such GREEDY in the algorithms, is a sub-graph of the ex-
+planning problems when there is a large state space. One rea- plicit graph describing the current optimal policy.
+son for this is that AO* only considers states that are reach-
+able from an initial state. Another reason is that given an In standard AO*, a single action will be associated with each
+informative heuristic function, AO* focuses on states that are node in the greedy graph. However, as described before, mul-
+reachable in the course of executing a good plan. As a result, tiple actions can be associated with each node, because dif-
+AO* often ﬁnds an optimal plan by exploring a small fraction ferent actions may be optimal for different Markov states rep-
+of the entire state space.                            resented by an aggregate state.
+  The challenge we face in applying AO* to this problem is 3.1 Data Structures
+the challenge of performing state-space search in a contin-
+uous state space. Our solution is to search in an aggregate The main data structure represents a search node n. It con-
+state space that is represented by a search graph in which tains:
+there is a node for each distinct value of the discrete compo- • The value of the discrete state. In our application these
+nent of the state. In other words, each node of our search are the discrete state variables and set of goals achieved.
+graph represents a region of the continuous state space in
+which the discrete value is the same. In this approach, dif- • Pointers to its parents and children in the explicit and
+ferent actions may be optimal for different Markov states in greedy policy graphs.
+the aggregate state associated with a search node, especially • Pn(·) – a probability distribution on the continuous vari-
+since the best action is likely to depend on how much energy ables in node n. For each x ∈ X, Pn(x) is an estimate    of the probability density of passing through state (n, x) 1: Create the root node n0 which represents the initial state.
+
+    under the current greedy policy. It is obtained by pro- 2: Pn0 = initial distribution on resources.
+
+    gressing the initial state forward through the optimal ac- 3: Vn0 = 0 everywhere in X.
+
+    tions of the greedy policy. With each Pn, we maintain 4: gn0 = 0.
+    the probability of passing through n under the greedy 5: OPEN = GREEDY = {n0}.
+    policy:              Z                             6: CLOSED  = ∅.
+                                                       7: while OPEN ∩ GREEDY   6= ∅ do
+                M(Pn) =       Pn(x)dx .
+                                                                        0                 0
+                          x∈X                          8:   n = arg maxn ∈OPEN∩GREEDY(gn  ).
+                                                       9:   Move n from OPEN to CLOSED.
+  • Hn(·) – the heuristic function. For each x ∈ X, Hn(x) 10: for all (a, n0) ∈ A × N not expanded yet in n and
+    is a heuristic estimate of the optimal expected reward
+                                                            reachable under Pn do
+    from state (n, x).                                11:     if n0 ∈/ OPEN ∪ CLOSED  then
+                                                                                                 0
+  • Vn(·) – the value function. At the leaf nodes of the ex- 12: Create the data structure to represent n and add
+                                                                                  0
+    plicit graph, Vn = Hn. At the non-leaf nodes of the         the transition (n, a, n ) to the explicit graph.
+    explicit graph, Vn is obtained by backing up the H func- 13: Get Hn0 .
+    tions from the descendant leaves. If the heuristic func- 14: Vn0 = Hn0 everywhere in X.
+                                       0                           0
+    tion Hn0 is admissible in all leaf nodes n , then Vn(x) 15: if n is terminal: then
+    is an upper bound on the optimal reward to come from 16:      Add n0 to CLOSED.
+    (n, x) for all x reachable under the greedy policy. 17:     else
+                                                      18:         Add n0 to OPEN.
+  • gn – a heuristic estimate of the increase in value of the       0
+    greedy policy that we would get by expanding node n. 19:  else if n is not an ancestor of n in the explicit graph
+                                                              then
+    If Hn is admissible then gn represents an upper bound
+                                                      20:       Add the transition (n, a, n0) to the explicit graph.
+    on the gain in expected reward. The gain gn is used to
+                                                      21:   if some pair (a, n0) was expanded at previous step (10)
+    determine the priority of nodes in the OPEN list (gn = 0
+    if n is in CLOSED), and to bound the error of the greedy then
+    solution at each iteration of the algorithm.      22:     Update Vn for the expanded node n and some of its
+                                                              ancestors in the explicit graph, with Algorithm 2.
+  Note that some of this information is redundant. Never-
+                                                      23:   Update Pn0 and gn0 using Algorithm 3 for the nodes
+theless, it is convenient to maintain all of it so that the algo- n0 that are children of the expanded node or of a node
+rithm can easily access it. HAO* uses the customary OPEN    where the optimal decision changed at the previous
+and CLOSED lists maintained by AO*. They encode the ex-     step (22). Move every node n0 ∈ CLOSED where
+plicit graph and the current greedy policy. CLOSED contains P changed back into OPEN.
+expanded nodes, and OPEN contains unexpanded nodes and
+nodes that need to be re-expanded.                                  Algorithm 1: Hybrid AO*
+3.2  The HAO* Algorithm
+                                                      and all arrival states n0 that can result from such a transi-
+Algorithm 1 presents the main procedure. The crucial steps tion (Pr(n0 | n, x, a) > 0).2 If n was previously expanded
+are described in detail below.                        (i.e. it has been put back in OPEN), only actions and arrival
+Expanding a node (lines 10 to 20): At each iteration, HAO* nodes not yet expanded are considered. In line 11, we check
+expands the open node n with the highest priority gn in the whether a node has already been generated. This is not nec-
+greedy graph. An important distinction between AO* and essary if the graph is a tree (i.e., there is only one way to get
+HAO* is that in the latter, nodes are often only partially to each discrete state).3 In line 15, a node n0 is terminal if
+expanded (i.e., not all Markov states associated with a dis- no action is executable in it (because of lack of resources).
+crete node are considered). Thus, nodes in the CLOSED In our application domain each goal pays only once, thus the
+list are sometimes put back in OPEN (line 23). The reason nodes in which all goals of the problem have been achieved
+for this is that a Markov state associated with this node, that are also terminal. Finally, the test in line 19 prevents loops in
+was previously considered unreachable, may now be reach- the explicit graph. As discussed earlier, such loops are always
+able. Technically, what happens is that as a result of ﬁnding suboptimal.
+a new path to a node, the probability distribution over it is Updating the value functions (lines 22 to 23): As in stan-
+           23
+updated (line ), possibly increasing the probability of some dard AO*, the value of a newly expanded node must be up-
+Markov state from 0 to some positive value. This process is dated. This consists of recomputing its value function with
+illustrated in Figure 1. Thus, while standard AO* expands Bellman’s equations (Eqn. 1), based on the value functions of
+only tip nodes, HAO* sometimes expands nodes that were all children of n in the explicit graph. Note that these backups
+moved from CLOSED to OPEN and are “in the middle of”
+the greedy policy subgraph.                              2We assume that performing an action in a state where it is not
+                                              0
+  Next, HAO* considers all possible successors (a, n ) of allowed is an error that ends execution with zero or constant reward.
+n given the state distribution Pn. Typically, when n is ex- 3Sometimes it is beneﬁcial to use the tree implementation of AO*
+panded for the ﬁrst time, we enumerate all actions a possible when the problem graph is almost a tree, by duplicating nodes that
+in (n, x) (a ∈ An(x) ) for some reachable x (Pn(x) > 0), represents the same (discrete) state reached through different paths.                                                                               P
+                                                                               n3
+                             P
+                              n3
+                                                                                           x       n
+                                                                       n     a                      5
+                  n1    a1               x                             1      1
+
+                                                                                            a2
+                                      a2                 n     a                    n              n
+    n0     a0                   n3            n4          0     0                    3              4
+                                                                           a3
+                                                                                           a4
+                  n          V                                         n2      V
+                   2          n3                                               n3                  n6
+
+                                         x                                                 x
+
+    (a) Initial GREEDY graph. Actions have multiple possible (b) GREEDY graph with n2 expanded. Since the path
+    discrete effects (e.g., a0 has two possible effects in n0). (n0, n2, n3) is optimal for some resource levels in n0,
+
+    The curves represent the current probability distribution Pn3 has changed. As a consequence, n3 has been re-
+    P  and value function V over x values for n3. n2 is a expanded , showing that node n5 is now reachable from
+    fringe node.                                         n3 under a2, and action a4 has become do-able in n3.
+                                        Figure 1: Node re-expansion.
+
+involve all continuous states x ∈ X for each node, not just the from n0 and x0 under a. This can be expressed as:
+reachable values of x. However, they consider only actions         X    Z
+                                                                                 0        0  0
+and arrival nodes that are reachable according to Pn. Once Pn(x) =          Pn0 (x ) Pr(n | n , x , a)
+                                                                           0
+the value of a state is updated, its new value must be propa-     0      X
+                                                                (n ,a)∈Ωn
+gated backward in the explicit graph. The backward propaga-                             0 0       0
+tion stops at nodes where the value function is not modiﬁed,                    Pr(x | n , x , a, n)dx . (2)
+                                                             0                                 0
+and/or at the root node. The whole process is performed by Here, X is the domain of possible values for x , and Ωn is
+applying Algorithm 2 to the newly expanded node.      the set of pairs (n0, a) where a is the greedy action in n0 for
+                                                      some reachable resource level:
+                                                                 0
+                                                        Ωn = {(n , a) ∈ N × A : ∃x ∈ X,
+                                                                          ∗                0
+                                                             P  0 (x) > 0, µ 0 (x) = a, Pr(n | n , x, a) > 0} ,
+ 1: Z = {n} // n is the newly expanded node.                   n          n
+                                                             ∗
+ 2: while Z 6= ∅ do                                   where µn(x) ∈  A is the greedy action in (n, x). Clearly,
+                   0
+ 3:  Choose a node n ∈ Z that has no descendant in Z. we can restrict our attention to state-action pairs in Ωn, only.
+              0
+ 4:  Remove  n from Z.                                Note that thisP operation may induce a loss of total probability
+ 5:  Update Vn0 following Eqn. 1.                     mass (Pn <   n0 Pn0 ) because we can run out of a resource
+ 6:  if Vn0 was modiﬁed at the previous step then     during the transition and end up in a sink state.
+                        0
+ 7:    Add all parents of n in the explicit graph to Z. When the distribution Pn of a node n in the OPEN list
+                                              0
+ 8:    if optimal decision changes for some (n , x),  is updated, its priority gn is recomputed using the following
+       Pn0 (x) > 0 then                               equation (the priority of nodes in CLOSED is maintained as
+                                                0
+ 9:       Update the greedy subgraph (GREEDY) at n if 0):           Z
+          necessary.
+                0                                              gn =              Pn(x)Hn(x)dx  ;      (3)
+10:       Mark n for use at line 23 of Algorithm1.                             old
+                                                                     x∈S(Pn)−Xn
+     Algorithm 2: Updating the value functions Vn.    where  S(P )  is  the support  of  P :   S(P )   =
+                                                                                old
+                                                      {x ∈ X : P (x) > 0}, and Xn   contains all x ∈   X
+                                                      such that the state (n, x) has already been expanded before
+                                                         old
+                                                      (Xn   = ∅ if n has never been expanded). The techniques
+Updating the state distributions (line 23): Pn’s represent used to represent the continuous probability distributions Pn
+the state distribution under the greedy policy, and they need and compute the continuous integrals are discussed in the
+to be updated after recomputing the greedy policy. More pre- next sub-section. Algorithm 3 presents the state distribution
+cisely, P needs to be updated in each descendant of a node updates. It applies to the set of nodes where the greedy
+where the optimal decision changed. To update a node n, decision changed during value updates (including the newly
+we consider all its parents n0 in the greedy policy graph, and expanded node, i.e. n in HAO* – Algorithm 1).
+all the actions a that can lead from one of the parents to n.
+The probability of getting to n with a continuous component 3.3 Handling Continuous Variables
+x is the sum over all (n0, a) and all possible values of x0 of Computationally, the most challenging aspect of HAO* is the
+the continuous component over the the probability of arriving handling of continuous state variables, and particularly the

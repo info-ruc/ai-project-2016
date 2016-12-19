@@ -1,0 +1,456 @@
+                       Semi-supervised Gaussian Process Classiﬁers
+
+          Vikas Sindhwani                       Wei Chu                     S. Sathiya Keerthi
+  Department of Computer Science                 CCLS                        Yahoo! Research
+       University of Chicago              Columbia University            3333 Media Studios North
+      Chicago, IL 60615, USA          New York, NY 10115, USA            Burbank, CA 91504, USA
+      vikass@cs.uchicago.edu            chuwei@gatsby.ucl.ac.uk          selvarak@yahoo-inc.com
+
+                    Abstract                            We utilize the graph-based construction of semi-supervised
+                                                      kernels in [Sindhwani et al., 2005]. The data geometry is
+    In this paper, we propose a graph-based construc- modeled as a graph whose vertices are the labeled and unla-
+    tion of semi-supervised Gaussian process classi-  beled examples, and whose edges encode appropriate neigh-
+    ﬁers. Our method is based on recently proposed    borhood relationships. In intuitive terms, in the limit of inﬁ-
+    techniques for incorporating the geometric proper- nite unlabeled data we imagine a convergence of this graph
+    ties of unlabeled data within globally deﬁned ker- to the underlying geometric structure of the probability dis-
+    nel functions. The full machinery for standard    tribution generating the data. The smoothness enforced by
+    supervised Gaussian process inference is brought  regularization operators (such as the graph Laplacian) over
+    to bear on the problem of learning from labeled   functions on the vertices of this graph is transferred onto a Re-
+    and unlabeled data. This approach provides a nat- producing Kernel Hilbert space (RKHS) of functions deﬁned
+    ural probabilistic extension to unseen test exam- over the entire data space. This gives rise to a new RKHS
+    ples. We employ Expectation Propagation proce-    in which standard supervised kernel methods perform semi-
+    dures for evidence-based model selection. In the  supervised inference. In this paper, we apply similar ideas
+    presence of few labeled examples, this approach is for Gaussian processes, with an aim to draw the beneﬁts of
+    found to signiﬁcantly outperform cross-validation a Bayesian approach when only a small labeled set is avail-
+    techniques. We present empirical results demon-   able. The semi-supervised kernel of [Sindhwani et al., 2005]
+    strating the strengths of our approach.           is motivated through Bayesian considerations, and used for
+                                                      performing Gaussian process inference. We apply expecta-
+                                                      tion propagation (EP) (see [Rasmussen and Williams, 2006]
+1  Introduction                                       and references therein) for approximating posterior processes
+Practitioners of machine learning methods frequently en- and calculating evidence for model selection.
+counter the following situation: large amounts of data can We point out some aspects of the proposed method:
+be cheaply and automatically collected, but subsequent label- a) Our method, hereafter abbreviated as SSGP, can be
+ing requires expensive and fallible human participation. This seen as providing a Bayesian analogue of Laplacian Sup-
+has recently motivated a number of efforts to design semi- port Vector Machines (LapSVM) and Laplacian Regularized
+supervised inference algorithms that aim to match the per- Least Squares (LapRLS) proposed in [Sindhwani et al., 2005;
+formance of well-trained supervised methods, using a small Belkin et al., 2006] and semi-supervised logistic regression
+pool of labeled examples and a large collection of unlabeled proposed in [Krishnapuram et al., 2004]. In this paper,
+data. The scarcity of labeled examples greatly exaggerates the we empirically demonstrate that when labeled examples are
+need to incorporate additional sources of prior knowledge, to scarce, model selection by evidence in SSGP is a signiﬁcant
+perform careful model selection, and to deal with noise in la- improvement over cross-validation in LapSVM and LapRLS.
+bels. A Bayesian framework is ideally suited to handle such b) Several graph-based Bayesian approaches incorporat-
+issues. In this paper, we construct semi-supervised Gaussian ing unlabeled data have recently been proposed. Methods
+processes, and demonstrate and discuss its practical utility on have been designed for transductive Bayesian learning us-
+a number of classiﬁcation problems.                   ing a graph-based prior in [Zhu et al., 2003; Kapoor et al.,
+  Our methods are based on the geometric intuition that for 2005]. Since the core probabilistic model in these methods
+many real world problems, unlabeled examples often iden- is deﬁned only over the ﬁnite collection of labeled and un-
+tify structures, such as data clusters or low dimensional man- labeled inputs, out-of-sample extension to unseen test data
+ifolds, whose knowledge may potentially improve inference. requires additional follow-up procedures. By contrast, our
+For example, one might expect high correlation between class approach possesses a Gaussian process model over the entire
+labels of data points within the same cluster or nearby on a input space that provides natural out-of-sample prediction.
+manifold. These, respectively, are the cluster and manifold c) While the focus of this paper is to derive SSGP and ver-
+assumptions for semi-supervised learning.             ify its usefulness on binary classiﬁcation tasks, we wish to
+
+                                                IJCAI-07
+                                                  1059                                                      
+                                                        l  P   |   N
+comment on its potential in the following respects: (1) SSGP i=1 (yi fxi ) (0, ΣLL)/P (YL) where we use ΣLL as a
+                                                                                                P
+also provides a general framework for other learning tasks, shorthand for ΣXLXL . The normalization factor (YL)=
+such as regression, multiple-class classiﬁcation and ranking. P(YL|fL)P(fL)dfL is known as the evidence for the model
+(2) SSGP also produces class probabilities and conﬁdence es- parameters (such as parameters of the covariance function
+                                                                       2
+timates. These can be used to design active learning schemes. and the noise level σn).
+(3) Efﬁcient gradient-based strategies can be designed for The posterior distribution above is non-Gaussian. To pre-
+choosing multiple model parameters such as regularization serve computational tractability, a family of inference tech-
+and kernel parameters.                                niques can be applied to approximate the posterior as a Gaus-
+  We begin by brieﬂy reviewing Gaussian process classiﬁca- sian. Some popular methods include Laplace approximation,
+tion in Section 2 and then propose and evaluate SSGP in the mean-ﬁeld methods, and expectation propagation (EP). In
+following sections.                                   this paper we will use the EP procedure, based on empiri-
+                                                      cal ﬁndings that it outperforms Laplace approximation. In
+2  Background and Notation                            EP, the key idea is to approximate the non-Gaussian part in
+                                                      the posterior in the form of an un-normalized Gaussian, i.e.
+In the standard formulation for learning from examples, pat- l
+                                                           P(yi|fxi ) ≈ c N (μ, A). The parameters c, μ, A are
+terns x are drawn from some space X , typically a subset i=1
+    d                                                 obtained by locally minimizing the Kullback-Liebler diver-
+of R  and associated labels y come from some space Y.
+For ease of presentation, in this paper we will focus on bi- gence between the posterior and its approximation.
+                                                        With a Gaussian approximation to the posterior in hand,
+nary classiﬁcation, so that Y can be taken as {+1, −1}.We
+                                                      the distribution of the latent variable x at a test point t,as
+assume there is an unknown joint probability distribution                            f t            x
+P                                                     given by the following integral, becomes a tractable quantity:
+ X×Y  over the space of patterns and labels. A set of pat- P |         P    |  P    |       ≈N        2
+     {  }l+u                              P               (fxt YL)=     (fxt fL) (fL YL)dfL       (μt,σt ),
+terns xi i=1 is drawn i.i.d from the marginal X (x)=             T  −1        2            −   T   −1 −
+    P                                                 where μt =ΣLtΣLL  μ and σt = K(xt, xt)  ΣLt (ΣLL
+  Y  X×Y(x,y); the label yi associated with xi is drawn −1     −1
+                           P    |                     ΣLL  A  ΣLL)ΣLt.    Here, the column vector ΣLt  =
+from the conditional distribution Y (y xi) for the ﬁrst l pat-               T
+terns. We are interested in leveraging the unlabeled patterns [K(xt, x1),...,K(xt, xl)] and ΣLL is the gram matrix
+{  }l+u                                               of K over the labeled inputs. The conditional distribution
+ xj j=l+1 for improved inference.                     P    |                                     T  −1
+                                                        (fxt fL) is a multi-variate Gaussian with mean ΣLtΣLLfL
+  To set our notation for the discussion ahead, we will denote                       T   −1
+          l                                           and covariance matrix K(xt, xt) − Σ Σ ΣLt.
+XL = {xi}i=1 as the set of labeled examples with associated                          Lt  LL
+               l               l+u                      Finally, one can compute the Bernoulli distribution over
+labels YL = {yi}i=1, XU =  {xi}i=l+1 as the set of un-
+                                                      the test label yt, which for the probit noise model becomes
+labeled patterns. We further denote all the given patterns as                   
+                                                                             2   2
+XD, i.e., XD = XL ∪ XU . Other patterns that are held out P(yt|YL)=Φμt/    σn + σt  .  For more details on
+for test purposes (or have not been collected yet) are denoted Gaussian processes, we point the reader to [Rasmussen and
+as XT . The set of all patterns (labeled, unlabeled and test) is Williams, 2006] and references therein.
+denoted as X, i.e., X = XD ∪ XT , but we will often also use Our interest now is to utilize unlabeled data for Gaussian
+X to denote a generic dataset.                        process inference.
+  In the standard Gaussian process setting for supervised
+learning, one proceeds by choosing a covariance function 3 Semi-supervised Gaussian Processes
+K  : X×X   →. With any point x ∈X, there is an as-
+sociated latent variable fx. Given any dataset X, the latent 3.1 Kernels for Semi-supervised Learning
+variables fX = {fx}x∈X are treated as random variables in a A symmetric positive semi-deﬁnite function K(·, ·) can serve
+zero-mean Gaussian process indexed by the data points. The as the covariance function of a Gaussian process and also as a
+covariance between fx and fz is fully determined by the co- kernel function of a deterministic Reproducing Kernel Hilbert
+ordinates of the data points x and z, and is given by K(x, z). Space (RKHS) H of functions X→. The RKHS and the
+Thus, the prior distribution over these variables is a multi- GP associated with the same function K(·, ·) are closely re-
+variate Gaussian, written as: P(fX )=N (0, ΣXX) where lated through a classical isometry between H and a Hilbert
+ΣXX  is the covariance matrix with elements K(x, z) with space of random variables spanned by the GP (i.e. random
+x, z ∈ X.
+                                                      variables of the form k αkfxk and their mean square lim-
+  The Gaussian process classiﬁcation model relates the vari- its)1. In this section, we review the construction of an RKHS
+able fx at x to the label y through a probit noise model that is adapted for semi-supervised learning of deterministic
+                                ∼N       2
+such as y = sign(fx + ξ) where ξ     (0,σn).Given     classiﬁers [Sindhwani et al., 2005]. The kernel of this RKHS
+the latent variables fL associated with labeled data points, the is then used as the covariance function of SSGP.
+class labels YL are independent Bernoulli variables and their In the context of learning deterministic classiﬁers, for
+                        P   |        l  P   |
+joint likelihood  is given by: (YL fL)= i=1 (yi fxi )= many choices of kernels, the norm  f H can be interpreted as
+l      y f
+         i xi                                         a smoothness measure over functions f in H. The norm can
+  i=1 Φ  σ    where Φ is the cumulative density function
+          n                                           then be used to impose a complexity structure over H and
+of the normal distribution.
+  Combining this likelihood term with the Gaussian prior 1For an RKHS function f, the notation f(x) means the function
+for the latent variables associated with the labeled dataset f evaluated at x, whereas for a GP fx refers to the latent random
+XL, we obtain the posterior distribution: P(fL|YL)=   variable associated with x.
+
+                                                IJCAI-07
+                                                  1060learning algorithms can be developed based on minimizing instantiation is interpreted as realization of a certain geom-
+                                       2
+functionals of the form: V (f,XL,YL)+γ f H,whereV is  etry. Then, conditioning on the geometry of unlabeled data
+a loss function that measures how well f ﬁts the data. Re- through these variables, a Bayesian update gives a posterior
+markably, for loss functions that only involve f through point over the latent variables. SSGP is the resulting posterior pro-
+evaluations, a representer theorem states that the minimizer is cess, which incorporates the localized spatial knowledge of
+                 l
+of the form f(x)=  i=1 αiK(x, xi) so that only the αi re- the data via Bayesian learning.
+main to be computed. This provides the algorithmic basis of There are many ways to deﬁne an appropriate likelihood
+algorithms like Regularized Least Squares (RLS) and Support evaluation for the geometry variables G. One simple formu-
+Vector Machines (SVM), for squared loss and hinge loss, re- lation for P(G|fD) is given by:
+spectively. In a semi-supervised setting, unlabeled data may                                  
+                                                                          1        1  T
+suggest alternate measures of complexity, such as smoothness   P(G|fD)=     exp  −   pD MpD           (2)
+with respect to data manifolds or clusters. Thus, if the space            Z        2
+H
+  contains functions that are smooth in these respects, it is       P       |        P        |      T
+                         H                            where pD  =[   (y =1fx1   ),..., (y =1fxl+u  )]  =
+only required to re-structure by reﬁning the norm using                   T
+labeled and labeled data XD. A general procedure to per- [Φ(fx1 ),...,Φ(fxl+u )] is a column vector of conditional la-
+form this operation is as follows: we deﬁne H˜ to be the space bel probabilities for latent variables associated with XD, M
+of functions from H with the modiﬁed data-dependent inner is a graph-based matrix such as the graph Laplacian in Sec-
+                            T                         tion 3.1, and Z is a normalization factor. P(G|fD) may be
+product: 
+f,gH˜ = 
+f,gH + f Mg,wheref   and g are
+                                                      interpreted as a measure of how much fD corroborates with
+the vectors {f(x)}x∈XD and {g(x)}x∈XD respectively, and
+M  is a symmetric positive semi-deﬁnite matrix. The norm a given geometry, computed in terms of the smoothness of
+induced by this modiﬁed inner product combines the origi- the associated conditional distributions with respect to unla-
+nal ambient smoothness with an intrinsic smoothness mea- beled data. This implements a speciﬁc assumption about the
+sure deﬁned in terms of the matrix M. The deﬁnition of M connection between the true underlying unknown conditional
+                                                      and marginal distributions – that if two points x1, x2 ∈Xare
+is based on the construction of a data adjacency graph that                         P
+acts as an empirical substitute of the intrinsic geometry of close in the intrinsic geometry of X , then the conditional
+                                                      distributions P(y|x1) and P(y|x2) are similar, i.e., as a func-
+the marginal PX . M can be derived from the graph Lapla-
+                                          p           tion of x, P(y|x) is smooth with respect to PX .
+cian L; for example, M = L or M =    p βpL are pop-
+ular choices for families of graph regularizers. The Lapla- Since the likelihood form (Eqn 2) leads to a non-Gaussian
+cian matrix of the graph implements an empirical version of posterior, a natural substitute is to use an un-normalized
+the Laplace-Beltrami operator when the underlying space is Gaussian form, as commonly used with EP approximations.
+                                                      The posterior is then approximated as:
+a Riemannian manifold. This operator measures smoothness                              
+                                  H˜
+with respect to the manifold. The space can be shown to                     1  T
+                                         H˜               P (fD|G) ≈ c exp −  fD M  fD  P(fD)/P (G)   (3)
+be an RKHS. With the new data-dependent norm, becomes                       2
+better suited, as compared to the original function space H,
+for semi-supervised learning tasks where the cluster/manifold Such a form captures the functional dependency between the
+assumptions hold. The form of the new kernel K˜ associated latent and the geometry variables while rendering subsequent
+with H˜ can be derived (see [Sindhwani et al., 2005])interms computations tractable. The value of c is inconsequential in
+of the kernel function using reproducing properties of an deﬁning this approximate posterior distribution (since c can-
+                   K                                                                G
+RKHS and orthogonality arguments, and is given by:    cels due to the normalizing term P ( )), although it is impor-
+                                                      tant for evidence computations. In Section 3.3, we further
+   ˜               −   T             −1
+  K(x, z)=K(x,   z)  ΣDx(I  + MΣDD)    MΣDz     (1)   comment on the role of the c and propose the use of partial
+where ΣDx (and similarly ΣDz) denotes the column vector: evidence for model selection. The matrix M is approximated
+                       T
+[K(x1, x),...,K(xl+u, x)] . Laplacian SVM and Lapla-  by the Laplacian matrix of the data-adjacency graph, to cor-
+                                                      respond to the deterministic algorithms introduced in [Sind-
+cian RLS solve regularization problems in the RKHS H˜ with
+                                                      hwani et al., 2005; Belkin et al., 2006]. We note that c, M
+hinge and squared loss respectively.
+                                                      can alternatively be computed from EP calculations, leading
+3.2  Data-dependent Conditional Prior                 to a novel graph regularizer and tractable computations for
+                                                      the full evidence. We outline more details in this direction
+SSGP uses the semi-supervised kernel function K˜ deﬁned
+                                                      in [Chu et al., 2006].
+above as a covariance function for Gaussian process learn-
+                                                        To proceed further, we make the assumption that given fD,
+ing. Thus, in SSGP the covariance between fxi and fxj not
+                                                      G is independent of latent variables at other points, i.e., if the
+only depends on the ambient coordinates of xi and xj ,but
+                                                      data set X contains XD and a set of unseen test points XT ,
+also on geometric properties of the set XD. In this section,
+                                                      we have:
+we discuss the derivation of K˜ from Bayesian considerations.
+                                                                       P(G|fX )=P(G|fD)               (4)
+  Our general approach is summarized as follows. We be-
+gin with a standard Gaussian process. Given unlabeled and This assumption allows out of sample extension without the
+labeled data XD, we deﬁne a joint probability distribution need to recompute the graph for a new dataset.
+over the associated latent process variables fD andanab- The posterior distribution of fX given G is: P(fX |G) ∝
+stract collection of random variables, denoted as G, whose P(G|fX )P(fX )=P(G|fD)P(fX ).
+
+                                                IJCAI-07
+                                                  1061  The prior distribution for fX is a Gaussian N (0, ΣXX) Table 1: Datasets with d features, n training examples (la-
+given by the standard Gaussian processes. In the form beled+unlabeled) and t test examples.
+of block matrices,
+ the prior P
+(fX ) can
+ be written as  fol-
+                                                        DATASET    dn            t         DOMAIN
+              fD             0     ΣDD    ΣDT
+lows: fX =          ∼N          ,    T            ,     MOONS      2     120   40401      SYNTHETIC
+               T
+              f              0      ΣDT   ΣTT            3VS5     256   1214    326       USPS DIGIT
+whereweusetheshorthandD      for XD  and T for XT .       SET1    241   1126    374   IMAGE RECOGNITION
+The posterior distribution of fX conditioned on G can be
+                                        P    |G  ∝       PCMAC    7511  1460    486     20-NEWGROUPS
+written as a zero-mean Gaussian distribution (fX )      REUTERS   9930   458    152     REUTERS-21578
+      1 T ˜ −1
+exp(− 2 fX ΣXX fX ) where
+              
+             −1   
+                  kernel in Eqn 1 needs to be recomputed multiple times. Also,
+        −1      ΣDD    ΣDT          M   0
+       Σ˜ XX =    T             +                     since cross-validation is based on counts, it may often be un-
+                        TT           00
+                ΣDT    Σ                              able to uniquely identify a good set of parameters. By con-
+  Proposition: Given Eqn 3, for any ﬁnite collection of trast, evidence maximization neither needs to suppress expen-
+data points X, the random variables fX = {f(x)}x∈X    sive labels nor needs to hold out labeled examples from the
+conditioned on G have a multivariate normal distribution graph. As a continuous function of many model parameters, it
+N (0, Σ˜ XX),whereΣ˜ XX is the covariance matrix whose el- is more precise in parameter selection (demonstrated in Sec-
+ements are given by evaluating the following kernel function tion 4) and also amenable to gradient-based techniques. In
+K˜ : X×X→,                                          addition to these beneﬁts, we note the novel possibility of em-
+                       T             −1               ploying unlabeled data for model selection by maximizing the
+  K˜ (x, z)=K(x, z) − ΣDx(I + MΣDD)    MΣDz     (5)
+                                                      full evidence P(YL, G|φ)=P(YL|G,φ )P(G|φ). The latter
+for x, z ∈X.HereΣDx        denotes the column vector                         P G|       P G| D P   D   D
+                      T                               term may be computed as (  φ)=      ( f  ) (f )df .
+[K(x1, x),...,K(xn, x)] .                             Given Eqn 3, one can immediately derive log P(G|φ)=
+                                                                1
+  This proposition shows that the Gaussian process condi- log c − 2 log det(MΣDD + I) where I is the identity
+tioned on the geometry variable G is a Gaussian process with matrix. For simplicity, in this paper we focus on compar-
+a modiﬁed covariance function K˜ . A proof of this result uses ing standard evidence maximization in SSGP with standard
+straightforward matrix algebra and is omitted for brevity. cross-validation in Laplacian SVM/RLS.
+  SSGP is the posterior process obtained by conditioning the
+original GP with respect to G. Note that the form of its co- 4 Experiments
+               ˜
+variance function K is the same as in Eqn 1, which is derived We performed experiments on a synthetic two-dimensional
+from properties of RKHS.                              dataset and four real world datasets for binary classiﬁcation
+3.3  Model Selection                                  problems. The statistics of these datasets are described in
+                                                      Table 1.
+Model selection for SSGP involves choosing the kernel pa-
+rameters and the noise variance σn (see Section 2). The def- Synthetic Data
+inition of K˜ is based on the choice of a covariance function
+K and a graph regularization matrix M.Asin[Sindhwani  The toy 2-D dataset MOONS, meant to visually demonstrate
+                                                      SSGP, is shown in Figure 1 as a collection of unlabeled
+et al., 2005], in this paper we restrict our attention to the fol-
+                                   2                  examples (small black dots) and two labeled examples per
+                              x−z           γI p
+                            −     2
+lowing choices: K(x, z)=exp     2σ    ,M=     γA L    class (large colored points). The classiﬁcation boundary and
+                1
+                   ˜                A     I           the contours of the mean of the predictive distribution over
+and use the kernel γA K. The parameters γ and γ balance
+ambient and intrinsic covariance. The parameters related to the unit square are shown for standard GP and SSGP (Fig-
+the computation of the graph Laplacian L are – the number ure 1(a,c)). These plots demonstrate how SSGP utilizes unla-
+                                                      beled data for classiﬁcation tasks. The uncertainty in predic-
+of nearest neighborsNN and the graph adjacency matrix W .
+                          2
+                   xi−xj                            tion (Figure 1(d)) respects the geometry of the data, increas-
+We set Wij =exp   −    2    ,ifxi and xj are adjacent
+                      2σt                             ing anisotropically as one moves away from the labeled ex-
+in a NN-nearest neighbor graph and zero otherwise.    amples. Figure 1(b) also demonstrates evidence-based model
+  Denote φ as the collection of model parameters. The opti- selection.
+mal values of φ are determined by maximizing the evidence
+P(YL|G,φ) which is available from EP computations.    Real World Data sets
+  Model selection is particularly challenging in semi- For all the real world data sets (except 3VS5), we generated
+supervised settings in the presence of few labeled examples. a ﬁxed training/test split by randomly drawing one-fourth of
+Popular model selection techniques like cross-validation (for the original data set into a test set of unseen examples, and
+deterministic methods like Laplacian SVM/RLS) require sub- retaining the rest as a training set of labeled and unlabeled
+sets of the already-scarce labeled data to be held out from examples. Learning curves were plotted for varying amount
+training. Moreover, for graph-based semi-supervised learn- of labeled data, randomly chosen from the training set. For
+ing, a proper cross-validation should also exclude the held 3VS5, we chose the exact data splits used in [Lawrence and
+out subset from the adjacency graph instead of simply sup- Jordan, 2004] to facilitate comparison between algorithms.
+pressing labels, in order to ensure good out-of-sample exten- To reduce the complexity of model selection, we ﬁx NN =
+sion. This adds a major expense since the semi-supervised 10 and p =2for 3VS5, SET1andNN =50and  p =5for
+
+                                                IJCAI-07
+                                                  1062  Mean of the Predictive Distribution of Supervised Learning Logrithm of the Evidence of Semi−supervised Learning 3vs5 set1
+1.5                      6
+                     (a)                 (b)            0.2
+                                                                           SSGP*  0.16
+                                                                           SSGP
+ 1                                           −3                                   0.14
+                         4.75                                              GP*
+                    0.2                                 0.15               GP     0.12
+                                             −3.5
+0.5        0                                                                       0.1
+
+
+                        t 3.5
+                        σ
+
+                        2                                                         0.08
+       0.6          0.6                                 0.1
+ 0                                           −4
+        0.4        0.4  −log
+
+     0                                                  Error  rate on Test Set   0.06
+           −0.2                                                                   Error  Rate on Test Set
+        0.2 −0.4         2.25
+   −0.6       −0.6
+   −0.4                                                                           0.04
+−0.5 −0.2                                    −4.5       0.05
+                                                                                  0.02
+                                                          0.02 0.04 0.06 0.08 0.1 0.12 0.14 0.16 0.18 0.2
+                         1                                                           0.04 0.06 0.08 0.1 0.12 0.14 0.16 0.18 0.2
+                                                                 prob. of label present
+−1                                                                                         prob. of label present
+                    0                        −5
+
+                             1  2.25 3.5 4.75 6
+−1.5                             −log σ                           pcmac                      reuters
+−1.5 −1 −0.5 0 0.5 1 1.5 2 2.5     2
+                                                        0.25
+ Mean of the Predictive Distribution of Semi−supervised Learning Entropy of the Predictive Distribution of Semi−supervised Learning 0.35
+1.5
+             −0.1    (c)                                                           0.3
+    −0.1                                 (d)            0.2
+                                             0.65                                 0.25
+ 1                      1
+                                                                                   0.2
+                                             0.6
+       −0.1                                             0.15
+ −0.2                                                                             0.15
+0.5                 0.2 0.5
+                                             0.55
+      0.3                                                                          0.1
+
+     0.2                                                Error  rate on Test Set 0.1 Error  rate on Test Set
+                        0
+ 0 −0.3             0.4                      0.5                                  0.05
+              −0.4
+                                                                                   0
+              −0.3 −0.2                                 0.05
+                 0     −0.5                  0.45
+−0.5                 0.2                                   0.04 0.06 0.08 0.1 0.12 0.14 0.16 0.18 0.2 0.04 0.06 0.08 0.1 0.12 0.14 0.16 0.18 0.2
+  −0.2          0.1
+                   0.3                                           prob. of label present    prob. of label present
+                                             0.4
+                        −1
+−1
+   0
+       0.1                                   0.35
+                  0.1                                    Figure 2: Comparison of SSGP with GP on Test Data.
+                       −1.5
+−1.5
+−1.5 −1 −0.5 0 0.5 1 1.5 2 2.5 −1 −0.5 0 0.5 1 1.5 2 2.5
+                                                      all datasets, except PCMAC where the gap seems to converge
+Figure 1: MOONS: The mean of the predictive distribution faster. (b) Performance based on parameters chosen by ev-
+of supervised GP is shown in graph (a). Based on maximum idence based model selection is much closer to the optimal
+evidence, the best settings are found at log2 σt = −3.0 and
+        −                                             performance for SSGP than for GP. The performance curves
+log2 σ = 2.25, shown as a cross in graph (b). The results of for SSGP have lesser variance.
+SSGP with the best settings are shown in graph (c) and (d).
+
+                                                                   3vs5                      set1
+                                                        0.18                      0.16
+                                                                             *
+                                                        0.16               SSGP   0.14
+PCMAC, REUTERS. These values are based on experimen-                       SSGP
+                                                        0.14               GP*    0.12
+                                                        0.12               GP
+tal experience from [Sindhwani et al., 2005] with image and                        0.1
+                                                        0.1
+                                                                                  0.08
+text data sets. We used weighted graphs with Euclidean dis- 0.08
+                                                                                  0.06
+tance as the graph similarity measure, and Gaussian weights 0.06
+                                                        Error  rate on Unlabeled Set 0.04
+
+
+                                                        0.04                      Error  Rate on Unlabeled Set
+with width (σt) set to the mean distance between adjacent 0.02                    0.02
+                                                          0.02 0.04 0.06 0.08 0.1 0.12 0.14 0.16 0.18 0.2
+                                                                                     0.04 0.06 0.08 0.1 0.12 0.14 0.16 0.18 0.2
+                                                                 prob. of label present
+vertices. The behavior of evidence-based model selection for                               prob. of label present
+
+SSGP and cross-validation (CV) based model selection for          pcmac                      reuters
+
+                                                                                  0.35
+Laplacian SVM was investigated over a range of values for 0.2
+                                                                                   0.3
+
+the parameters σ, γA,γI . For each dataset, we computed the                       0.25
+                                                        0.15
+mean length of feature vectors (σ0) in the training set, and                       0.2
+                     σ0 σ0                                                        0.15
+                            0   0   0
+probed σ in the range [ 4 2 σ 2σ 4σ  ]; the range for   0.1                        0.1
+         −6   −4   −2                           γI      Error  rate on Test Set   Error  rate on Test Set
+ A                                                                                0.05
+γ  was [10  10   10  1 100] and the choices for ratio γA
+                                                        0.05                       0
+                                                           0.04 0.06 0.08 0.1 0.12 0.14 0.16 0.18 0.2 0.04 0.06 0.08 0.1 0.12 0.14 0.16 0.18 0.2
+were [0 1 10 100 1000] (note that a choice of 0 ignored un-      prob. of label present    prob. of label present
+labeled data and reduces the algorithm to its standard super-
+                                                         Figure 3: SSGP vs GP on Unlab. Data (Transduction).
+vised mode). The noise parameter σn in the probit model for
+                    −4
+class labels was set to 10 in all experiments. Note that this 2. EVIDENCE MAXIMIZATION VERSUS CV: We next
+parameter allows SSGP to potentially deal with label noise. compare evidence-based model selection in SSGP with CV
+  1. BENEFIT OF UNLABELED DATA: In Figure 2, we plot  based model selection in Laplacian SVM. In Figure 4, we
+the mean error rates on the test sets for the four datasets as plot the mean error rates on the test sets for the four datasets
+a function of the number of labeled examples (expressed in as a function of the number of labeled examples for SSGP
+terms of probability of ﬁnding a labeled example in the train- and Laplacian SVM, both of which utilize unlabeled data
+ing set) for SSGP and standard supervised GP (which ignores through the same kernel. Figure 5 shows the correspond-
+unlabeled data). Figure 3 shows the corresponding curves for ing curves for performance on the unlabeled data. The solid
+performance on the unlabeled data. The solid curves show the curves show the mean and standard deviation of the mini-
+mean and standard deviation of the minimum error rates for mum error rates for SSGP and Laplacian SVM over the set
+SSGP and GP over the set of parameters σ, γA,γI (γI =0 of parameters σ, γA,γI ; and the dashed curves show corre-
+for GP) and the dashed curves show the mean and standard sponding curves at a parameter setting chosen by evidence-
+deviation of error rates at parameters chosen by maximiz- maximization and CV for SSGP and Laplacian SVM respec-
+ing evidence. The mean and standard deviations are com- tively. The mean and standard deviations are computed over
+puted over 10 random draws for every choice of the amount 10 random draws for every choice of the amount of labeled
+of labeled data. We make several observations: (a) By utiliz- data. We used 5-fold CV for each labeled set, except those
+ing unlabeled data, SSGP makes signiﬁcant performance im- with 10 or fewer examples, in which case leave-one-out cross
+provements over standard GP on both the test and unlabeled validation was used. It is important to note that our CV pro-
+sets, the gap being larger on the unlabeled set. This holds true tocol for Laplacian SVMs only suppresses labels but does
+across the entire span of varying amounts of labeled data for not exclude the labeled examples from the graph. We make
+
+                                                IJCAI-07
+                                                  1063

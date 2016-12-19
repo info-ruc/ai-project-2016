@@ -1,0 +1,416 @@
+      Solving POMDPs with Continuous or Large Discrete Observation Spaces
+
+                        Jesse Hoey                                 Pascal Poupart
+                 Department of Computer Science                 School of Computer Science
+                      University of Toronto                       University of Waterloo
+                     Toronto, ON, M5S 3H5                         Waterloo, ON, N2L 3G1
+                   jhoey@cs.toronto.edu                      ppoupart@cs.uwaterloo.ca
+
+                    Abstract                          imate scalable algorithms for model-based POMDPs with
+                                                      large state spaces [20; 19] and complex policy spaces [17; 19;
+    We describe methods to solve partially observable 24], however model-based algorithms cannot tackle problems
+    Markov decision processes (POMDPs) with con-      with continuous nor large discrete observation spaces.
+    tinuous or large discrete observation spaces. Real- In this paper we study and propose new algorithms for
+    istic problems often have rich observation spaces, model-based POMDPs with continuous or large discrete ob-
+    posing signiﬁcant problems for standard POMDP     servation spaces. We ﬁrst demonstrate that the complexity of
+    algorithms that require explicit enumeration of the observation spaces can often be signiﬁcantly reduced with-
+    observations. This problem is usually approached  out affecting decision quality. Intuitively, observations pro-
+    by imposing an a priori discretisation on the obser- vide information to the decision maker for choosing a future
+    vation space, which can be sub-optimal for the de- course of action. When the same course of action is chosen
+    cision making task. However, since only those ob- for two different observations, these observations are indis-
+    servations that would change the policy need to be tinguishable from a decision making point of view, and can
+    distinguished, the decision problem itself induces a therefore be aggregated. Hence, when a policy is composed
+    lossless partitioning of the observation space. This of a small set of conditional plans (conditional on the obser-
+    paper demonstrates how to ﬁnd this partition while vations), it is possible to partition the observation space in a
+    computing a policy, and how the resulting discreti- small number of regions corresponding to the relevant fea-
+    sation of the observation space reveals the relevant tures of the observation space for decision making. Many
+    features of the application domain. The algorithms systems tackle the feature detection problem separately from
+    are demonstrated on a toy example and on a realis- the decision making problem, ﬁrst building a set of features,
+    tic assisted living task.                         then computing a policy based on those observation features.
+                                                      In this paper, we demonstrate how the decision problem can
+1  Introduction                                       be used to automatically deﬁne a set of relevant features that
+Partially observable  Markov    decision  processes   are sufﬁcient to ﬁnd an optimal policy.
+(POMDPs)  [1] provide a rich framework for planning under The paper ﬁrst provides some background on POMDPs in
+uncertainty. In particular, POMDPs can be used to robustly Sect. 2, followed by a discussion of the partitioning of the
+optimize the course of action of complex systems despite in- observation space in Sect. 3. Sects. 4 and 5 discuss methods
+complete state information due to poor or noisy sensors. For for the one-dimensional and multi-dimensional cases, respec-
+instance, in mobile robotics [15], spoken-dialog systems [21; tively. Sect. 6 reports experiments with an assisted living task.
+25] and vision-based systems [7], POMDPs can be used
+to optimize controllers that rely on the partial and noisy 2 Partially Observable MDPs
+information provided by various sensors such as sonars, Formally, a  POMDP    is  speciﬁed  by   a   tuple
+laser-range ﬁnders, video cameras and microphones. Un- hS, A, Z,T,Z,R,γ,hi which  consists of a set S  of
+fortunately, to date, the use of POMDPs in such real-world states s capturing the relevant features of the world, a set A
+systems has been limited by the lack of scalable algo- of actions a corresponding to the possible control decisions,
+rithms capable of processing rich and continuous sensor a set Z of observations corresponding to sensor readings,
+observations.                                         a transition function T (s, a, s0) = Pr(s0|s, a) encoding the
+  While model-free approaches such as neuro-dynamic pro- stochastic dynamics of the world, an observation function
+gramming [3], Monte Carlo sampling [23] and stochastic Z(a, s0,z) = Pr(z|a, s0) indicating how sensor readings re-
+gradient descent [13; 2; 16] can tackle POMDPs with arbi- late to physical states of the world, a reward function R(s, a)
+trary observation spaces, they tend to require a large amount encoding the objectives of the system, a discount factor γ
+of simulation or a priori knowledge to restrict the space of (between 0 and 1) and a planning horizon h (assumed to be
+policies (which reduces the need for simulation). Signif- inﬁnite in this paper). We assume that states and actions
+icant progress has also been made in developing approx- are discrete, but observations can be continuous or discrete.                                                       stages to go conditional plan
+While it is common for observations to be continuous               cp
+                                                                    1                      value function
+                                                         k         listen
+because sensors often provide continuous readings, states      observe: observe:
+are often abstract, unobservable quantities. In the case of      left  right
+                                                                cp      cp
+                                                                 32
+user modeling problems and event recognition problems,  k−1                         α
+                                                                listen listen        cp
+                                                           observe:                  1
+sates are often discrete. For continuous observations,                    observe: value
+                                                             left          right
+     0              0                                                                      α   α
+                                                                                      α     cp  cp  α
+                 |                                                                     cp   45
+Z(a, s ,z)=pdf(z a, s ) is a probability density function.                              2            cp 3
+                                                             cp            cp
+Since states are not directly observable, the decision maker’s k−2 open4 right open5 left
+                                                                                   left               right
+belief about the current state is represented by a probability                           belief ( tiger location )
+distribution b(s) = Pr(s) called belief state. After executing    (a)                       (b)
+a and observing z, the beliefP state b is revised according to Figure 1: a) Tree representation of a three-step conditional
+               a  0                 0      0
+Bayes’ theorem: bz (s ) ∝ s b(s)T (s, a, s )Z(a, s ,z). plan for the simple tiger problem, starting with a uniform be-
+  To illustrate the concepts we will present, we use the clas- lief about the tiger location. b) Corresponding value function
+sic Tiger problem [5], in which the decision maker is faced of composed of 5 α-vectors
+with two doors. A small reward lies behind one door, but a
+large cost (a tiger) lies behind the other. The decision maker Fig. 1(b) shows the value function of a policy for the Tiger
+can either open a door, or listen for the tiger. Listening gives problem, composed of 5 conditional plans, each of which
+the decision maker information from which she can infer the is highest for some part of the belief space. The goal is
+                                                      to ﬁnd an optimal policy π∗ with the highest value (i.e.,
+location of the tiger. In the original, discrete, version of this π∗ π                               ∗
+problem, two possible observations result from listening (left V (b) ≥ V (b) ∀π). The optimal value function V (b)
+                                                      for an inﬁnite planning horizon can be computed by value it-
+or right), and these observations correspond with the true lo-                                     k
+cation of the tiger with probability 0.85. In the continuous eration which computes successive approximations V (b) by
+version we will discuss here, the decision maker has access dynamic programming
+                                                                                  X
+to the original microphone array measurement that (noisily) k+1            a                    k a
+                                                           V    (b) = max R (b)+γ     Pr(z|b, a)V (bz )
+locates the tiger in the continuous horizontal dimension (from        a
+                                                                                   z
+the far left to the far right).                                            P
+                                                               a
+  At each time step, the decision maker picks an action to whereP R (b)=     s b(s)R(s, a), Pr(z|b, a)=
+                                                                   0            0        a
+execute based on the information gathered in past actions and s,s0 b(s)Pr(s |s, a)Pr(z|a, s ) and bz is the revised
+observations. We can represent the decision maker’s possi- belief state after executing a and observing z. When V k is
+ble strategies by a set CP of conditional plans cp which cor-                                   k+1
+                                                      formed by the set of αcp, a new set of αcp0 for V can be
+respond to decision trees. Fig. 1(a) shows the decision tree constructed by point-based dynamic programming backups.
+of a k-step conditional plan for the Tiger POMDP with dis- A point-based backup computes the best conditional plan
+crete observations. Nodes are labeled by actions and edges cp0∗ = ha∗,os∗i (and corresponding α-vector) from a set of
+are labeled by observations. The execution of a conditional conditional plans cp for a given belief state b:
+plan starts at the root, performing the actions of the nodes tra-             X
+versed and following the edges labeled with the observations          a∗                 ∗         a∗
+                                                       αha∗,os∗i(b)=R   (b)+γ    Pr(z|b, a )αos∗(z)(bz ) (1)
+received from the environment. For example, the conditional                    z
+plan in Fig. 1(a), will lead to opening a door if two successive
+observations conﬁrm the same tiger location. We can deﬁne             ∗                    a∗
+                                                      s.t.          os (z)=argmaxcp   αcp(b  )         (2)
+recursively a k-step conditional plan cpk = ha, osk−1i as a                      P         z
+                                                            ∗             a                          a
+tuple consisting of an action a with an observation strategy a = argmaxa R (b)+γ    z Pr(z|b, a)αos∗(z)(bz )(3)
+osk−1 : Z→CPk−1   that maps observations to (k − 1)-step
+                                                        In practice, we cannot perform such point-based back-
+conditional plans. For POMDPs with continuous observa-
+                                                      ups for every belief state since the belief space is contin-
+tions, conditional plans cp are decision trees with inﬁnitely
+                                                      uous. However, as noted by Smallwood and Sondik [22],
+many branches and observation strategies os are continuous
+                                                      ﬁnite-horizon optimal value functions are composed by a ﬁ-
+functions. The value function αcp(b) of a conditional plan cp
+                                                      nite number of α-vectors, which means that we only need
+is the expected sum of discounted rewards that will be earned
+                                                      to compute a ﬁnite number of point-based backups, one per
+when starting in belief state b. This value function is often
+                                                      α-vector to be constructed. Exact algorithms such as Linear
+called an α-vector since it is linear with respect to the be-
+                                                      Support [6] and Witness [12] perform this ﬁnite set of point-
+lief space and therefore parameterized by a vector αcp(s) that
+                                     P                based backups at carefully chosen belief points. Alterna-
+has one component per state (i.e., αcp(b)= b(s)αcp(s)).
+                                       s              tively, approximate algorithms such as Point-Based Value It-
+Fig. 1(b) shows the 5 α-vectors corresponding to the condi-
+                                                      eration [27; 17; 24] heuristically sample a set of belief points
+tional plans shown in Fig. 1(a). The α-vectors corresponding
+                                                      at which they perform point-based backups.
+to the conditional plans starting with an open door action (α4
+and α5) have high value at one extreme of the belief space
+(when the certainty about the tiger location is high), but very 3 Policy-directed Observation Aggregation
+low value at the other extreme.                       In a decision process, observations provide information to the
+  A collection of conditional plans forms a policy π. The decision maker for deciding the future course of action. When
+value function V π of a policy π is the best value achieved by the observation space is rich (i.e., continuous observations or
+                             π
+any of its conditional plans (i.e., V (b) = maxcp∈π αcp(b)). many discrete observations), the decision maker can deviserich policies with a different course of action for each pos- observations can be aggregated are segments of a line corre-
+sible observation. However, for many POMDPs, there often sponding to a range of observations for which the same con-
+exists good policies that are quite simple. These policies tend ditional plan is optimal. Segment boundaries are observations
+to select the same course of action for many different obser- for which there are two (or more) conditional plans yielding
+                                                                    a
+vations that share similar features. For POMDPs with contin- the highest αcp(bz ). To make clear that z is the only variable
+                                                                  b,a
+uous observations, this will allow us to implicitly discretise here, deﬁne βcp (z) to be a function in z that corresponds to
+the observation space without introducing any error. From  a                          b,a         a
+                                                      αcp(bz ) where b and a are ﬁxed (i.e., βcp (z) ≡ αcp(bz )). We
+the point of view of the application domain, this also gives
+                                                      can ﬁnd these boundaries by solving βb,a(z) − βb,a (z)=0
+us insights regarding the relevant features of the observation                         cpi     cpj
+                                                                                            3
+space. In this section we discuss how simple policies allow for every pair cpi, cpj of conditional plans. Analytically
+us to aggregate many observations, effectively reducing the solving this equation will be difﬁcult in general, and is not
+complexity of the observation space.                  possible for observation functions in the exponential family
+  Recall that a conditional plan cp = ha, osi is a tuple con- (e.g. Gaussians). However, efﬁcient numerical solutions can
+sisting of an action a and an observation strategy os. The be used for many well-behaved functions. We used the Math-
+observation strategy os(z)=cp0 indicates for each observa- ematica function IntervalRoots, that ﬁnds all the roots
+tion z the conditional plan cp0 encoding the future course of of an arbitrary one-dimensional function in a given interval
+action. Intuitively, all the observations that select the same by interval bisection combined with gradient-based methods.
+conditional plan are indistinguishable and can be aggregated. Once all potential regions are identiﬁed, the aggregate proba-
+We can therefore view observation strategies as partitioning bilities P (Zcp|b, a) can be computed by exact integration (or
+the observation space into regions mapped to the same condi- Monte Carlo approximation) for each conditional plan cp.
+tional plan.1 In the continuous observation tiger problem, for Consider again the continuous Tiger problem introduced in
+example, as long as a sound is heard coming “from the left”, Sect. 2. We now illustrate how to ﬁnd the observation regions
+the best choice of action may be to open the right door. Al- induced by a set of conditional plans and how to use them in
+though the precise location of the sound here is not important, a point-based backup. Suppose that the doors are located at
+the decision boundary is (e.g. how far right can the sound be z =1and z = −1, and the decision maker is at z =0. Due
+heard before the decision maker would listen again).  to a lack of accuracy, the binary microphone array reports
+  In each point-based backup, we compute an observation the tiger’s location corrupted by some zero-mean, normally
+strategy os which partitions the observation space into re- distributed noise of standard deviation σ =0.965. Listening
+gions Zcp that select the same conditional plan cp. Let’s ex- costs 1, while meeting the tiger costs 100, but opening the
+amine how these regions arise. Recall from Eq. 2 that for correct door is rewarded with 10. The discount is γ =0.75.
+each observation z, the conditional plan selected is the one Suppose we have 3 conditional plans with correspond-
+                  a                            ∗
+that maximizes αcp(bz ). Hence, we deﬁne Zcp∗ = {z|cp = ing α-vectors shown in Fig. 2(b) and we would like to per-
+             a
+argmaxcpαcp(bz )} to be the set of observations for which form a point-based backup. When considering belief state
+  ∗                                   a
+cp is the best conditional plan to execute in bz .    b(tiger location = left)=0.85  and action a = listen,
+  For each region Zcp, we can compute the aggregate prob- Fig. 2(a) shows the β functions of each conditional plan.
+                0
+ability Pr(Zcp|a, s ) that any observation z ∈Zcp will be Since the observation function is Gaussian, the β-function is
+made if action a is taken and state s0 is reached by inte- a linear combination of Gaussian distributions. By ﬁnding
+           |   0                       Z   |  0                  b,a   −  b,a       b,a   −  b,a
+Rgrating pdf(z a, s ) over region Zcp (i.e., Pr( cp a, s )= the roots of βcp1 (z) βcp2 (z) and βcp1 (z) βcp3 (z), we ob-
+      pdf(z|a, s0)dz.2 The aggregate probabilities can be tain the boundaries z =0.28 and z =1.33 delimiting the
+ z∈Zcp                                                                 Z    Z       Z
+                                                      observation regions cp1 , cp2 and cp3 .
+used to perform point-based dynamicX programming backups
+               a∗                    ∗     a∗           We   can thus form  a discrete observation function
+    ∗  ∗                      Zcp|      cp
+ αha ,os i(b)=R  (b)+γ     Pr(    b, a )α (bZcp ) (4) Pr(Zcp|s, a) by integrating the original Gaussian observa-
+                   P    cp                            tion distributions over each region. We analytically integrate
+       Z  |   ∗                 0|  ∗    Z  | ∗  0
+with Pr( cp b, aP)=  s,s0 b(s)Pr(s s, a )Pr( cp a ,s) each Gaussian over each region using the complementary er-
+    a∗   0               0   ∗         ∗  0           ror function erfc.4 Fig. 2(c) shows the two Gaussian observa-
+and bZ (s ) ∝   s b(s)Pr(s |s, a )Pr(Zcp|a ,s). This is
+     cp                                               tion distributions, and the aggregate observation probabilities
+equivalent to Eq. 1, except that we have replaced the sum over
+                                                      for each region. Using Eq. 4, we can then compute the value
+observations z with a sum over regions Zcp, in each of which
+                                                      of the conditional plan cp0 = ha, σi where a = listen and
+a particular conditional plan is dominant.                         ∈Z
+                                                      σ(z)=cpi  if z   cpi .
+4  One-Dimensional Observation Space                    In contrast, the original discrete version of the tiger prob-
+                                                      lem partitions the observation space in two halves at z =
+We now discuss how to ﬁnd the implicit discretization of the 0, resulting in a discrete, binary observation function with
+observation space induced by a set of conditional plans (or α- ( =    |            =     )=  1 erfc( √−1 )
+                                                      P observe  right tiger location right  2     2σ .A
+vectors) when the observation space is one-dimensional con- dynamic partition induced by the current set of conditional
+tinuous. For this special case, the regions, Zcp, over which
+                                                         3
+  1Note that the observations that are mapped to the same condi- This method may ﬁnd more boundaries than are necessary, for
+tional plan may not form a contiguous region though.  a third βcpk may have higher value than both βcpi and βcpj at their
+  2
+   If Zcp is not a contiguous region, then several integrals must be intersection points.
+                                                                     R ∞   2
+                                                         4erfc( )= √2    −t
+computed, one for each contiguous sub-region.                x     π  x e   dt.plans has the advantage that no information is lost. Fig. 2(d) the world. In this case, it is possible to factor the obser-
+compares the value of the policies obtained with our dynamic vation function into a product of small observation func-
+                                                                                                     0
+discretization scheme and the naive binary discretization as tions, one for each random variable (i.e., Pr(z1,z2|a, s )=
+                   2                                           0         0
+we vary the variance σ . The dynamic discretization outper- Pr(z1|a, s )Pr(z2|a, s )). For example, consider a mobile
+forms the ﬁxed binary discretization for all variances. The robot with sonars pointing forwards and to the side. The read-
+solutions are the same for almost perfectly observable cases ings from each sonar are conditionally independent given the
+(σ ≤ 0.1) and approach one another for almost unobservable location of the robot and a map of the robot’s environment.
+cases (σ →∞).                                           This factorization can be exploited to process the observa-
+                                                      tions sequentially. For n conditionally independent observa-
+    6                        20
+     Z  open right Z Z  open left                     tion variables, we divide each time step into n sub-steps such
+      cp       cp
+                1 cp
+      2            3
+    4  β       listen
+        cp                   10        α              that only one observation variable is observed per sub-step.
+         2 β                            cp
+    2       cp                           1
+             1                          listen        This can be easily accomplished by constructing a POMDP
+    0
+  )                          0
+  a z
+
+  (b −2                                               with an additional state variable, sub step, that keeps track of
+                            V(b)
+   cp
+  β −4                      −10 α                     the current sub-step. The observation function encodes the
+                                cp            α
+                                 3             cp
+   −6    β                                      2
+         cp                                           probabilities of a single, but different, observation variable at
+          3                 −20  open left
+   −8                                      open right each sub-step. The transition function is the same as in the
+  −10                       −30
+   −5 −4 −3 −2 −1 0 1 2 3 4 5 0  0.2 0.4 0.6 0.8 1
+               observation z         b(tiger location = right) original POMDP when sub step=1, but becomes the identity
+           (a)                       (b)              function otherwise. The rewards are gathered and the dis-
+                            12                        count factor applied only when sub step=1.
+   0.5
+                            10
+                                       lossless dynamic When all observation variables are conditionally indepen-
+         left    right
+   0.4                      8          naive binary   dent, this effectively reduces the dimensionality of continu-
+                            6
+     P(Z  | s,a)
+   0.3 cp                                             ous observations to one, allowing the approach of Sect. 4 to
+      s=left: 0.91 0.08 0.01 4
+
+                            average  reward           be used. For discrete observation variables, an exponential
+   0.2 s=right: 0.23 0.40 0.37 2
+  pdf(z|a,s)
+                            0                         reduction is also achieved since the domain of a single vari-
+   0.1
+                            −2                        able is exponentially smaller than the cross-domain of several
+   0                        −4
+   −5 −4 −3 −2 −1 0 1 2 3 4 5 0 0.5 1  1.5 2 2.5 3    variables. Note however that the complexity of the equivalent
+               observation z            standard deviation POMDP remains the same since the reduction is achieved by
+           (c)                       (d)
+                            a                         multiplying the horizon and the number of states by n.
+Figure 2: Tiger example. a) βcp(bz ) for b(tiger location =
+left)=0.85  and a = listen, showing regions over which 5.2 Sampling
+each conditional plan will be selected. b) α-vectors of 3 con-
+ditional plans. c) Observation function and aggregate proba- For arbitrary multi-dimensional observations, an effective ap-
+bilities of each observation region for each state. d) Average proximation technique for computing the aggregate proba-
+discounted reward achieved over 10 trials of 100 simulated bilities consists of sampling. Recall from Sect. 3 that for
+runs of 50 steps each, for different observation variances in each conditional plan cp, we can aggregate in one region
+                                                      Z
+the continuous 1D tiger problem.                        cp all the observations z for which cp yields the highest
+                                                                b,a       b,a      0
+                                                      value (i.e.,βcp (z) ≥ βcp0 (z) ∀cp ∈CP). Hence, for each
+                                                      ha, s0i-pair, we sample k observations from pdf(z|a, s0) and
+5  Multi-dimensional observation space                             0
+                                                      set Pr(Zcp|a, s ) to the fraction of observations for which
+                                                       b,a
+In many applications, observations are composed of several βcp (z) is maximal, breaking ties by favoring the conditional
+sensor readings. For example, a mobile robot may have a plan with the lowest index.
+number of sonar, laser or tactile sensors, which together give This sampling technique allows us to build an approxi-
+                                                                                              0
+rise to multi-dimensional observations. When the observation mate discrete observation function Pr(Zcp|a, s ) which can
+space is multi-dimensional, analytically ﬁnding the regions be used to perform a point-based backup for a set CP of
+and computing their aggregate probability will be difﬁcult for conditional plans and a belief state b. The number of ob-
+many observation functions.                           servations sampled is k|S||A| for each point-based backup.
+  We examine two approaches.  The ﬁrst, discussed in  The quality of the approximation improves with k. In par-
+Sect. 5.1, considers the special case of POMDPs with obser- ticular, using Hoeffding’s bound [9], we can guarantee that
+                                                                0
+vations composed of conditionally independent variables. For Pr(Zcp|a, s ) has an error of at most  with probability 1 − δ
+this special case, it is possible to deﬁne an equivalent POMDP when k = ln(2|CP|/δ)/(22). Interestingly, k doesn’t de-
+where the observation variables are processed sequentially in pend on the dimensionality (nor any other complexity mea-
+isolation, essentially reducing the observation space to one sure) of the observation space. It depends only on the num-
+dimension. For arbitrary multi-dimensional observations, we ber of regions, which is at most the number of conditional
+present a general sampling-based technique in Sect. 5.2. plans. While this is true in a single DP backup, the num-
+                                                      ber of conditional plans may increase exponentially (in the
+5.1  Conditionally Independent Observations           worst case) with the number of observations at each DP
+In some applications, the random variables corresponding backup [12]. On the other hand, several algorithms [18; 8;
+to the individual sensor measurements may be conditionally 17; 24] can mitigate policy complexity by searching for good
+independent given the last action executed and the state of yet small policies represented by a bounded number of condi-tional plans or α-vectors. Perseus [24], a randomized point- t−1         t
+                                                          hands         hands
+                                                          state          state             tap
+based value iteration algorithm, is such an algorithm since                  R
+            α                                             hands         hands
+the number of -vectors is bounded by the number of belief wet            wet
+points initially sampled. Hence k depends on policy com-                                            towel
+                                                          water          water
+plexity, which generally depends on observation complexity,                        soap
+                                                          hand           hand
+but can be made independent by restricting policies to have a location  location
+bounded representation.                                      impeller PROMPT impeller       water
+                                                          {x,y}         {x,y}      away
+  This sampling technique can also be used for POMDPs    hand position hand position
+with many discrete observations. In particular, when the          (a)                       (b)
+observations are factored into several random variables, the
+number of observations is exponential in the number of vari- Figure 3: a) POMDP model of handwashing. b) Example im-
+ables, but as long as the number of conditional plans remains age showing the regions induced by the observation function
+small, the number of samples will also be relatively small. alone, maxi P (x, y|hand location = i)
+  Note also that we can often weaken the dependency be-
+tween the number of samples and the size of the action and (20) is given when the hands are dry and clean and the water
+state spaces. Instead of sampling k observations from each is off. Smaller rewards are given for progressions through the
+of the |A||S| densities pdf(z|a, s0), we can sample j obser- task: if the hands are clean (1), soapy (0.5) and wet (0.2), but
+vations from one proposal distribution p(z). This sample of j other variables are not as in the ﬁnal goal state. The discount
+                                                 0    was γ =0.85.
+observations can be used to approximate each Pr(Zcp|a, s )
+as follows. First, we assign a weight pdf(z|a, s0)/p(z) to We model the system as being equipped with an impeller
+each sampled observation z to obtain an unbiased sample of in the water pipe, which returns 0 when there is no water
+pdf(z|a, s0). Then, for each conditional plan cp, we ﬁnd the ﬂowing and 1 when the water is on full. The sensor’s noise
+                                       b,a            is zero-mean Gaussian with standard deviation σ =0.4825,
+subset of sampled observations z for which βcp (z) is max-
+                      0                               which gives it an 85% accuracy (when the most likely state
+imal, and set Pr(Zcp|a, s ) to the (normalized) sum of the
+                                                      of water is considered). The position of the hands in the hori-
+weights of the observations in that subset. The number of
+                                                      zontal plane is measured using a camera mounted in the ceil-
+sampled observations j necessary to guarantee an error of at
+                                                      ing above the sink, connected to a computer vision system
+most  with probability 1 − δ depends on how similar the
+                                                0     that returns an estimate of the {x, y} position of the patient’s
+proposal distribution p(z) is with each density pdf(z|a, s ).
+                                                      dominant hand in the image using skin color [14]. Fig. 3(b)
+When the proposal is relatively similar to each of the densi-
+                                                      shows an example image from the camera. The observation
+ties then j tends to be close to k, signiﬁcantly reducing the
+                                                      function that relates these measured hand positions to the ac-
+dependencies on |A| and |S|. However, as the differences be-
+                                                      tual hand location was learned from a set of data taken from
+tween the proposal and each of the densities increase, j also
+                                                      the computer vision system. An actor simulated the repeated
+increases and may become arbitrarily large. In Sect. 6, we
+                                                      handwashing trials for about 10 minutes. The vision system
+use pdf(z|b, a) as a proposal distribution.
+                                                      tracked and reported the {x, y} position of the right (domi-
+                                                      nant) hand, while a researcher annotated the data with the ac-
+6  Experiments                                        tual hand location.5 The functions P (x, y|hand location =
+                                                      i) were then learned by ﬁtting a mixture of Gaussians to
+This section presents experiments with a POMDP that as-
+                                                      the data annotated with the value hand location = i.6
+sists people with cognitive difﬁculties to complete activities
+                                                      The mixture models were ﬁt using a K-means initialization
+of daily living. Focusing on the task of handwashing, we
+                                                      followed by the expectation-maximization algorithm. Fig-
+present a simpliﬁed POMDP for guiding patients with verbal
+                                                      ure 3(b) shows the most likely hand locations for each {x, y}
+prompts as they wash their hands. The goal of such a system
+                                                      position induced by the learned mixtures of Gaussians. The
+is to minimize the human caregiver burden, and is part of an
+                                                      water ﬂow observation function was not learned from data.
+ongoing research initiative applying intelligent reasoning to
+assistive living [4]. In this paper, we present results from sim- The water ﬂow and hand position readings yield a 3D ob-
+                                                      servation space. Although water ﬂow and hand positions are
+ulations of our methods on a simpliﬁed POMDP model for                          {   }
+the handwashing task. Fig. 3(a) shows the graphical model conditionally independent, the x, y coordinates of the mea-
+of the handwashing POMDP. The POMDP’s actions are the sured hand positions are dependent. Hence, we cannot pro-
+verbal prompts (corresponding to the canonical steps of hand- cess the observations sequentially as suggested in Sect. 5.1
+washing: turn on water, wet hands, use soap, dry hands and and must resort to the sampling technique of Sect. 5.2. We
+                                                                     [  ]
+turn off water) and a null action where the system waits. The extended Perseus 24 with the sampling technique described
+
+states are deﬁned by the variables hands state, which can be 5
+{dirty, soapy, clean}, hand location, which can be {away, The vision system only reports the hand position every 2 sec-
+                                                      onds, or when the hand location changes and is located consistently
+tap, water, soap, towel}, hands wet, which can be {wet, dry},
+                    {      }                          for 5 frames (1 second).
+and water, which can be on, off . We assume the hands start 6The model orders were selected by minimizing the mini-
+dirty and dry, and the goal is to get them clean and dry, which mum description length (MDL): −log(P (z|hand location)) +
+                                                      1
+can only happen if they become soapy and wet at some inter- 2 MlogN, where M is the number of parameters and N is the num-
+mediate time. The water starts off and must be off for task ber of data points. This yielded between 2 mixture components for
+completion. The cost of a prompt is 0.2, and a large reward each state. The away state was ﬁxed to have 1 mixture component.

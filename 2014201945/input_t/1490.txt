@@ -1,0 +1,373 @@
+                              Continuous Time Particle Filtering
+
+             Brenda Ng                         Avi Pfeffer                   Richard Dearden
+         Harvard University                Harvard University            University of Birmingham
+       Cambridge, MA 02138               Cambridge, MA 02138             Birmingham B15 2TT, UK
+      bmng@eecs.harvard.edu              avi@eecs.harvard.edu          R.W.Dearden@cs.bham.ac.uk
+
+                    Abstract                          this is not the case for K-9 and discrete approaches have
+                                                      largely proven unhelpful [Washington et al., 2000]. For this
+    We present the continuous-time particle ﬁlter     reason, we use a hybrid system model for state representation
+    (CTPF) – an extension of the discrete-time particle and particle ﬁltering for state estimation.
+    ﬁlter for monitoring continuous-time dynamic sys-   Probabilistic hybrid automata (PHAs) [Hofbaur and
+    tems. Our methods apply to hybrid systems con-    Williams, 2002] are commonly used for representing hybrid
+    taining both discrete and continuous variables. The systems in diagnosis and state estimation (other representa-
+    dynamics of the discrete state system are governed tions have similar expressive power). In the PHA model, a
+    by a Markov jump process. Observations of the dis- system consists of a set of discrete modes and a set of contin-
+    crete process are intermittent and irregular. When- uous variables. For each mode, a set of differential equations
+    ever the discrete process is observed, CTPF sam-  describes the continuous behavior in that mode. Transitions
+    ples a trajectory of the underlying Markov jump   between modes are stochastic; a transition matrix represents
+    process. This trajectory is then used to estimate the probability of being in state s at time t +1given that
+    the continuous variables using the system dynam-  the system is in state s at time t. Transition probabilities may
+    ics determined by the discrete state in the trajectory. depend on the values of the continuous variables.
+    We use the unscented Kalman-Bucy ﬁlter to han-      The problem with applying the PHA model (and other sim-
+    dle nonlinearities and continuous time. We present ilar representations) to systems such as K-9 is the assump-
+    results showing that CTPF is more stable in its per- tion that a transition matrix applied at ﬁxed time intervals is
+    formance than discrete-time particle ﬁltering, even sufﬁcient to describe the evolution of the system. This im-
+    when the discrete-time algorithm is allowed to up- plies that only one discrete transition can occur per interval,
+    date many more times than CTPF. We also present   and also that it doesn’t matter when in the interval the transi-
+    a method for online learning of the Markov jump   tion occurs. These assumptions lead to two problems. First,
+    process model that governs the discrete states.   they make the system model unwieldy as they force a single
+                                                      transition matrix to represent the effects of multiple discrete
+                                                      transitions. Second, they reduce efﬁciency by forcing model
+1  Introduction                                       steps to be small enough for the assumptions to be reason-
+The work described here is directly motivated by problems able. The continuous time model avoids these assumptions,
+encountered in creating a state estimation system for the K- allowing state updates to be performed only when a new ob-
+9 experimental Mars rover at NASA Ames Research Cen-  servation arrives or when a signiﬁcant event occurs.
+ter [Willeke and Dearden, 2004]. As with many robotic sys- The approach we take is to build a continuous-time model
+tems, K-9 contains numerous sensors that report on its per- of the system (see Section 2). As before, there is a differen-
+formance. These sensors produce telemetry at different rates, tial equation model governing the continuous system behav-
+and frequently at rates that vary over time. As a result, using ior for every discrete system mode, but now the discrete state
+a ﬁxed time-step state estimator, for example a Kalman ﬁlter, transitions are represented as a continuous-time Markov jump
+is extremely difﬁcult. In this paper we describe a continuous- process. That is, we keep a set of transition probabilities for
+time state estimation algorithm based on particle ﬁltering that each discrete mode, as well as the distribution over how long
+can handle telemetry arriving at different rates and changes in the system will remain in the mode before transitioning out.
+system behavior between observations. The system can also As we said above, we use particle ﬁltering to track the sys-
+update its model of system behavior to improve its perfor- tem state (see Section 4). For efﬁciency, and to make it possi-
+mance and to detect gradual degradation of the system. ble to track large systems, we use Rao-Blackwellized particle
+  State estimation is typically done either using discrete di- ﬁlters [Doucet et al., 2000a], in which the discrete mode is
+agnosis algorithms such as Livingstone [Williams and Nayak, sampled, just as in a standard particle ﬁlter, but the continu-
+1996], or more recently, using hybrid system representations. ous state is tracked using an unscented Kalman-Bucy ﬁlter.
+The discrete approach is well suited for domains where there This work addresses the key challenge that many mode
+are occasional transitions between relatively stable states, and changes on the rover, as with most systems, are not observ-
+where sensor readings tend to be very reliable. Unfortunately, able directly. Commanded changes such as moving fromstopped to driving are observable, but the occurrence of                         Stuck
+                                                                          Terrain Left front wheel
+                                                                                      Left bogey angle
+faults, and other mode transitions triggered by the environ-                   Left middle wheel
+
+ment or the continuous state, do not produce telemetry di-                       Stuck Left rocker angle
+rectly, and can only be inferred from their effects on the con-     Solar energy level Left back wheel
+tinuous system behavior. The algorithm we have developed to            Sunny     Stuck
+                                                                    Rainy  Speed      Rover roll angle
+address these difﬁculties, the continuous-time particle ﬁlter,                   Stuck
+                                                                    Ground stickiness
+is described in Section 5.                                                     Right back wheel
+  One major advantage of the continuous-time approach is                         Stuck Right rocker angle
+                                                                               Right middle wheel
+that it allows resource-bounded computation. Although the                             Right bogey angle
+                                                                          Rockiness Right front wheel
+
+cost of a single update may be higher than that of a discrete                    Stuck
+update (because of the Kalman-Bucy ﬁlter equations), com-
+putation need only be performed when new observations ar- Figure 1: Rover CTBN. Note that a CTBN may contain cycles.
+rive. Indeed, if computation is limited, observations can even
+be ignored until sufﬁcient computation is available to update value. Let zi denote the value of Zt in the interval [τi,τi+1].
+the estimate. For discrete approaches, an update must be per- During the time span of [τi,τi+1] the variables Xt follow
+formed for each time step, even if no telemetry has arrived. nonlinear dynamics given by
+  In Section 6, we discuss how the parameters of the                d
+continuous-time Markov jump process can be learned by ob-             X  = F  (X  , U )+W
+                                                                    dt  t    zi  t  t     t           (1)
+serving the system. Section 7 applies the approach to the sim-
+ulated rover model presented in Section 3.             and the observations Yt are given by
+
+                                                                     Yt = Hzi (Xt, Ut)+Vt             (2)
+2  Continuous-time hybrid-state processes
+                                                      where Wt ∼N(0,  Φt) and Vt ∼N(0, Ψt) are the respective
+A continuous-time hybrid-state process consists of interact- process and measurement noise, and Ut is the control input.
+ing discrete-state and continuous-state random variables. In this work, we assume that some variables in Zt may be
+  The discrete-state variables Zt evolve according to dynam- observed, but only at random discrete points in time. On the
+ics described by continuous-time Markov jump processes. other hand, Yt are observed more frequently, but as noisy
+                                         Z
+A Markov jump process is a random variable t that is  measurements of the true continuous state Xt.
+parametrized by time t ∈ [0, ∞). Zt starts in an initial state
+z and remains in this state for a random amount of time be- 3 A continuous-time rover model
+fore it makes a transition to a different state. The time that Z t
+stays in a particular state is exponentially distributed, due to As a testbed, we use a continuous-time rover model. The
+the Markovian property of the process.                rover employs a rocker-bogey suspension system for its six
+  Mathematically, a Markov jump process Zt is character- wheels. On each side, the front two wheels are attached to
+ized by its intensity matrix                          the bogey, which pivots around its center. The center of the
+                  2                3                  bogey is attached to the rocker, which is attached to the main
+                     −q1  q12  ...
+                  6  q    −q   ... 7                  rover chassis and the rear wheels. Motion from the bogey
+              Q = 4   12    2      5
+                      .    .   .                      can cause the rocker to pivot around the differential axle, a
+                      .    .    ..                    mechanism that centers the rover chassis between the left and
+                                                      right sets of wheels. From the rocker angles and the bogey
+where
+                                                     angles, we can infer the rover orientation and thus the wheel
+          P {Zt+∆t = j|Zt = i}
+qij = lim                    ,i=  j and qi =   qij   heights relative to the rover chassis.
+     ∆t→0         ∆t
+                                             j=i       We are interested in reasoning about the rover wheel dy-
+                                                      namics under the effects of weather, terrain, ground condi-
+in which qij is the transition rate that deﬁnes the probability tions and faulty wheel behavior. The model consists of 20
+per time unit that the system makes a transition from state state variables and 4 transient variables. There are two groups
+i       j     q                                  i
+ to state and  i is the total transition rate out of state . of state variables: 5 that model background conditions and
+                                           i
+The amount of time that the process stays in state is dis- 15 that directly model the rover. The background variables
+                                           f (t)=
+tributed according to the exponential distribution i  model environmental factors such as weather, terrain, ground
+qi exp(−qit). When the process leaves state i, it enters the
+                               qij                    rockiness and ground stickiness, while the rover variables
+next state j with probability Pij = P if i = j and 0 oth-
+                               j qij                  model the solar energy level available to the rover, the rover
+erwise. In this paper, we assume that the process is stationary, speed, the wheel heights, the wheel stuck conditions, and the
+i.e. the intensity matrix is the same at all times.   rover roll angle. The CTBN structure is shown in Figure 1.
+  In recent work, [Nodelman  et al., 2002] introduced   The model comprises 11 binary and ternary discrete vari-
+continuous-time Bayesian networks (CTBNs) as a way to fac- ables and 9 continuous variables. The only observable dis-
+torize Markov jump processes over discrete-valued variables. crete variables are Sunny, Rainy, T errain and Rockiness.
+Our work extends the inference to hybrid-state processes. The observation of these variables at sparse time points cor-
+  The instantiation of Zt corresponds to a unique set of equa- responds to situations when the rover takes measurements of
+tions that govern the dynamics of the continuous variables its surroundings, to plan navigation or to manage power con-
+Xt. Let τ1,τ2,... denote the times at which Zt changes sumption. The wheel stuck states are never observed and areinferred from observations of the continuous wheel variables. increases, the number of particles required to achieve decent
+The wheel stuck condition is more frequently induced when accuracy increases as well, thus making PF an expensive so-
+the rover travels at high speed and when the ground is rocky. lution for tracking complex, high-dimensional systems.
+  The rover dynamics are adapted from the kinematic anal- Rao-Blackwellization [Doucet et al., 2000a] is a technique
+ysis in [Hacot, 1998]. The front wheels receive an input that improves PF by analytically marginalizing out some of
+proportional to some height perturbation induced by the ter- the variables. This method is especially applicable to our do-
+rain. The change in the middle wheel height is proportional main since the structure of the rover model can be factorized:
+to the difference between the front and middle wheel height,
+                                                                         p(S |y   )=
+taken relative to the rover body which experiences roll (tor-              t 1:t−1
+sional rotation) on uneven terrain. To illustrate the system’s p(Xt|Zt, Xt−1)p(Zt|St−1)p(St−1|y1:t−1)dSt−1 (6)
+nonlinearity, the equation for the middle wheel height is:
+   d                                                Hence, Rao-Blackwellized Particle Filtering (RBPF) can be
+     zM =  κ cos(Θ ) l sin(θB ) − l sin(θB + β)       used to sample only from the (lower-dimensional) discrete
+   dt t     t     t  1     t    2     t         (3)
+                                                      distribution and the continuous distribution can subsequently
+                        B
+where Θt is the roll angle, θt is the bogey angle, and l1, l2 be computed using the Kalman ﬁlter.
+and β are constant parameters of the physical rover model.
+The change in the back wheel is deﬁned in a similar manner. 4.2 The unscented Kalman-Bucy ﬁlter
+                                     κ
+For each wheel, the proportionality constant t is dependent The Kalman ﬁlter [Grewal and Andrews, 2001] is an efﬁcient,
+on the speed and whether the wheel is stuck. The speed is recursive method that ﬁnds the least-square estimate of the
+affected by the availability of solar energy and by ground sur- state of a discrete-time, linear stochastic process with Gaus-
+face characteristics such as stickiness and rockiness. sian noise. The Kalman-Bucy ﬁlter is the continuous-time
+  Noisy measurements of the continuous variables that counterpart to the discrete-time Kalman ﬁlter. It uses a differ-
+model the bogey and rocker angles are observed more fre-
+                                                      ential equation to generate an estimate xˆt of the continuous
+quently than the discrete observations. The bogey angle is
+                                                      state, and generates from that an estimate yˆt of the observa-
+determined from the front and middle wheel heights. The
+                                                      tion. It also generates Pt, the covariance of the state estimate
+rocker angle depends on the middle and back wheel heights
+                                                      error xt − xˆt, and Rt, the covariance of yt − yˆt. The update
+as well as the bogey angle.
+                                                      of Pt also uses a differential equation. Given these estimates,
+                                                      the probability of the observation yt is given by a normal dis-
+4  Preliminaries                                      tribution with mean yˆt and covariance Rt.
+Let the hybrid system state be represented as St = {Zt, Xt}. The Kalman-Bucy ﬁlter assumes a linear transition model
+We denote y1:t as the history of observations from time 1 to and observation model. To handle nonlinear models, we
+time t. The aim is to track the probability p(St|y1:t) that any adopt an approach similar to the discrete-time unscented
+given state may be the true system state, conditioned upon the Kalman ﬁlter (UKF) [Wan and van der Merwe, 2000] and
+sequence of past observations y1:t. This probability distribu- extend the Kalman-Bucy ﬁlter by applying the unscented
+tion, also referred to as the belief state, can be recursively transformation [Julier and Uhlman, 2002] to the state esti-
+estimated given the previous belief state p(St−1|y1:t−1) and mation. Thus, the unscented Kalman-Bucy ﬁlter (UKB)isa
+the current observation yt:                           continuous-time ﬁlter that allows for nonlinear models. UKB
+
+                             p(St|y1:t−1)             is used in RBPF as an approximation to the Kalman-Bucy ﬁl-
+           p(St|y1:t)=p(yt|St)                  (4)   ter. This approximation introduces bias and does not provide
+                             p(yt|y1:t−1)
+                                                     the theoretical guarantee that variance is reduced in RBPF.
+where p(St|y1:t−1)=    p(St|St−1)p(St−1|y1:t−1)dSt−1.
+However, the computation of this integral leads to intractabil- 5 The continuous-time particle ﬁlter
+ity in all but the smallest conditional linear Gaussian models.
+As a result, one must resort to approximate inference methods In the continuous-time particle ﬁlter (CTPF), we perform an
+to compute the updated belief state.                  update each time a discrete observation is received. If no
+                                                      discrete-state process is observed, updates can be triggered
+4.1  Particle ﬁltering                                by an asynchronous request for update. Technically, this is
+Particle ﬁltering (PF) [Doucet et al., 2000b] approximates (4) treated the same way as observing the discrete-state process
+by a discrete sum of particles or samples of possible states with a vacuous observation. If the new observation is received
+drawn from that distribution:                         at time tn and the previous observation was at time tn−1,an
+                                                      update means generating particles of the state at tn, using the
+                         N
+                             1   (i)                  particles generated at tn−1. We assume that observations of
+              p(St|y1:t) ≈     δ(s )            (5)
+                             N   t                    the discrete-state processes are sparse and intermittent. We
+                         i=1                          make no assumption that observations come at regular inter-
+where δ(·) denotes the Dirac delta function. Since it is difﬁ- vals or that the observations coincide with any discrete tran-
+cult to sample from p(St|y1:t) directly, importance sampling sitions. Let ζn be the observation at time tn. We may observe
+
+is used, in which particles are drawn from a more tractable ζn as the entirety of Ztn ,orζn may be an assignment of val-
+
+proposal distribution, then each particle is weighted to ac- ues to a subset of the variables in Ztn ,orζn may be vacuous,
+count for this bias. Since variance increases as the state space assigning values to none of the variables. In any case, we will                                                            M
+say that a value z agrees with the observation ζn if it assigns 1: let be the number of particles
+                                                            N
+the same value to all variables assigned by ζn.       2: let  be the number of discrete observations
+                                                      3: for n =1to N do
+  At a high level, the CTPF works as follows. When up- 4:  Dynamics propagation
+           t      t
+dating from n−1 to n, we sample a trajectory from the 5:   for m =1to M  do
+Markov jump process for the time interval [t n−1,tn]. This               th
+                                                      6:     let ζn be the n observation
+results in a set of time points τ0 = tn−1,τ1,...,τk = tn
+                                                      7:     let tn be the observed time of ζn
+at which Z changes value. Let zi denote the value of Z in
+                                                      8:     Simulate a Markov jump process
+interval [τi,τi+1]. We then perform Rao-Blackwellization to
+                                                      9:     let i =0,τ0 = tn−1
+obtain updates for the continuous variables. We go through                              th
+                                                      10:    let z0 be the value of Z in the m particle at time tn−1
+the sequence of intervals, starting at [τ0,τ1] and ending at
+                                                      11:    while τi <tn do
+[τk−1,τk], propagating our estimate of the mean and variance
+                                                                      γ        PDF f(t)=qz   exp(−qz t)
+of the continuous variables X using UKB. In the time pe- 12:   Sample   from the            i       i
+                                                      13:      if τi + γ<tn then
+riod [τi,τi+1], the continuous dynamics are governed by the
+     z                                                14:         let τi+1 = τi + γ
+value i. As we propagate the continuous variables, we also              z                         Q
+compute the probability of the trajectory, which is used as 15:   Sample i+1 using the intensity matrix Z
+the particle weight. We repeat this process to obtain a set of 16: else
+                                                                    τ    = t    z(m) = z
+weighted particles at time tn, and resample from these to get 17: let i+1  n; let       i
+                                                      18:      i ← i +1
+a new set of unweighted particles.                              (m)
+                                                      19:    if z   disagrees with ζn, reject the particle
+  The behavior of the Markov jump process governing Z is        k = i
+                              Q                       20:    let
+characterized by the intensity matrix Z. The process of gen- 21: Propagate continuous variables
+erating a trajectory of the Markov jump process from time       xˆ       P
+t     t                                  t      z     22:    let tn−1 and tn−1 be the mean and covariance of
+ n−1 to n is as follows. For each particle at time n−1, let 0                          mth              t
+             Z                  τ =  t       i =0            the continuous variables in the particle at time n−1
+be the value of in that particle. Set 0 n−1 and   .             w(m) =1
+We use the intensity matrix to sample a time from the ex- 23: let
+                                                      24:    for i =0to k − 1 do
+ponential distribution fzi (t)=qzi exp(−qzi t) to obtain the
+                                                               let δ1,...,δ−1
+length of time γ until Z next changes value. If τ i+γ<tn,we 25:              be the times of
+                                                               continuous observations in [τi,τi+1]
+sample zi+1 from the intensity matrix, and continue to loop,
+                                                      26:      let δ0 = τi, δ = τi+1
+setting τi+1 = τi + γ. Otherwise, we know that Z = zi at tn.
+                               ζ                      27:      for j =0to  − 1 do
+If this value agrees with the evidence n, the particle is kept,           ˆ          ˆ
+                                                      28:         Compute xδj+1 , Pδj+1 , yδj+1 and Rδj+1
+otherwise it is rejected.                                                               ˆ
+                                                                  using UKB beginning with xδj and Pδj ,
+  Once we have the jump process, we proceed to prop-              under the dynamics determined by zi
+agate the continuous variables X through the time points           (m)     (m)           ˆ
+                                                      29:         w    ← w    ×N(yδj+1  ; yδj+1 ,Rδj+1 )
+τ0,...,τk. Since there may be many observations of the con-     ˆ(m)      (m)   ˆ
+                                                      30:    let x   and P   be xtn and Ptn
+tinuous variables in the interval [τi,τi+1], when we propagate
+                                                      31:  Resampling
+them from τi to τi+1, we need to consider all the observations                 (m)
+                                                                     w(m) ← Pw
+between those times. Let δ0 be τi, δ be τi+1 and δ1,...,δ−1 32: Normalize    w(m)
+be the time points at which continuous observations were 33: Select M new particles where the probability of
+                                                             (m)  (m)   (m)    (m)
+received. We loop through the intervals [δ j,δj+1] in turn. (z  , xˆ ,P    ) is w
+For each interval, we propagate the mean and variance of
+the continuous variables forward using UKB. We also obtain
+                                                               Figure 2: Continuous-time particle ﬁlter
+the probability of the observation at time δ j+1, given by the
+                                       ˆ
+predictive density p(yδj+1 |yδ1:δj )=N (yδj+1 ; yδj+1 ,Rδj+1 )
+      ˆ                                               6   Learning
+where yδj+1 and Rδj+1 are the estimate and covariance of
+y
+ δj+1 under UKB. We then multiply the probability of all the In real-world applications, we may not know the exact
+observations together over all time points δj in [τi,τi+1] and parametrization of Zt. Instead, we may have a prior distri-
+over all τi to obtain the probability of the sequence of obser- bution over the intensity matrices QZ and need to ﬁne tune
+vations. This becomes the weight of the particle.     our estimate of QZ as observations about Zt are made.
+                                                                            Q
+  We repeat this procedure for each of the M particles from In this case, we model Z as a random variable and we
+                                                                                   φ(Q  )
+time tn−1. Each particle consists of a candidate Markov jump attribute a probability distribution Z over the space of
+                                                                               Q
+process for each discrete variable in Zt, and the mean and admissible intensity matrices, Z . Since the observations are
+                                                                                    φ(Q  )
+covariance for the continuous variables in X t. The Markov exponentially distributed, we model Z as a Gamma dis-
+jump process candidates that are far from the ground truth tribution since Gamma and exponential are conjugates.
+                                                                                Q
+will lead to poor tracking of the continuous variables due to Assume that the elements of Z are distributed according
+                                                                 1
+incorrect parametrization of the continuous-state dynamics. qij ∼ Γ ,αij                   QZ
+                                                      to         βi    . The prior distribution is given by:
+Particles associated with the ill-ﬁt Markov jump processes
+                                                                           m 
+will have low weights and will be resampled out.                                  αij −1 −qij βi
+                                                                  φ(QZ)  ∝       qij  e               (7)
+  The pseudocode for CTPF is shown in Figure 2.                            i=1 j=i                                                        Figure 3 shows an experiment comparing CTPF to the
+                                            ζ
+  Upon the arrival of a discrete-state observation n,we discrete-time particle ﬁlter (DTPF). The results shown are av-
+                             J
+simulate a Markov jump process over the time interval eraged over 50 runs. The ﬁrst graph shows the performance
+[t  ,t ]       J                               Q
+ n−1  n . From  , we can compute the likelihood of Z: of CTPF with 10 particles and 55 updates, comparing the es-
+                     m                              timate of one of the continuous state variables produced by
+                            Nij −qij Ri
+             L(QZ)=        qij e                (8)   CTPF with the actual value of that variable. While CTPF up-
+                     i=1 j=i                         dates the discrete variables at infrequent intervals, DTPF per-
+                                                      forms an update at equally-spaced intervals ﬁxed by a preset
+where Nij is the number of transitions from state i to j in the time granularity. Both algorithms perform continuous infer-
+      J     R                      i            J
+process and  i is the time spent in state during process . ence, via UKB or UKF, at many intermediate time points, cor-
+From this, we update the QZ-distribution              responding to when the continuous variables are observed.
+                      m                               The plotted points are the estimates at these intermediate
+                             [N +α  ]−1
+                               ij  ij   −qij [Ri+βi]  points. From the graph, we see that CTPF is consistently able
+ ψ(QZ)=L(Q)φ(Q)=            qij        e
+                      i=1 j=i                        to track the variable through the different mode changes. The
+                                                (9)   second graph (DTPF1) shows DTPF’s performance using the
+Upon the arrival of the next discrete-state observation, we same number of particles and the same number of updates as
+                 1                                    CTPF. We see that DTPF1 has worse tracking throughout, and
+sample qij ∼ Γ      ,Nij + αij  to get an instantiation
+               Ri+βi                                  does particularly poorly from time 75 to time 100. CTPF out-
+for QZ that reﬂects the updated distribution.         performs DTPF because it is able to perform updates precisely
+  The learning procedure is integrated into algorithm 2 as when they are needed.
+follows: we sample QZ ∼ φ(QZ) right before line (8) and DTPF is considerably faster than CTPF because it does not
+perform the QZ-distribution update, as prescribed in Equa- require solving differential equations. This was exacerbated
+tions (7)-(9), after line (20) of the pseudocode.     by a slow Matlab implementation of the Kalman-Bucy ﬁlter,
+  This procedure may seem like magic. After all, we are compared to a well-optimized implementation of the Kalman
+using statistics generated from simulating from QZ itself to ﬁlter. We expect this difference to lessen with a more efﬁcient
+obtain an updated estimate of QZ. The reason it works is that implementation of CTPF. Nonetheless, we ran experiments
+not all QZs from the previous set of particles have the same that allowed DTPF the same running time as CTPF.
+chance of being accepted into the next set of particles. First of We ﬁrst allowed DTPF to use more particles than CTPF,
+all, if the trajectory disagrees with the discrete observation ζ n, while maintaining the same number of updates. The results of
+it will be rejected. Second, the trajectories will be weighted DTPF, with 58 particles and 55 updates, are shown as DTPF2,
+by the probability of the continuous observations, and these in the third graph of Figure 3. When the number of updates
+weighted particles will be resampled. A trajectory, and thus a is not sufﬁcient for DTPF to track the variables, increasing the
+new intensity matrix, that agrees well with the observations, number of particles does not particularly help. We then al-
+is more likely to be kept. In this way, the set of intensity lowed DTPF to update more frequently than CTPF, but use the
+matrices that are kept will be inﬂuenced by the observations, same number of particles. The results, with 10 particles and
+both discrete and continuous.                         584 updates, are shown in the fourth graph and are labeled
+  Other learning approaches have been explored in [Nodel- DTPF3. The DTPF3 results show a signiﬁcant improvement
+man et al., 2003] for parameter learning of CTBNs, and in the performance of DTPF, although DTPF still does not per-
+in [Bladt and Sørensen, 2003] for statistical inference of dis- form as well as CTPF when the continuous variables are os-
+cretely observed Markov jump processes. However, these ap- cillating rapidly. Furthermore, we found the variance of the
+proaches are ofﬂine learning approaches where the sequence estimates in DTPF3 to be higher than that produced by CTPF.
+of discrete-time observations are assumed known a priori to Figure 4 shows the results of learning the Q matrix on the
+the learning process. Our approach integrates online learn- small model. The results were quite promising. The ﬁrst
+ing into the particle ﬁltering framework, where we also take graph compares the estimation error achieved by CTPF with
+advantage of the continuous observations in eliminating poor learning the Q matrix and CTPF with using the true Q ma-
+candidates for QZ. This advantage allows for relatively quick trix. Both sets of CTPF experiments used 10 particles. We
+convergence to the neighborhood of the true Q Z value. see that the error of CTPF with learning comes close to that
+                                                      of CTPF without learning after 1000 time steps. The second
+                                                                                         Q
+7  Experimental results                               graph shows the distance of the learned matrix from the
+                                                      true Q matrix over time, computed as the sum of the element-
+We evaluate the performance of the CTPF algorithm on a sim- wise differences between the two matrices. The graph shows
+ulated small model and the rover model. The small model the learned Q matrix converging towards the true Q matrix.
+consists of one discrete ternary variable, two continuous state Lastly, we tested the CTPF algorithm on our main applica-
+variables, and two continuous observation variables. Depend- tion, the continuous-time rover model. Despite the nonlin-
+ing on the state of the discrete-valued process, the continuous earity of the model, CTPF is able to track the wheel heights
+behavior can be either linear, polynomial or sinusoidal. The relatively well with 10 particles. The results of the CTPF in-
+low dimensionality of the small model makes it feasible to ference, averaged over 20 runs, are presented in Figure 5 (one
+compare against the discrete-time particle ﬁlter and to evalu- graph per rover wheel). The tracking error is mainly due to
+ate the performance of the learning procedure.        incorrect estimation of the wheel stuck variable. Whenever

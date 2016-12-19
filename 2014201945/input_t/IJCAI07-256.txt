@@ -1,0 +1,336 @@
+                        A Ranking Approach to Pronoun Resolution
+
+                                  Pascal Denis   and  Jason Baldridge
+                                       Department of Linguistics
+                                      University of Texas at Austin
+                             {denis,jbaldrid}@mail.utexas.edu
+
+
+                    Abstract                          would be far too many overall and also the number of poten-
+                                                      tial antecedents varies considerably for each anaphor.
+    We propose a supervised maximum entropy rank-       Despite this apparent poor ﬁt, a classiﬁcation approach can
+    ing approach to pronoun resolution as an alter-   be made to work by assuming a binary scheme in which pairs
+    native to commonly used classiﬁcation-based ap-   of candidate antecedents and anaphors are classiﬁed as ei-
+    proaches. Classiﬁcation approaches consider only  ther COREF or NOT-COREF. Many candidates usually need
+    one or two candidate antecedents for a pronoun at to be considered for each anaphor, so this approach poten-
+    a time, whereas ranking allows all candidates to  tially marks several of the candidates as coreferent with the
+    be evaluated together. We argue that this provides anaphor. A separate algorithm must choose a unique an-
+    a more natural ﬁt for the task than classiﬁcation tecedent from that set. The two most common techniques are
+    and show that it delivers signiﬁcant performance  “Best-First” or “Closest-First” selections (see [Soon et al.,
+    improvements on the ACE datasets. In particular,  2001] and [Ng and Cardie, 2002], respectively).
+    our ranker obtains an error reduction of 9.7% over  A major drawback with the classiﬁcation approach out-
+    the best classiﬁcation approach, the twin-candidate lined above is that it forces different candidates for the same
+    model. Furthermore, we show that the ranker of-   pronoun to be considered independently since only a single
+    fers some computational advantage over the twin-  candidate is evaluated at a time. The probabilities assigned
+    candidate classiﬁer, since it easily allows the in- to each candidate-anaphor pair merely encode the likelihood
+    clusion of more candidate antecedents during train- of that particular pair being coreferential, rather than whether
+    ing. This approach leads to a further error reduction that candidate is the best with respect to the others. To over-
+    of 5.4% (a total reduction of 14.6% over the twin- come this deﬁciency, Yang et al. [2003] propose a twin-
+    candidate model).                                 candidate model that directly compares pairs of candidate an-
+                                                      tecedents by building a preference classiﬁer based on triples
+                                                      of NP mentions. This extension provides signiﬁcant gains for
+1  Introduction                                       both coreference resolution [Yang et al., 2003] and pronoun
+Pronoun resolution concerns the identiﬁcation of the an- resolution [Ng, 2005].
+tecedents of pronominal anaphors in texts. It is an important A more straightforward way to allow direct comparison
+and challenging subpart of the more general task of corefer- of different candidate antecedents for an anaphor is to cast
+ence, in which the entities discussed in a given text are linked pronoun resolution as a ranking task. A variety of dis-
+to all of the textual spans that refer to them. Correct resolu- criminative training algorithms –such as maximum entropy
+tion of the antecedents of pronouns is important for a variety models, perceptrons, and support vector machines– can be
+of other natural language processing tasks, including –but not used to learn pronoun resolution rankers. In contrast with
+limited to– information retrieval, text summarization, and un- a classiﬁer, a ranker is directly concerned with comparing
+derstanding in dialog systems.                        an entire set of candidates at once, rather than in a piece-
+  The last decade of research in coreference resolution has meal fashion. Each candidate is assigned a conditional prob-
+seen an important shift from rule-based, hand-crafted sys- ability (or score, in the case of non-probabilistic methods
+tems to machine learning systems (see [Mitkov, 2002] for such as perceptrons) with respect to the entire candidate
+an overview). The most common approach has been a     set. Ravichandran et al. [2003] show that a ranking ap-
+classiﬁcation approach for both general coreference resolu- proach outperforms a classiﬁcation approach for question-
+tion (e.g., [McCarthy and Lehnert, 1995; Soon et al., 2001; answering, and (re)rankers have been successfully applied
+Ng and Cardie, 2002]) and pronoun resolution speciﬁcally to parse selection [Osborne and Baldridge, 2004; Toutanova
+(e.g., [Morton, 2000; Kehler et al., 2004]). This choice is et al., 2004] and parse reranking [Collins and Duffy, 2002;
+somewhat surprising given that pronoun resolution does not Charniak and Johnson, 2005].
+directly lend itself to classiﬁcation; for instance, one cannot In intuitive terms, the idea is that while resolving a pro-
+take the different antecedent candidates as classes since there noun one wants to compare different candidate antecedents,
+
+                                                IJCAI-07
+                                                  1588rather than consider each in isolation. Pronouns have no in- the fundamental problem that pronoun resolution is not char-
+herent lexical meaning, so they are potentially compatible acterized optimally as a classiﬁcation task. The nature of
+with many different preceding NP mentions provided that the problem is in fact much more like that of parse selec-
+basic morphosyntactic criteria, such as number and gender tion. In parse selection, one must identify the best analysis
+agreement, are met. Looking at pairs of mentions in isolation out of some set of parses produced by a grammar. Different
+gives only an indirect, and therefore unreliable, way to select sentences of course produce very different parses and very
+the correct antecedent. Thus, we expect pronoun resolution different numbers of parses, depending on the ambiguity of
+to be particularly useful for teasing apart differences between the grammar. Similarly, we can view a text as presenting us
+classiﬁcation and ranking models.                     with different analyses (candidate antecedents) which each
+  Our results conﬁrm our expectation that comparing all can- pronoun could be resolved to. (Re)ranking models are stan-
+didates together improves performance. Using exactly the dardly used for parse selection (e.g., [Osborne and Baldridge,
+same conditioning information, our ranker provides error re- 2004]), while classiﬁcation has never been explored, to our
+ductions of 4.5%, 7.1%, and 13.7% on three datasets over the knowledge.
+twin-candidate model. By taking advantage of the ranker’s In classiﬁcation models, a feature for machine learning
+ability to efﬁciently compare many more previous NP men- is actually the combination of a contextual predicate1 com-
+tions as candidate antecedents, we achieve further error re- bined with a class label. In ranking models, the features
+ductions. These reductions cannot be easily matched by the simply are the contextual predicates themselves. In either
+twin-candidate approach since it must deal with a cubic in- case, an algorithm is used to assign weights to these fea-
+crease in the number of candidate pairings it must consider. tures based on some training material. For rankers, features
+  We begin by further motivating the use of rankers for pro- can be shared across different outcomes (e.g., candidate an-
+noun resolution. Then, in section (3), we describe the three tecedents or parses) whereas for classiﬁers, every feature con-
+systems we are comparing, providing explicit details about tains the class label of the class it is associated with. This
+the probability models and training and resolution strategies. sharing is part of what makes rerankers work well for tasks
+Section (4) lists the features we use for all models. In sec- that cannot be easily cast in terms of classiﬁcation: features
+tion (5), we present the results of experiments that compare are not split across multiple classes and instead receive their
+the performance of these systems on the Automatic Content weights based on how well they predict correct outputs rather
+Extraction (ACE) datasets.                            than correct labels. The other crucial advantage of rankers
+                                                      is that all candidates are trained together (rather than inde-
+                                                      pendently), each contributing its own factor to the training
+2  Pronoun Resolution As Ranking                      criterion. Speciﬁcally, for the maximum entropy models used
+The twin-candidate approach of Yang et al. [2003] goes a here the computation of a model’s expectation of a feature
+long way toward ameliorating the deﬁciencies of the single- (and the resulting update to its weight at each iteration) is
+candidate approach. Classiﬁcation is still binary, but proba- directly based on the probabilities assigned to the different
+bilities are conditioned on triples of NP mentions rather than candidates [Berger et al., 1996]. From this perspective, the
+just a single candidate and the anaphor. Each triple contains: ranker can be viewed as a straightforward generalization of
+(i) the anaphor, (ii) an antecedent mention, and (iii) a non- the twin-candidate classiﬁer.
+antecedent mention. Instances are classiﬁed as positive or The idea of ranking is actually present in the linguistic lit-
+negative depending on which of the two candidates is the erature on anaphora resolution. It is at the heart of Centering
+true antecedent. During resolution, all candidates are com- Theory [Grosz et al., 1995] and the Optimality Theory ac-
+pared pairwise. Candidates receive points for each contest count of Centering Theory provided by Beaver [2004]. Rank-
+they win, and the one with the highest score is marked as the ing is also implicit in earlier hand-crafted approaches such as
+antecedent.                                           Lappin and Leass [1994], wherein various factors are manu-
+  The twin-candidate model thus does account for the rela- ally given weights, and goes back at least to [Hirst, 1981].
+tive goodness of different antecedent candidates for the same
+pronoun. This approach is similar to error-correcting out- 3 The Three Systems
+put coding [Dietterich, 2000], an ensemble learning tech-
+                                                      Here, we describe the three systems that we compare: (1)
+nique which is especially useful when the number of output
+                                                      a single-candidate classiﬁcation system, (2) a twin-candidate
+classes is large. It can thus be seen as a group of models
+                                                      classiﬁcation system, and (3) a ranking system. For each sys-
+that are individual experts on teasing apart two different can-
+                                                      tem, we give the probability models and the training and res-
+didates. Nonetheless, the approach is still hampered by the
+                                                      olution procedures. All model parameters are estimated using
+fact that these models’ probability estimates are only based
+                                                      maximum entropy [Berger et al., 1996]. Speciﬁcally, we es-
+on two candidates rather than all that are available. This
+                                                      timate parameters with the limited memory variable metric
+means that unjustiﬁed independence assumptions made dur-
+                                                      algorithm implemented in the Toolkit for Advanced Discrim-
+ing model training and usage may still hurt performance.
+                                                      inative Modeling2 [Malouf, 2002]. We use a Gaussian prior
+  While it is a common and often necessary strategy to adapt
+a task to ﬁt a particular modeling approach, pronoun resolu- 1Examples of contextual predicates are whether the antecedent is
+tion has in fact been unnecessarily coerced into classiﬁcation a proper name in coreference or whether an S → NP VP expansion
+approaches. While the twin-candidate strategy is an improve- occurs in a parse tree in parse selection.
+ment over the single-candidate approach, it does not address 2Available from tadm.sf.net.
+
+                                                IJCAI-07
+                                                  1589with a variance of 1000 — no attempt was made to optimize preceding mention αi. Each test instance π, αi thus formed
+the prior for each data set or system.                is then evaluated by the classiﬁer, which returns a probability
+  Maxent models are well-suited for the coreference task, representing the likelihood that these two mentions are coref-
+because they are able to handle many different, potentially erential. Soon et al. [2001] use “Closest-First” selection: that
+overlapping features without making independence assump- is, the process terminates as soon as an antecedent (i.e., a test
+tions. Previous work on coreference using maximum entropy instance with probability >.5) is found or the beginning of
+includes [Kehler, 1997; Morton, 1999; 2000]. In principle, the text is reached.
+other discriminative algorithms such as perceptrons and sup-
+port vector machines could be used for each of the systems, 3.2 The Twin-candidate Classiﬁer
+though the output would not be probabilistic for these. The twin-candidate model was proposed by Yang et al. [2003]
+  The systems are trained and tested on data originally anno- in the context of coreference resolution. Ng [2005] more re-
+tated with coreference chains. This means that in principle, an cently used it speciﬁcally for the pronoun resolution task; for
+anaphoric pronoun can have several antecedents. Since pro- this reason, we adopt his training and test procedures.
+nouns show a strong tendency to take very local antecedents,
+we take only the closest antecedent as an anchor when creat- Model
+ing training instances.                               With the twin-candidate approach, resolving anaphoric pro-
+  We use the following notation for all models: π is an nouns is also a two step process. The ﬁrst step involves es-
+                                                                           P  (     |π, α ,α )
+anaphoric pronoun and A = {α1,...,αk} is a set of an- timating the probability tc FIRST  i j  , of the pro-
+tecedent candidates. The task of pronoun resolution is to pre- noun π corefering to the ﬁrst antecedent candidate αi.Since
+dict the correct antecedent α for π out of A.        this is still binary classiﬁcation, we have the dual probability
+                                                      Ptc(SECOND|π, αi,αj), which expresses the likelihood of
+3.1  The Single-candidate Classiﬁer                   the pronoun π being coreferential with the second antecedent
+                                                               α
+For the single-candidate classiﬁer, we use the model, training candidate j. As with the single-candidate classiﬁer, the se-
+and test procedures of [Soon et al., 2001].           lection of the correct antecedent is done in a separate step
+                                                      based on the parameters learned by the model. But with the
+Model                                                 twin-candidate approach, the antecedent selection algorithm
+The single-candidate classiﬁcation approach tackles coref- involves comparing candidates in a pairwise manner.
+erence in two steps by: (i) estimating the probability,
+Pc(COREF|π, αi), of having a coreferential outcome given                       n
+apairofmentionsπ, αi, and (ii) applying a selec-                          exp(   λifi(π, αi,αj, FIRST))
+tion algorithm that will single out a unique candidate out P ( |π, α ,α )=    i=1
+                                                        tc FIRST    i  j           n
+of the subset of candidates αk for which the probability
+                                                                                exp(   λifi(π, αi,αj,c))
+Pc(COREF|π, αk) reaches a particular value (typically .5).                  c     i=1
+Note that in this case, the number of events created for a given                                      (2)
+pronoun is just the cardinality of the set of candidates.
+                                                      Training
+
+                         n                            Training instances are constructed based on triples of men-
+                                                                   π, α ,α       π
+                    exp(   λifi(π, αi, COREF))      tions of the form  i  j ,where  describes a pronominal
+                        i=1                           anaphor and αi and αj are the descriptions for two of its can-
+ Pc(COREF|π, αi)=          n                  (1)
+                                                    didate antecedents and αi is stipulated to be closer to π than
+                        exp(   λifi(π, αi,c))       α                                       α
+                      c     i=1                        j. These instances are labeled either FIRST if i is the cor-
+                                                      rect antecedent or SECOND if αj is the correct antecedent.
+Training                                              For this to work, one has to add an additional constraint on
+Training instances are constructed based on pairs of mentions the creation of instances, namely: exactly one and only one
+of the form π, αi,whereπ and αi are the descriptions for of the two candidates can be coreferential with the pronoun.
+an anaphoric pronoun and one of its candidate antecedents, Note that the number of instances created is rather large; it is
+respectively. Each such pair is assigned either a label COREF in fact cubic (since each triple generates two instances) in the
+(i.e. a positive instance) or a label NOT-COREF (i.e. a nega- number of mentions in the document if one assumes that all
+tive instance) depending on whether or not the two mentions mentions preceding a pronoun are potential candidates. In or-
+corefer. In generating the training data, we create for each der to obviate this problem, Ng [2005] suggests using a win-
+anaphoric pronoun: (i) a positive instance for the pair π, αi dow of 4 sentences including the sentence of the pronoun, and
+where αi is the closest antecedent for π, and (ii) a negative the immediately preceding three sentences.
+instance for each pair π, αj  where αj intervenes between
+                                                      Resolution
+αi and π.
+                                                      Once trained, the twin-candidate classiﬁer is used to select a
+Resolution                                            unique antecedent for the given anaphoric pronoun π.Like
+Once trained, the classiﬁer is used to select a unique an- Yang et al. [2003] and Ng [2005], we use a round robin al-
+tecedent for each anaphoric pronoun in the test documents. In gorithm to compare the members of the candidate set for π.
+the Soon et al. [2001] system, this is done for each pronoun More speciﬁcally, test instances are created for each pair of
+π by scanning the text right to left, and pairing π with each candidates, αi and αj ,whereαj precedes αi. These instances
+
+                                                IJCAI-07
+                                                  1590are presented to the classiﬁer, which determines which one of Features of the pronoun
+the candidates is preferred; the winner of the comparison gets PERS PRO Tifπ is a personal pronoun; else F
+                                                        POSS PRO        Tifπ is a possessive pronoun; else F
+one point. Finally, the candidate with the most points at the                   rd
+                                                        THIRD PERS PRO  Tifπ is 3 person pronoun; else F
+termination of the round robin competition gets selected as                π   1st 2nd
+the antecedent for π. We use a window of three sentences as SPEECH PRO  Tif  is  ,   person pronoun; else F
+                                                        REFL PRO        Tifπ is a reﬂexive pronoun; else F
+we did in training.
+                                                        PRO FORM        Tifπ is lower-cased pronoun; else F
+                                                                                               π
+3.3  The Ranker                                         PRO LCONX       POS tag of word on the left of
+                                                        PRO RCONX       POS tag of word on the right of π
+The following describes our training and resolution proce- PRO SCONX    POS tags of words around π
+dures for the ranking system.                           Features of the antecedent candidate
+                                                        ANTE WD  LEN    the number of tokens in α’s string
+Model                                                   PRON ANTE       Tifα is a pronoun; else F
+Viewed as ranking task, pronoun resolution is done in a sin- PN ANTE    Tifα is a proper name; else F
+gle step, by computing the probability Pr(αi|π), which is the INDEF ANTE Tifα is a indeﬁnite NP; else F
+                                                                           α
+conditional probability of a particular candidate αi being the DEF ANTE Tif  is a deﬁnite NP; else F
+antecedent of the anaphoric pronoun π. Here, a unique event DEM ANTE    Tifα is a demonstrative NP; else F
+                                             A          QUANT  ANTE     Tifα is a quantiﬁed NP; else F
+is created for each pronoun and its entire candidate set .Fi-                                  α
+nally, selecting the correct antecedent merely boils down to ANTE LCONX POS tag of word on the left of
+                                                        ANTE RCONX      POS tag of word on the right of α
+picking the most likely candidate in this set.
+                                                        ANTE SCONX      POS tags of words around α
+                          n                            ANTE M  CT      number of times α’s string appears
+                      exp(   λifi(π, αi))                               previously in the text
+                                                                           α
+          P (α |π)=       i=1                           NEAREST ANTE    Tif  is the nearest NP candidate
+           r  i           n                   (3)                     compatible in gender, person, and
+                       exp(   λifi(π, αk))                              number; else F
+                     k     i=1
+                                                        EMBED  ANTE     Tifα is embedded in another NP;
+Training                                                                else F
+The training instances for the ranker system are built based Relational features
+on an anaphoric pronoun π and the set of its antecedent can- S DIST     Binned values for sentence distance
+                                                                        between π and α
+didates A. The candidate set is composed of: (i) the closest
+            π                                           NP DIST         Binned values for mention distance
+antecedent for , which is singled out as such, and (ii) a set of        between π and α
+non-antecedents. The construction of the latter set proceeds NUM AGR    Tifπ and α agree in number; F if they
+by taking the closest antecedent as an anchor and adding all            disagree; UNK if either NP’s number
+the non-antecedents that occur in a window of 4 sentences               cannot be determined
+around it (including the current sentence of the antecedent, GEN AGR    Tifπ and α agree in gender; F if they
+the preceding sentence, and the two following sentences). In            disagree; UNK if either NP’s gender
+contrast with the previous models, note that the comparison             cannot be determined
+between the different candidates in A is here directly part of
+the training criterion; these are used in the denominator of the Table 1: Feature selection for pronoun resolution
+above equation.
+Resolution                                              For the pronoun features, we encoded into our features in-
+Once trained, the ranker is used to select a unique antecedent formation about the particular type of pronoun (e.g., personal,
+for each anaphoric pronoun. Given preference shown by pro- possessive, etc.) and the syntactic context of the anaphoric
+nouns for local resolutions and in order to reduce testing time, pronoun. The syntactic context is here approximated as POS
+we build our candidate set by taking only the preceding men- tags surrounding the pronoun. For the antecedent candidates,
+tions that occur in a window of 4 sentences, including the pro- we also use information about the type of NP at hand as
+noun’s sentence and the 3 sentences preceding it. The ranker well as POS context information. Other features encode the
+provides a probability distribution for the entire candidate set, salience of a given antecedent: whether the candidate NP
+and the candidate with the highest conditional probability is string has been seen up to the current point, whether it is the
+chosen as the antecedent. In cases of ties, the alternative that nearest NP, and whether it is embedded in another larger NP.
+is the closest to the pronoun is chosen.              Finally, we use features describing the relation between the
+                                                      anaphoric NP and its candidate antecedent, namely distance
+                                                      features (in terms of sentences and in terms of NP mentions)
+4  Feature selection                                  and compatibility features (i.e., number and gender agree-
+In this study, we focused on features obtainable with very ment). In addition to the simple features described above, we
+limited linguistic processing. Our features fall into three main used various composite features. More speciﬁcally, we used
+categories: (i) features of the anaphoric pronoun, (ii) features features combining: (i) distances and the type of the pronoun
+of antecedent candidate NP, and (iii) relational features (i.e., (e.g., reﬂexive, possessive), (ii) the named entity for the an-
+features that describe the relation between the two mentions). tecedent with various information on the pronoun, such as the
+The detailed feature set is summarized in table 1.    pronoun form and the pronoun gender, (iii) the last three char-
+
+                                                IJCAI-07
+                                                  1591acters in the antecedent head word and the pronoun form and of 74.0%. This corresponds to average (weighted) improve-
+gender.                                               ments of 7.2% (i.e., an error reduction of 21%) over the
+                                                      single-candidate classiﬁer and of 2.8% (i.e., an error reduc-
+5  Experiments and Results                            tion of 9.7%) over the twin-candidate classiﬁer. The scores
+5.1  Corpus and evaluation                            obtained for the ﬁrst dataset NPAPER are substantially better
+                                                      than for the two other datasets; we suspect that this difference
+For evaluation, we used the datasets from the ACE corpus is due to the fact that we only did development on that dataset.
+(Phase 2). This corpus is divided into three parts, correspond-
+ing to different genres: newspaper texts (NPAPER), newswire 5.3 Additional results
+texts (NWIRE), and broadcasted news transcripts (BNEWS). In this section, we discuss an additional experiment aimed at
+Each of these is split into a train part and a devtest part.
+           devtest                                    getting additional insight into the potential of the ranker. In
+We used the         material only once, namely for test- the previous experiments, we provided a rather limited con-
+ing. Progress during the development phase was estimated text for training: we only considered mentions in a window of
+only by using cross-validation on the training set for the NPA- 4 sentences around the correct antecedent. Our main motiva-
+PER section.                                          tion for doing this was to stay as close as possible to the train-
+  In our experiments, we used all forms of personal (all per- ing conditions given in [Ng, 2005] for the twin-candidate ap-
+sons) and possessive pronouns that were annotated as ACE proach, thereby giving it the fairest comparison possible. An
+“markables”, i.e., the pronouns associated with the follow- open question is to what extent can widening the window of
+ing named entity types: FACility, GPE (geo-political entity), antecedent candidates help the ranker to learn better parame-
+LOCation, ORGanization, PERson, VEHicle, WEApons. This ters for pronoun resolution. To answer this question, we ran
+excludes pleonastics and references to eventualities or to non- an experiment on the same three ACE datasets and widened
+ACE entities. Together, the three ACE datasets contain 7263
+   1866                                               the window of sentences by collecting, in addition to the clos-
+and     such referential pronouns, for training and testing, est antecedent, all non-antecedents preceding the anaphor up
+respectively.                                         to 10 sentences before the antecedent:4 The results for this
+  Finally, note that in building our antecedent candidate sets, experiment are reported in table (3):
+we restricted ourselves to the true ACE mentions since our fo-
+cus is on evaluating the classiﬁcation approaches versus the
+                                                             System       BNEWS    NPAPER   NWIRE
+ranking approach rather than on building a full pronoun res- RK (w =10)     73.0     77.6     75.0
+olution system. It is worth noting that previous work tends to
+be vague in both these respects: details on mention ﬁltering Table 3: Accuracy scores for the ranker (RK) with a window
+or providing performance ﬁgures for markable identiﬁcation of 10 sentences.
+are rarely given.
+  No human-annotated linguistic information is used in the These ﬁgures show a signiﬁcant improvement on the ﬁrst
+input. The corpus text was preprocessed with the OpenNLP
+      3                                               two datasets, with an average score of 75.4%. This translates
+Toolkit (i.e., a sentence detector, a tokenizer, a POS tagger, into an average gain of 1.4% oranerrorreductionof5.4%.
+and a Named Entity Recognizer).
+  Following common practice in pronoun resolution, we re- 6 Conclusions
+port results in terms of accuracy, which is simply the ratio of
+correctly resolved anaphoric pronouns. Since the ACE data is We have demonstrated that using a ranking model for pro-
+annotated with coreference chains, we assumed that correctly noun resolution performs far better than a classiﬁcation
+resolving a pronoun amounts to selecting one of the previous model. On the three ACE datasets, the ranker achieves an er-
+elements in chain as the antecedent.                  ror reductions of 9.7% over the twin-candidate classiﬁer, even
+                                                      when both have exactly the same features and experimental
+5.2  Comparative results                              settings (e.g., number of sentences from which to consider
+The results obtained for the three systems on the three ACE candidates). Our results thus corroborate Ravichandran et
+datasets are summarized in table (2).                 al.’s [2003] similar ﬁnding that ranking outperforms classiﬁ-
+                                                      cation for question-answering. Clearly, the ability to consider
+         System  BNEWS    NPAPER   NWIRE              all potential antecedents together, rather than independently,
+         SCC       62.2     70.7     68.3             provides the ranker with greater discriminating power.
+         TCC       68.6     74.6     71.1               The round robin nature of the pairwise contests in the twin-
+         RK        72.9     76.4     72.4             candidate approach imposes a restrictive computational cost
+                                                      on its use which limits the number of NP mentions that can
+Table 2: Accuracy scores for the single-candidate classiﬁer be considered in a candidate set. The ranker does not suffer
+(SCC), the twin-candidate classiﬁer (TCC), and the ranker from this limitation, and we show that the ranker achieves a
+(RK).                                                 further error reduction of 5.4% (or total of 14.6% over the
+                                                      twin-candidate model) by increasing the size of the candidate
+  As shown by this table, the ranker system signiﬁcantly out- set used in training.
+performs the two classiﬁer systems, with an overall f-score
+                                                         4As for the other experiments, we use a Gaussian prior of vari-
+  3Available from opennlp.sf.net.                     ance 1000, and we maintain the window of 4 sentences for testing.
+
+                                                IJCAI-07
+                                                  1592

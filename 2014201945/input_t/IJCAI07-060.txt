@@ -1,0 +1,362 @@
+                              Conﬂict-Driven Answer Set Solving
+
+      Martin Gebser    and  Benjamin Kaufmann       and  AndreNeumann´      and  Torsten Schaub∗
+                              Institut f¨ur Informatik, Universit¨at Potsdam,
+                            Postfach 90 03 27, D–14439 Potsdam, Germany
+
+
+                    Abstract                            After establishing the formal background, we provide in
+                                                      Section 3 a constraint-based speciﬁcation of ASP solving in
+    We introduce a new approach to computing answer   terms of nogoods. Based on this uniform representation, we
+    sets of logic programs, based on concepts from con- develop in Section 4 algorithms for ASP solving that rely on
+    straint processing (CSP) and satisﬁability checking advanced CSP and SAT techniques. Notably, our solving pro-
+    (SAT). The idea is to view inferences in answer   cedure is centered around conﬂict-driven learning and back-
+    set programming (ASP) as unit propagation on no-  jumping. In Section 5, we describe our new ASP solver clasp,
+    goods. This provides us with a uniform constraint- implementing our approach. We ﬁnally provide empirical re-
+    based framework for the different kinds of infer- sults demonstrating the competitiveness of clasp.
+    ences in ASP. It also allows us to apply advanced
+    techniques from the areas of CSP and SAT. We have 2   Background
+    implemented our approach in the new ASP solver
+                                                      Given an alphabet P, a (normal) logic program is a ﬁnite set
+    clasp. Our experiments show that the approach is                   p ←  p ,...,p , not p  ,...,not p
+    competitive with state-of-the-art ASP solvers.    of rules of the form 0 1      m      m+1          n
+                                                      where 0 ≤ m  ≤ n and pi ∈Pis an  atom for 0 ≤ i ≤ n.
+                                                      A body literal is an atom p or its negation not p.Fora
+1  Introduction                                       rule r,lethead(r)=p0   be the head of r and body (r)=
+                                                      {p1,...,pm, not pm+1,...,not pn} be the body of r.The
+Answer set programming (ASP; [Baral, 2003]) has become
+                                                      set of atoms occurring in a logic program Π is denoted by
+an attractive tool for knowledge representation and reason-
+                                                      atom(Π). The set of bodies in Π is body (Π) = {body (r) |
+ing. Although the corresponding solvers are highly optimized
+                                                      r ∈ Π}. For regrouping rule bodies sharing the same head p,
+(cf. [Simons et al., 2002; Leone et al., 2006]), their per-
+                                                      deﬁne body (p)={body (r) | r ∈ Π, head(r)=p}.InASP,
+formance does not match the one of state-of-the-art solvers
+                                                      the semantics of a program Π is given by its answer sets,be-
+for satisﬁability checking (SAT; [Mitchell, 2005]). However,
+                                                      ing total well-founded models of Π. For a formal introduction
+computational mechanisms of SAT and ASP solvers are not
+                                                      to ASP, we refer the reader to [Baral, 2003].
+that far-off. This can, for instance, be seen on the success
+                                                        A Boolean assignment A over a domain, dom(A),isase-
+of SAT-based ASP solvers assat [Lin and Zhao, 2004] and
+                                                      quence (σ1,...,σn) of signed literals σi of form Tp or Fp
+cmodels [Giunchiglia et al., 2006]. But despite the close re-
+                                                      for p ∈ dom(A)  and 1 ≤ i ≤  n; Tp expresses that p is
+lationship to SAT and, more generally, constraint processing
+                                                      true and Fp that it is false. (We omit the attribute signed
+(CSP; [Dechter, 2003]), state-of-the-art look-back techniques
+                                                      for literals whenever clear from the context.) We denote
+from these areas, like backjumping, conﬂict-driven learning,
+                                                      the complement of a literal σ by σ,thatis,Tp = Fp and
+and restarts, are not yet established in genuine ASP solvers. Fp = Tp  A ◦ B
+                                          [                    .Welet        denote the sequence obtained by
+In fact, recent approaches to adopt such techniques Ward and                 A     B
+Schlipf, 2004; Ricca et al., 2006; Lin et al., 2006] are rather concatenating assignments and . We sometimes abuse
+implementation-speciﬁc and lack generality.           notation and identify an assignment with the set of its con-
+  We address this deﬁciency by introducing a new compu- tained literals. Given this, we access true and false propo-
+                                                      sitions in A via AT = {p ∈  dom(A)  | Tp  ∈ A}  and
+tational approach to ASP solving, centered around the CSP AF = {p ∈ dom(A) | Fp ∈ A}
+concept of a nogood. Apart from the fact that this allows us to                  .
+easily integrate solving technology from the areas of CSP and For a canonical representation of constraints, we use the
+                                                      CSP concept of a nogood. In our setting, a nogood is a set
+SAT, e.g., conﬂict-driven learning, backjumping, watched lit- {σ ,...,σ }
+erals, etc., it also provides us with a uniform representation of 1 n of signed literals, expressing a constraint vio-
+                                                      lated by any assignment containing σ1,...,σn. An assign-
+inferences from logic program rules, unfounded sets, as well A       AT ∪ AF  = dom(A)     AT ∩ AF  = ∅
+as nogoods learned from conﬂicts.                     ment   such that                 and             is
+                                                      a solution for a set Δ of nogoods, if δ  ⊆ A for all δ ∈ Δ.
+  ∗Afﬁliated with the School of Computing Science at Simon For a nogood δ, a literal σ ∈ δ, and an assignment A,we
+Fraser University, Canada, and IIIS at Grifﬁth University, Australia. say that σ is unit-resulting for δ wrt A,if(1)δ \ A = {σ}
+
+                                                IJCAI-07
+                                                   386and (2) σ  ∈ A.By(1),σ is the single literal from δ that is not This result captures the intuition that a body should be equiv-
+contained in A. This implies that a violated constraint does alent to the conjunction of its body literals.
+not have a unit-resulting literal. Condition (2) makes sure We now come to inferences primarily aiming at atoms. An
+that no duplicates are introduced: If A already contains σ, atom p must be true if some body in body (p) is true. Con-
+then it is no longer unit-resulting. For instance, literal Fq is versely, all elements of body (p) must be false if p is false.
+unit-resulting for nogood {Fp, Tq} wrt assignment (Fp),but For body (p)={β1,...,βk}, we get the nogoods:
+         (Fp, Fq)       (Fp, Tq)
+neither wrt       nor wrt       . Note that our notion         Δ(p)={{Fp,   Tβ  },...,{Fp, Tβ }}
+of a unit-resulting literal is closely related to the unit clause              1             k
+rule of DPLL (cf. [Mitchell, 2005]). For a set Δ of nogoods For example, for an atom x with body (x)={{y}, {not z}},
+and an assignment A, we call unit propagation the iterated we get Δ(x)={{Fx, T{y}}, {Fx, T{not z}} }.
+process of extending A with unit-resulting literals until no Finally, an atom p must be false if all elements of body (p)
+further literal is unit-resulting for any nogood in Δ. are false. And conversely, some body in body (p) must be true
+                                                      if p is true. For body (p)={β1,...,βk}, this is reﬂected by
+3  Nogoods of Logic Programs                          the following nogood:
+
+Inferences in ASP rely on atoms and program rules, which           δ(p)={Tp,   Fβ1,...,Fβk}
+can be expressed by using atoms and bodies. For a pro-
+                                                                           x     body (x)={{y}, {not z}}
+gram Π, we thus ﬁx the domain of assignments  A  to   Taking once more atom  with                       ,
+                                                               δ(x)={Tx,  F{y}, F{not z}}
+dom(A)=atom(Π)     ∪ body (Π). Such a hybrid approach we obtain                          .
+may result in exponentially smaller search spaces [Gebser and Dually to Proposition 3.1, we have the following for atoms.
+Schaub, 2006]; it moreover allows for an adequate represen- Proposition 3.2 Let Π be a logic program.
+tation of nogoods, as we show in the sequel.            The set of clauses
+  Our approach is guided by the idea of Lin and Zhao [2004] {γ ∈ Γ(Δ(p)) | p ∈ atom(Π)}∪{γ(δ(p)) | p ∈ atom(Π)}
+and decomposes ASP solving into (local) inferences obtain-
+able from the Clark completion of a program [Clark, 1978] is logically equivalent to the propositional theory
+and those obtainable from loop formulas. We begin with no- {p ≡ p ∨···∨p    |
+goods capturing inferences from the Clark completion.           β1        βk
+  The body of a rule is true if all its body literals are true. p ∈ atom(Π), body (p)={β1,...,βk}}.
+Conversely, some of its literals must be false if the body is Combining the last propositions yields the following result.
+false. For a body β = {p1,...,pm, not pm+1,...,not pn},
+                                                                     Π
+the following nogood captures this:                   Theorem 3.3 Let   be a tight logic program and
+     δ(β)={Fβ,Tp1,...,Tpm,    Fpm+1,...,Fpn}          ΔΠ  = {δ(β) | β ∈ body (Π)}∪{δ ∈ Δ(β) | β ∈ body (Π)}
+Intuitively, δ(β) is a constraint enforcing the truth of body β, ∪{δ(p) | p ∈ atom(Π)}∪{δ ∈ Δ(p) | p ∈ atom(Π)}.
+or the falsity of a contained literal. E.g. for body {x, not y},                                     T
+                                                      Then, X ⊆  atom(Π) is an answer set of Π iff X = A ∩
+we obtain δ({x, not y})={F{x, not y}, Tx, Fy}.
+                                                      atom(Π) for a (unique) solution A for ΔΠ.
+  Additionally, a body must be false if one of its literals is
+false. And conversely, all contained literals must be true if the The nogoods in ΔΠ capture the supported models of a pro-
+body is true. For β = {p1,...,pm, not pm+1,...,not pn}, gram [Apt et al., 1987]. Any answer set is a supported model,
+this is reﬂected by the following set of nogoods:     but the converse only holds for tight programs [Fages, 1994].
+                                                      The mismatch on non-tight programs is caused by loops [Lin
+      Δ(β)={{Tβ,Fp1},...,{Tβ,Fpm},
+                {Tβ,Tp      },...,{Tβ,Tp  }}          and Zhao, 2004], responsible for cyclic support among true
+                        m+1              n            atoms. Such cyclic support can be prohibited by loop formu-
+Taking again body {x, not y}, we obtain Δ({x, not y})= las.Asshownin[Lee, 2005], the answer sets of a program Π
+{{T{x, not y}, Fx}, {T{x, not y}, Ty}}.               are precisely the models of Π that satisfy the loop formulas
+  Nogoods induce a set of clauses, which can be used for of all non-empty subsets of atom(Π).1 Observe that the ex-
+investigating the logical contents of the underlying infer- ponential number of loops in the worst case [Lifschitz and
+ences. Given a program Π, we associate a nogood δ =   Razborov, 2006] makes an enumeration of all loop formulas
+{Tp1,...,Tpm, Fpm+1,...,Fpn}   with the clause γ(δ)=  infeasible. All loop formulas can however be checked in lin-
+{¬q1,...,¬qm,qm+1,...,qn}  where qi =   pi,ifpi  ∈    ear time, and propagation within genuine ASP solvers makes
+atom(Π),andqi =  pβ,ifpi = β ∈ body (Π),for1 ≤ i ≤ n; sure that they are satisﬁed by a solution.
+and deﬁne Γ(Δ) = {γ(δ) | δ ∈ Δ} for a set of nogoods Δ. For a program Π and some U ⊆ atom(Π),wedeﬁnethe
+For the bodies of Π, we obtain the following correspondence. external bodies of U for Π, EB Π(U),as
+Proposition 3.1 Let Π be a logic program.                 {body (r) | r ∈ Π, head(r) ∈ U, body (r) ∩ U = ∅}.
+  The set of clauses
+{γ(δ(β)) | β ∈ body (Π)}∪{γ ∈ Γ(Δ(β)) | β ∈ body (Π)} The (disjunctive) loop formula of U for Π, LF Π(U),is
+                                                                                              
+                                                        ¬           (     + p ∧     − ¬p) →¬        p ,
+is logically equivalent to the propositional theory         β∈EBΠ(U)   p∈β       p∈β            p∈U
+{p  ≡ p ∧···∧p    ∧¬p     ∧···∧¬p    |
+  β    1        m     m+1          n                     1
+ β ∈ body (Π),β = {p ,...,p , not p  ,...,not p }}.      Note that a loop formula can be constructed for any set of atoms,
+                    1     m      m+1          n       even if this set is not a loop in the sense of [Lin and Zhao, 2004].
+
+                                                IJCAI-07
+                                                   387     β+  = β ∩ atom(Π)     β− = {p | not p ∈ β}
+where                  and                    .The     Algorithm 1:NOGOODPROPAGATION
+loop formula of a set U of atoms enforces all elements of U
+                                                        Input  : A program Π,aset∇ of nogoods, and an
+to be false, if U is not externally supported [Lee, 2005].
+                                                                assignment A.
+  To capture the effect of a loop formula induced by a set
+                                                        Output: An extended assignment and set of nogoods.
+U ⊆ atom(Π),wedeﬁnetheloop nogood   of an atom p ∈ U
+as                                                    1 U ←∅                       // set of unfounded atoms
+            λ(p, U)={Fβ1,...,Fβk,  Tp}                2 loop
+                                                      3    A  ← LOCALPROPAGATION(Π,   ∇,A)
+where EB Π(U)={β1,...,βk}. Overall, we get the follow-
+                                                      4    if δ ⊆ A for some δ ∈ ΔΠ ∪∇or TIGHT(Π) then
+ing set of loop nogoods for a program Π:
+                                                     5        return (A, ∇)
+       ΛΠ  =  U⊆atom(Π),U=∅{λ(p, U) | p ∈ U}         6    else
+                                                (1)                      F
+                                                      7        U ← U  \ A
+Observe that loop nogoods make direct use of the bodies in 8   if U = ∅ then U ← UNFOUNDEDSET(Π,A)
+EB  (U)={β   ,...,β }                   LF  (U)
+   Π        1      k , unlike loop formulas Π   re-   9        if U = ∅ then return (A, ∇)
+                         β
+lying on the literals in each i. Using bodies in loop no- 10   else let p ∈ U in
+goods is reasonable because unit propagation on completion 11     ∇←∇∪{λ(p, U)}
+nogoods makes a body false if it contains a false literal. No- 12 if Tp ∈ A then return (A, ∇)
+tably, the usage of bodies avoids a combinatorial blow-up, 13     else A ← A ◦ (Fp)
+faced when expressing these constraints in terms of body lit-
+erals. In fact, representing λ(p, U) in terms of body literals
+yields about |β1 ×···×βk| nogoods instead of a single one.
+  Dropping the tightness requirement, we can show that
+                                                      ﬁxpoint of unit propagation is computed. If LOCALPROPA-
+completion and loop nogoods characterize answer sets.
+                                                      GATION yields a violated nogood δ (line 4), then A cannot be
+Theorem 3.4 Let Π be a logic program, let ΔΠ and ΛΠ as extended to a solution. Also if Π is tight, all unfounded atoms
+in Theorem 3.3 and (1).                               are already falsiﬁed. In both cases, we are done with nogood
+                                               T
+  Then, X ⊆atom(Π)  is an answer set of Π iff X = A ∩ propagation. Only if Π is non-tight, we check whether an un-
+atom(Π) for a (unique) solution A for ΔΠ ∪ ΛΠ.        founded set [van Gelder et al., 1991] (accumulated in U)has
+The nogoods in ΔΠ  ∪ ΛΠ  describe a set of constraints to be falsiﬁed.
+                                                                U                    8
+that must principally be checked for computing answer sets. Initially, is empty; so in line we determine an un-
+While the size of ΔΠ is linear in atom(Π)×body (Π), the one founded set. Note that, if some non-false atom is unfounded,
+of ΛΠ is exponential. These magnitudes apply to all exist- there always is an unfounded set not containing any false
+ing ASP solvers, where ΔΠ is either encoded via dependency atoms. In Section 5, we describe our implementation of UN-
+                                                                                                       U
+graphs (linking atoms and bodies/rules) or given through the FOUNDEDSET; we here only require that an unfounded set
+Clark completion of Π. Loop nogoods in ΛΠ are determined of non-false atoms is returned, if it exists. If so, we select in
+                                                          10        p      U                      λ(p, U)
+only on demand by dedicated algorithms.               line   an atom  from   and add its loop nogood
+                                                      to ∇ (line 11).2 If p is true, then λ(p, U) is violated, and
+                                                      we return A and ∇ (line 12). Otherwise, Fp is unit-resulting
+4  Conﬂict-Driven ASP Solving                         for λ(p, U) wrt A,andweaddFp   to A (line 13). Having
+Given the speciﬁcation of ASP solving in terms of nogoods, falsiﬁed a single element of U,were-invokeLOCALPROP-
+we can now make use of advanced techniques from CSP and AGATION before adding any further loop nogoods. In fact,
+SAT for developing equally advanced ASP solving proce- completion nogoods in ΔΠ might sufﬁce for falsifying the
+dures. Different from SAT, where every (known) nogood is residual atoms in U. For example, consider U = {x, y, z}
+usually explicated as a clause, our algorithms work on logic and rules x ← z, y ← x, z ← y:FromFx, we can de-
+programs, inducing several kinds of nogoods. In particular, rive Fy and Fz. But generally, falsifying a single element
+the exponentially many nogoods resulting from loop formulas does not allow for falsifying the whole set U only via com-
+are implicitly given by a program, and determined only when pletion nogoods. If we add rule y ← z to the above example,
+used for propagation. The key role of the different kinds of then Fy and Fz are no longer derivable. This is reﬂected in
+(and partially implicit) constraints, expressed as nogoods, is line 7, where we remove false atoms from U. The shrunken
+to identify a reason responsible for deriving a literal by unit set U is still unfounded, and if it is non-empty, we can im-
+propagation. This makes the logical fundament of ASP solv- mediately determine another loop nogood to falsify the next
+ing the same as the one of CSP and SAT solving, so that we element of U. Observe that no further unfounded atoms are
+can directly apply similar reasoning strategies, without the computed until the ones in U are expended. With changing
+need of a SAT conversion or proprietary designs.      set U, the atom p (selected in line 10) and the bodies in loop
+  To begin, we give a speciﬁcation of our nogood propaga- nogood λ(p, U) change in each iteration, aiming at a ﬁrmer
+tion procedure in Algorithm 1. Propagation works on a pro- representation of the respective unfounded set.
+gram Π,aset∇  of recorded nogoods, and an assignment A. All in all, our nogood propagation procedure interleaves
+First, we invoke LOCALPROPAGATION on Π and accumu-    unit propagation on completion and accumulated nogoods
+lated nogoods in ∇. This function adds unit-resulting literals
+to A, derived via nogoods either in ΔΠ or in ∇;thatis,a  2Given that p is unfounded, we have λ(p, U) \{Tp}⊆A.
+
+                                                IJCAI-07
+                                                   388  Algorithm 2: CDNL-ASP                                 Algorithm 3:CONFLICTANALYSIS
+   Input : A program Π.                                  Input  : A violated nogood δ, a program Π,aset∇ of
+   Output: An answer set of Π.                                   nogoods, and an assignment A.
+                                                         Output: A derived nogood, a UIP, and a decision level.
+ 1 A ←∅          // assignment over atom(Π) ∪ body (Π)
+                                                                                  
+ 2 ∇←∅                      // set of (dynamic) nogoods 1 let σ ∈ δ st A = B ◦ (σ) ◦ B and δ \{σ}⊆B
+ 3 dl ← 0                            // decision level 2 while {ρ ∈ δ | dl(ρ)=dl(σ)}  = {σ} do
+ 4 loop                                                3    let ε ∈ ΔΠ ∪∇st σ ∈ ε and ε \{σ}⊆B
+ 5    (A, ∇) ← NOGOODPROPAGATION(Π,    ∇,A)            4    δ ←  (δ \{σ}) ∪ (ε \{σ})
+                                                                                     
+ 6    if ε ⊆ A for some ε ∈ ΔΠ ∪∇then                  5    let σ ∈ δ st B = C ◦ (σ) ◦ C and δ \{σ}⊆C
+ 7       if dl =0then return no answer set             6    B  ← C
+ 8       (δ, σUIP ,k) ← ONFLICT NALYSIS ε, Π, ∇,A
+                     C        A        (         )     7 k ←  max({dl(ρ) | ρ ∈ δ \{σ}} ∪ {0})
+ 9       ∇←∇∪{δ}
+                                                       8 return (δ, σ, k)
+10       A ←  A \{σ ∈ A  | k<dl(σ)}
+11       dl ← k
+
+12       A ←  A ◦ (σUIP )
+             T    F                                    σ                              dl +1
+13    else if A ∪ A = atom(Π)  ∪ body (Π) then          d belongs to the new decision level .
+                 T
+14       return A  ∩ atom(Π)                             Our conﬂict analysis procedure determines an asserting
+15    else                                             nogood δ. That is, after backjumping, δ yields a unit-resulting
+16       σd ←  SELECT(Π, ∇,A)                          literal, leading Algorithm 2 into a different part of the search
+17       dl ← dl +1                                    space than traversed before. This is similar to an asserting
+18       A ←  A ◦ (σd)                                 clause, determined by conﬂict analysis in CDCL. In deriv-
+                                                       ing δ, we follow the First-UIP scheme and stop conﬂict analy-
+                                                       sis at the ﬁrst UIP that is found; no further UIPs are explored.
+                                                         Though our conﬂict analysis procedure is similar to its
+ with the recording and propagation of loop nogoods. The classical CDCL counterpart, we need subtle adjustments. The
+ latter is only done if the underlying program is non-tight and reason is that unfounded set inference works in a directed
+ the falsity of unfounded atoms cannot be determined via other way: It only falsiﬁes unfounded atoms, but does not “protect”
+ nogoods. Our approach favors local propagation over un- true atoms from becoming unfounded. For illustration, con-
+ founded set computations. This is motivated by the fact that sider Π={x ← not y ; y ← not x ; u ← x ; u ← v ; v ←
+ local propagation does not add any nogoods to ∇, hence, it u, y} along with assignment A =(Tu). Note that Tu is a de-
+ is more economical than unfounded set falsiﬁcation. We fur- cision literal; its decision level is 1. Local propagation on ΔΠ
+ ther discuss the relation between our propagation strategy and and A yields no inferences (due to body (u)={{x}, {v}}),
+ other approaches in Section 7.                        and there is no unfounded set. When we extend A by deci-
+   Conﬂict-Driven Nogood Learning. Our basic algorithm sion literal Ty at level 2, local propagation sets atom x and
+ for deciding whether a program has an answer set is similar body {x} to false (and v to true). But then, the set {u, v}
+ to Conﬂict-Driven Clause Learning (CDCL) with First-UIP becomes unfounded, which makes us record the loop nogood
+ scheme [Mitchell, 2005]. Given a program Π, Algorithm 2 δ = λ(u, {u, v})={F{x}, Tu}.SinceA  contains F{x}
+ starts from an empty assignment A and an empty set ∇ of and Tu, nogood δ is violated. Also, δ contains only one lit-
+ learned nogoods. Via the decision level dl, we count decision eral added to A at decision level 2: F{x}. Hence, F{x}
+ literals, i.e., the literals in A not derived by nogood propa- is a UIP. In this example, the violated nogood δ is immedi-
+ gation. The initial value of dl is 0, it is incremented before ately asserting. A situation like this cannot occur in classi-
+ a decision literal is added to A. For a literal σ ∈ A, we ac- cal CDCL, where the initial violated clause always contains
+ cess via dl(σ) the decision level of σ, that is, the value dl had more than one literal from the current decision level. The dif-
+ when σ was added to A. After encountering a conﬂict, the ference to CDCL is caused by the directedness of unfounded
+ decision level is used to guide backjumping.          set inference in ASP, which is “partial”, in the sense that not
+   The loop of Algorithm 2 is similar to CDCL, so we here all logical consequences are derived. In terms of a loop no-
+ only sketch the principal steps. First, function NOGOOD- good {Fβ1,...,Fβk, Tp}, unfounded set inference can only
+ PROPAGATION  deterministically extends A (and ∇)asde- derive Fp, but not Tβi for a body βi (1 ≤ i ≤ k), at least
+ scribed above. If this yields a conﬂict (line 6), function CON- as long as the loop nogood is not made explicit by record-
+ FLICTANALYSIS (see below) determines a conﬂict nogood δ ing it. For δ = {F{x}, Tu} as above, unfounded set infer-
+ to be recorded, a unique implication point (UIP) σUIP ,anda ence would have derived Fu at decision level 1,ifwehad
+ decision level k to jump back to. Backjumping and nogood selected F{x} as the decision literal. However, it does not
+ recording work as with CDCL, in particular, a conﬂict at deci- derive T{x} from assignment (Tu), which is inferred by
+ sion level 0 indicates the non-existence of an answer set. If A unit propagation once δ is available as an explicit constraint.
+ is a solution (line 13), the atoms of Π that are true in A form (Undirected unfounded set inference is not yet algorithmi-
+ an answer set of Π. Finally, if A is non-conﬂicting and partial, cally solved. Current algorithms only determine unfounded
+ a decision literal σd is selected according to some heuristics atoms, but not bodies that must be true according to an (im-
+ (see Section 5 on further details) and added to A. Note that plicit) loop nogood.)
+
+                                                 IJCAI-07
+                                                    389  Algorithm 3 shows our conﬂict analysis procedure. It clasp also allows for enumerating answer sets. This is accom-
+worksonanassignmentA   containing a violated nogood δ, plished by interleaving backjumping with (systematic) back-
+either from the program Π and so in ΔΠ, or from the recorded tracking: After a solution has been found, its decision literals
+nogoods in ∇. In line 1, we determine via σ the literal from δ can only be backtracked chronologically; backjumping is re-
+added last to A. As mentioned above, σ might already be a stricted for not repeating already enumerated solutions. This
+UIP, that is, the single literal in δ from the current decision strategy avoids the generation of nogoods excluding entire
+level. If σ is a UIP, we do not enter the while-loop in line 2. solutions, as done for instance by smodelscc and mchaff 3.
+Otherwise, δ contains at least one literal other than σ from clasp’s second major operation mode runs (systematic)
+the current decision level. Note that, in this case, σ is not a backtracking without learning. This is similar to the strategy
+decision literal. Hence, there is some nogood ε in ΔΠ or ∇ of standard ASP solvers like smodels, using lookahead. Both
+for which σ has been unit-resulting. Such an ε is determined operation modes are implemented in a uniform framework,
+in line 3, and in line 4 we resolve δ and ε into a new nogood δ. which also allows us to evaluate the efﬁciency of advanced
+In line 5, we determine as new σ the literal from the new δ SAT implementation techniques, such as watched literals, in
+added last to A. In each iteration, σ moves closer to the front a standard ASP solver.
+of A. Hence, we ﬁnally derive a nogood δ that contains ex-
+actly one literal σ from the current decision level; in the worst 6 Experiments
+case, it is the decision literal. In line 7, we determine the deci-
+                                                      We conducted experiments on a variety of problem classes.
+sion level to jump back to as the maximum level of any literal
+                                                      Our comparison considers clasp (RC2) in its two major
+in δ other than σ. Algorithm CONFLICTANALYSIS is very
+                                                      modes: (a) the standard one using backjumping and learn-
+similar to the First-UIP scheme for CDCL. The difference is
+                                                      ing, and (b) the systematic backtracking mode using looka-
+that conﬂict resolution might start from an asserting nogood.
+                                                      head but no learning. We refer to these variants as claspa
+                                                      and claspb. As “traditional” ASP solver, we include smod-
+5Theclasp     System                                  els (2.31). Beyond some variations, smodels’ strategy is sim-
+                                                      ilar to claspb. We also incorporate assat (2.02) and cmod-
+Our new system clasp [2006] implements our approach to
+                                                      els (2.12), both using mchaff (spelt3), and smodelscc (1.08).
+ASP solving. It combines the high-level modeling capac-
+                                                      Among all compared solvers, smodelscc is closest to claspa.
+ities of ASP with state-of-the-art techniques from the area SAT-based solvers assat and cmodels convert a logic program
+of Boolean constraint solving. Unlike existing ASP solvers, into CNF and delegate the search for a supported model to
+clasp is originally designed and optimized for conﬂict- mchaff. For tight programs, this approach amounts to clasp
+driven ASP solving. Rather than applying a SAT solver in mode (a). In the non-tight case, assat and cmodels delay
+to a CNF conversion, clasp directly incorporates suitable checking loop nogoods until an assignment is total, while all
+data structures, particularly ﬁtting backjumping and learning. other solvers integrate it into their propagation.
+This includes dedicated treatment of binary and ternary no- All experiments were run on a 2.2GHz PC on Linux. We
+     [          ]
+goods Ryan, 2004 , and watched literals for unit propaga- report results in seconds, taking the average of 3 runs, each
+                     [                    ]
+tion on “long” nogoods Moskewicz et al., 2001 . Unlike restricted to 900s time and 1GB RAM. A timeout is indi-
+      cc [                   ]
+smodels  Ward and Schlipf, 2004 , which builds a material cated by “—”. All solvers were run with their default settings
+implication graph for keeping track of the multitude of in-
+                                                      except for smodelscc, for which we used option “nolooka-
+ference rules found in ASP solving, clasp uses the more eco- head” as recommended by the developers. The instances used
+nomical approach of SAT solvers: For a derived literal, it only
+                                       Δ  ∪∇          in our experiments as well as extended results (e.g. for dlv
+stores a pointer to the responsible constraint in Π . and nomore++, being excluded here due to lack of space)
+  Unfounded set detection within clasp combines smodels’ are available at [clasp, 2006]. In brief, the instances in Ta-
+source pointer technique [Simons, 2000] with the unfounded ble 1 and 2 are from the areas of bounded model checking
+set computation algorithm described in [Anger et al., 2006]. (1-5;31-35), DES cryptanalysis (6-10), blocksworld planning
+It aims at small and “loop-encompassing”, rather than great- (11-12;42-45), Hamiltonian cycles in clumpy graphs (13-20),
+est unfounded sets, as determined by smodels [Simons et al., Hamiltonian paths for the Gryzzles game (21-25), Sokoban
+2002] and dlv [Leone et al., 2006].Notably,clasp recognizes (26-30;46-55), and machine code superoptimization (36-41).
+violated loop nogoods that are immediately asserting (cf. Sec- The instances numbered 1-10 and 31-41 are tight, all others
+tion 4), so that the same nogood is not recorded twice. are non-tight.
+  The primary operation mode of clasp is conﬂict-driven Table 1 gives results for computing one answer set. On the
+nogood learning. Beyond backjumping and learning, clasp tight instances 1-10, claspa performs comparable to assat and
+features a number of related techniques, typically found in cmodels. Sometimes it is even slightly faster, showing that the
+CDCL-based SAT solvers. clasp incorporates restarts, dele- low-level implementation of clasp is competitive with state-
+tion of recorded conﬂict and loop nogoods, and decision of-the-art SAT solvers, doing most of the work for assat and
+heuristics favoring literals from conﬂict nogoods. All these cmodels. Regarding smodels, we see that its systematic back-
+features are conﬁgurable via command line options. The de- tracking approach does not scale very well; the same applies
+fault restart and nogood deletion policies are adopted from to clasp in mode (b). Instances 11 and 12 are tight on their
+MiniSat [E´en and S¨orensson, 2003]; the standard heuristics supported models, that is, every supported model is also an
+is an adjustment of BerkMin [Goldberg and Novikov, 2002].
+Although Algorithm 2 details the search for one answer set, 3http://www.princeton.edu/∼chaff/
+
+                                                IJCAI-07
+                                                   390

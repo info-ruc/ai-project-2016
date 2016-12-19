@@ -1,0 +1,403 @@
+                         Bayesian Inverse Reinforcement Learning
+
+                 Deepak Ramachandran                                 Eyal Amir
+                  Computer Science Dept.                       Computer Science Dept.
+        University of Illinois at Urbana-Champaign   University of Illinois at Urbana-Champaign
+                     Urbana, IL 61801                             Urbana, IL 61801
+
+
+                    Abstract                          the expert [Atkeson and Schaal, 1997]. However the reward
+                                                      function is generally the most succint, robust and transferable
+    Inverse Reinforcement Learning (IRL) is the prob- representation of the task, and completely determines the op-
+    lem of learning the reward function underlying a  timal policy (or set of policies). In addition, knowledge of
+    Markov Decision Process given the dynamics of     the reward function allows the agent to generalize better i.e. a
+    the system and the behaviour of an expert. IRL    new policy can be computed when the environment changes.
+    is motivated by situations where knowledge of the IRL is thus likely to be the most effective method here.
+    rewards is a goal by itself (as in preference elici- In this paper we model the IRL problem from a Bayesian
+    tation) and by the task of apprenticeship learning perspective. We consider the actions of the expert as evidence
+    (learning policies from an expert). In this paper that we use to update a prior on reward functions. We solve
+    we show how to combine prior knowledge and evi-   reward learning and apprenticeship learning using this poste-
+    dence from the expert’s actions to derive a probabil- rior. We perform inference for these tasks using a modiﬁed
+    ity distribution over the space of reward functions. Markov Chain Monte Carlo (MCMC) algorithm. We show
+    We present efﬁcient algorithms that ﬁnd solutions that the Markov Chain for our distribution with a uniform
+    for the reward learning and apprenticeship learn- prior mixes rapidly, and that the algorithm converges to the
+    ing tasks that generalize well over these distribu- correct answer in polynomial time. We also show that the
+    tions. Experimental results show strong improve-  original IRL is a special case of Bayesian IRL (BIRL) with a
+    ment for our methods over previous heuristic-based Laplacian prior.
+    approaches.                                         There are a number of advantages of our technique over
+                                                      previous work: We do not need a completely speciﬁed op-
+1  Introduction                                       timal policy as input to the IRL agent, nor do we need to
+The Inverse Reinforcement Learning (IRL) problem is de- assume that the expert is infallible. Also, we can incorpo-
+ﬁned in [Russell, 1998] as follows: Determine The reward rate external information about speciﬁc IRL problems into
+function that an agent is optimizing. Given 1) Measurement the prior of the model, or use evidence from multiple experts.
+of the agent’s behaviour over time, in a variety of circum- IRL was ﬁrst studied in the machine learning setting by
+                                                      [                  ]
+stances 2) Measurements of the sensory inputs to that agent; Ng and Russell, 2000 who described algorithms that found
+3) a model of the environment. In the context of Markov De- optimal rewards for MDPs having both ﬁnite and inﬁnite
+cision Processes, this translates into determining the reward states. Experimental results show improved performance by
+function of the agent from knowledge of the policy it executes our techniques in the ﬁnite case.
+and the dynamics of the state-space.                    The rest of this paper is organised as follows: In section
+  There are two tasks that IRL accomplishes. The ﬁrst, re- 2 we deﬁne our terms and notation. Section 3 presents our
+ward learning, is estimating the unknown reward function as Bayesian model of the IRL process. Section 4 discusses how
+accurately as possible. It is useful in situations where the re- to use this model to do reward learning and apprenticeship
+ward function is of interest by itself, for example when con- learning while section 5 discusses the sampling procedure.
+structing models of animal and human learning or modelling Sections 6, 7 and 8 then present experimental results, related
+opponent in competitive games. Pokerbots can improve per- work and our conclusions respectively.
+formance against suboptimal human opponents by learning
+reward functions that account for the utility of money, prefer- 2 Preliminaries
+ences for certain hands or situations and other idiosyncrasies We recall some basic deﬁnitions and theorems relating to
+[Billings et al., 1998]. There are also connections to various Markov Decision Processes and Reinforcement Learning.
+preference elicitation problems in economics [Sargent, 1994]. A (ﬁnite) Markov Decision Problem is a tuple
+  The second task is apprenticeship learning - using obser- (S, A, T, γ, R) where
+vations of an expert’s actions to decide one’s own behaviour. • S is a ﬁnite set of N states.
+It is possible in this situation to directly learn the policy from • A = {a1,...,ak} is a set of k actions.
+
+                                                IJCAI-07
+                                                  2586  • T : S × A × S → [0, 1] is a transition probability func-
+
+    tion.                                                             a2      S1
+  • γ ∈ [0, 1) is the discount factor.
+                                                                                     a1
+  • R : S → R  is a reward function, with absolute value                 0.4   a1
+    bounded by Rmax.                                                     a1  0.3
+  The rewards are functions of state alone because IRL prob-   a2     S     0.3        S
+                                                                       0          a      3
+lems typically have limited information about the value of                         2
+action and we want to avoid overﬁtting.
+                                                                        a            a
+  A Markov Decision Process (MDP) is a tuple (S, A, T, γ),               2            1
+with the terms deﬁned as before but without a reward func-                    S2
+tion. To avoid confusion we will use the abbreviation MDP
+only for Markov Decision Processes and not Problems.  Figure 1: An example IRL problem. Bold lines represent the
+                                           [
+  We adopt the following compact notation from Ng and optimal action a1 for each state and broken lines represent
+           ]                               s1 ...sN
+Russell, 2000 for ﬁnite MDPs : Fix an enumeration     some other action a2. Action a1 in s1 has probabilities 0.4,0.3
+of the ﬁnite state space S. The reward function (or any other              s ,s ,s
+                                                N     and 0.3 of going to states 1 2 3 respectively, and all other
+function on the state-space) can then be represented as an - actions are deterministic.
+dimensional vector R, whose ith element is R(si).
+                            π   S → A
+  A (stationary) policy is a map :      and the (dis- 3.1  Evidence from the Expert
+counted, inﬁnite-horizon) value of a policy π for reward func-
+tion R at state s ∈ S,denoted V π(s, R) is given by:  Now we present the details of our Bayesian IRL model (Fig.
+ π                                    2               2). We derive a posterior distribution for the rewards from
+V  st , R   R  st   Es ,s ,... γR st γ R  st   ...|π
+   ( 1   )=   ( 1 )+  t1 t2 [   ( 2 )+   ( 3 )+    ]  a prior distribution and a probabilistic model of the expert’s
+
+where Pr(sti+1 |sti ,π)=T (sti ,π(sti ),sti+1 ). The goal of actions given the reward function.
+standard Reinforcement Learning is to ﬁnd an optimal policy Consider an MDP M =(S, A, T, γ) and an agent X
+π∗ such that V π(s, R) is maximized for all s ∈ S by π = π∗. (the expert) operating in this MDP. We assume that a reward
+Indeed, it can be shown (see for example [Sutton and Barto, function R for X is chosen from a (known) prior distribu-
+1998]) that at least one such policy always exists for ergodic tion PR. The IRL agent receives a series of observations of
+MDPs. For the solution of Markov Decision Problems, it is the expert’s behaviour OX = {(s1,a1), (s2,a2) ...(sk,ak)}
+useful to deﬁne the following auxilliary Q-function:  which means that X was in state si and took action ai at time
+      π                               π                  i
+     Q  (s, a, R)=R(s)+γEs∼T  (s,a,·)[V (s , R)]     step . For generality, we will not specify the algorithm that
+                                                      X
+                       Q         Q∗ ·, ·, R     Q        uses to determine his (possibly stochastic) policy, but we
+We also deﬁne the optimal -function (    ) as the -   make the following assumptions about his behaviour:
+function of the optimal policy π∗ for reward function R.
+                                                        1. X is attempting to maximize the total accumulated re-
+  Finally, we state the following result concerning Markov                R               X
+Decision Problems (see [Sutton and Barto, 1998]):         ward according to . For example,  is not using an
+                                                          epsilon greedy policy to explore his environment.
+Theorem  1 (Bellman Equations). Let a Markov Decision
+                                                          X
+Problem M  =(S, A, T, γ, R) and a policy π : S → A be  2.   executes a stationary policy, i.e. it is invariant w.r.t.
+given. Then,                                              time and does not change depending on the actions and
+          s ∈ S, a ∈ A, V π  Qπ                           observations made in previous time steps.
+ 1. For all              and   satisfy
+        π                                π          For example, X could be an agent that learned a policy for
+      V  (s)=R(s)+γ          T (s, π(s),s)V (s ) (1)
+                                                      (M,R)  using a reinforcement learning algorithm. Because
+                          s
+                                                     the expert’s policy is stationary, we can make the following
+      π                               π  
+    Q  (s, a)=R(s)+γ         T (s, a, s )V (s )       independence assumption:
+                          s
+                                                        PrX  (OX |R)=PrX     ((s1,a1)|R)PrX ((s2,a2)|R)
+ 2. π is an optimal policy for M iff, for all s ∈ S,
+                                                                         ...PrX ((sk,ak)|R)
+                 π s ∈        Qπ  s, a                  The expert’s goal of maximizing accumulated reward is
+                  ( )  argmax    (   )          (2)                                          ∗
+                         a∈A                          equivalent to ﬁnding the action for which the Q value at each
+                                                      state is maximum. Therefore the larger Q∗(s, a) is, the more
+3BayesianIRL                                          likely it is that X would choose action a at state s. This like-
+IRL is currently viewed as a problem of infering a single re- lihood increases the more conﬁdent we are in X ’s ability to
+ward function that explains an agent’s behaviour. However, select a good action. We model this by an exponential dis-
+                                                                                            ∗
+there is too little information in a typical IRL problem to get tribution for the likelihood of (si,ai), with Q as a potential
+only one answer. For example, consider the MDP shown in function:
+                                                                                        ∗
+Figure 1. There are at least three reasonable kinds of reward                    1  αX Q (si,ai,R)
+                                                                PrX ((si,ai)|R)=   e
+functions: R1(·) has high positive value at s1 (and low values                   Zi
+elsewhere) which explains why the policy tries to return to α               1
+              R  ·     R  ·                  s        where  X  is a parameter representing the degree of con-
+this state, while 2( ) and 3( ) have high values at 2 and ﬁdence we have in X ’s ability to choose actions with high
+s3 respectively. Thus, a probability distribution is needed to
+represent the uncertainty.                               1Note that the probabilities of the evidence should be conditioned
+
+                                                IJCAI-07
+                                                  2587                                                                                     1  − |r|
+                                                                PLaplace(R(s)=r)=      e  2σ , ∀s ∈ S
+                      X                                                              2σ
+                                                        3. If the underlying MDP represented a planning-type
+                                                          problem, we expect most states to have low (or negative)
+                                                          rewards but a few states to have high rewards (corre-
+                αX           R                            sponding to the goal); this can be modeled by a Beta dis-
+                                                          tribution for the reward at each state, which has modes
+                                                          at high and low ends of the reward space:
+                                                            P    R  s    r            1          , ∀s ∈ S
+                                                             Beta( ( )=   )=    r   1      r   1
+        (s ,a )     (s ,a )      (s ,a )                                            2  −       2
+          1 1        2  2         k  k                                       ( Rmax ) (1  Rmax )
+                                                        In section 6.1, we give an example of how more informa-
+              Figure 2: The BIRL model                tive priors can be constructed for particular IRL problems.
+                                                      4   Inference
+value. This distribution satisﬁes our assumptions and is easy
+                                                      We now use the model of section 3 to carry out the two tasks
+to reason with. The likelihood of the entire evidence is :
+                                                      described in the introduction: reward learning and appren-
+                          1  αX E(OX ,R)
+            PrX (OX |R)=    e                         ticeship learning. Our general procedure is to derive minimal
+                          Z                           solutions for appropriate loss functions over the posterior (Eq.
+                P    ∗
+where E(OX , R)=  i Q (si,ai, R) and Z is the appropriate 3). Some proofs are omitted for lack of space.
+normalizing constant. We can think of this likelihood func- 4.1 Reward Learning
+tion as a Boltzmann-type distribution with energy E(OX , R)
+               1                                      Reward learning is an estimation task. The most common loss
+and temperature αX .
+  Now, we compute the posterior probability of reward func- functions for estimation problems are the linear and squared
+tion R by applying Bayes theorem,                     error loss functions:
+                                                                           ˆ              ˆ
+                                                                 Llinear(R, R)=     R − R 1
+                        Pr   O  |R P   R                           L    R, Rˆ       R − Rˆ 
+       Pr   R|O            X ( X   ) R(  )                           SE(    )=              2
+          X (   X )=         Pr  O
+                                ( X )                 where R and Rˆ are the actual and estimated rewards, respec-
+                         1  α E(O ,R)                         R
+                           e X   X   P   R            tively. If is drawn from the posterior distribution (3), it can
+                    =                R(  )     (3)                                         ˆ
+                        Z                             be shown that the expected value of LSE(R, R) is minimized
+  Computing the normalizing constant Z is hard. However by setting Rˆ to the mean of the posterior (see [Berger, 1993]).
+the sampling algorithms we will use for inference only need Similarily, the expected linear loss is minimized by setting Rˆ
+the ratios of the densities at two points, so this is not a prob- to the median of the distribution. We discuss how to compute
+lem.                                                  these statistics for our posterior in section 5.
+                                                        It is also common in Bayesian estimation problems to use
+3.2  Priors                                           the maximum a posteriori (MAP) value as the estimator. In
+When no other information is given, we may assume that the fact we have the following result:
+rewards are independently identically distributed (i.i.d.) by Theorem 2. When the expert’s policy is optimal and fully
+the principle of maximum entropy. Most of the prior func- speciﬁed, the IRL algorithm of [Ng and Russell, 2000] is
+tions considered in this paper will be of this form. The exact equivalent to returning the MAP estimator for the model of
+prior to use however, depends on the characteristics of the (3) with a Laplacian prior.
+problem:
+                                                        However in IRL problems where the posterior distribution
+ 1. If we are completely agnostic about the prior, we can is typically multimodal, a MAP estimator will not be as rep-
+    use the uniform distribution over the space −Rmax ≤ resentative as measures of central tendency like the mean.
+    R(s) ≤ Rmax for each s ∈ S. If we do not want to spec-
+    ify any Rmax we can try the improper prior P (R)=1 4.2 Apprenticeship Learning
+               n
+    for all R ∈ R .                                   For the apprenticeship learning task, the situation is more in-
+ 2. Many real world Markov decision problems have parsi- teresting. Since we are attempting to learn a policy π, we can
+    monious reward structures, with most states having neg- formally deﬁne the following class of policy loss functions:
+    ligible rewards. In such situations, it would be better to
+                                                               Lp     R,π     V ∗ R − V π R  
+    assume a Gaussian or Laplacian prior:                       policy(   )=     (  )     (  ) p
+                                                              ∗
+                                      2                     V   R
+                               1   − r                where    ( ) is the vector of optimal values for each state
+       PGaussian(R(s)=r)=√         e 2σ2 , ∀s ∈ S                                   R      p
+                                πσ                    acheived by the optimal policy for and is some norm.
+                               2                      We wish to ﬁnd the π that minimizes the expected policy loss
+on αX as well (Fig 2). But it will be simpler to treat αX as just a over the posterior distribution for R. The following theorem
+parameter of the distribution.                        accomplishes this:
+
+                                                IJCAI-07
+                                                  2588Theorem  3.  Given a  distribution P (R) over reward   Algorithm PolicyWalk(Distribution P ,MDPM, Step Size δ )
+functions R for an MDP  (S, A, T, γ), the loss function  1. Pick a random reward vector R ∈ R|S|/δ.
+ p                               ∗                         π := PolicyIteration(M,R)
+Lpolicy(R,π) is minimized for all p by πM , the optimal policy 2.
+                                                         3. Repeat
+for the Markov Decision Problem M =(S, A, T, γ, EP [R]).
+                                                            (a) Pick a reward vector R˜ uniformly at random from the
+Proof. From the Bellman equations (1) we can derive the fol-   neighbours of R in R|S|/δ.
+lowing:                                                               Qπ(s, a, R˜)   (s, a) ∈ S, A
+                π             π −1                          (b) Compute         for all        .
+              V  (R)=(I  −  γT  )  R            (4)         (c) If ∃(s, a) ∈ (S, A), Qπ(s, π(s), R˜) <Qπ(s, a, R˜)
+where T π is the |S|×|S| transition matrix for policy π. Thus, i. π˜ := PolicyIteration(M,R˜,π)
+for a state s ∈ S and ﬁxed π, the value function is a linear   ii. Set R := R˜ and π  :=π ˜ with probability
+                                                                 min{1, P (R˜,π˜) }
+function of the rewards:                                               P (R,π)
+                π                                              Else
+               V (s, R)=w(s, π)  · R                                                            ˜
+                                                                    R := R˜            min{1, P (R,π) }
+                                                               i. Set      with probability   P (R,π)
+where w(s, π) is the s’th row of the coefﬁcient matrix (I −
+   π                                                     4. Return R
+γT  )−1 in (4). Suppose we wish to maximize E[V π(s, R)]
+alone. Then,                                                  Figure 3: PolicyWalk Sampling Algorithm
+        π
+max E[V  (s, R)] = max E[w(s, π)·R]=maxw(s, π)·E[R]
+ π                 π                 π
+                                                      steps of policy iteration (see [Sutton and Barto, 1998])start-
+                           V ∗ s
+  By deﬁnition this is equal to M ( ), the optimum value ing from the old policy π. Hence, PolicyWalk is a correct
+          M                          π  π∗
+function for , and the maximizing policy is M , the op- and efﬁcient sampling procedure. Note that the asymptotic
+             M                  s ∈ S E V π s, R
+timal policy for . Thus for all states , [ (   )] is  memory complexity is the same as for GridWalk.
+           π   π∗
+maximum at   =  M .                                     The second concern for the MCMC algorithm is the speed
+     V ∗ s, R ≥ V π s, R      s ∈ S
+  But   (   )      (   ) for all   , reward functions of convergence of the Markov chain to the equilibrium dis-
+R            π
+  , and policies . Therefore                          tribution. The ideal Markov chain is rapidly mixing (i.e. the
+          p                ∗        π
+      E[Lpolicy(π)] = E( V (R) − V  (R) p)          number of steps taken to reach equilibrium is polynomially
+                          ∗                           bounded), but theoretical proofs of rapid mixing are rare. We
+is minimized for all p by π = πM .                    will show that in the special case of the uniform prior, the
+  So, instead of trying a difﬁcult direct minimization of the Markov chain for our posterior (3) is rapidly mixing using
+                                                      the following result from [Applegate and Kannan, 1993] that
+expected policy loss, we can ﬁnd the optimal policy for the
+                                                      bounds the mixing time of Markov chains for pseudo-log-
+mean reward function, which gives the same answer.
+                                                      concave functions.
+                                                      Lemma 1.  Let F (·) be a positive real valued function deﬁned
+5  Sampling and Rapid Convergence                                      n
+                                                      on the cube {x ∈ R |−d  ≤ xi ≤ d} for some positive d,
+We have seen that both reward learning and apprenticeship satisfying for all λ ∈ [0, 1] and some α, β
+learning require computing the mean of the posterior distribu-
+tion. However the posterior is complex and analytical deriva-     |f(x) − f(y)|≤α   x − y ∞
+tion of the mean is hard, even for the simplest case of the uni-
+form prior. Instead, we generate samples from these distribu- and
+tions and then return the sample mean as our estimate of the f(λx +(1− λ)y) ≥ λf(x)+(1−   λ)f(y) − β
+true mean of the distribution. The sampling technique we use
+is an MCMC algorithm GridWalk  (see [Vempala, 2005])  where f(x)=logF  (x). Then the Markov chain induced by
+that generates a Markov chain on the intersection points of a GridWalk (and hence PolicyWalk)onF rapidly mixes
+                          |S|         |S|                        F    O n2d2α2e2β    1
+grid of length δ in the region R (denoted R /δ).      to within of  in (          log  ) steps.
+  However, computing the posterior distribution at a partic-
+                                                      Proof. See [Applegate and Kannan, 1993].
+ular point R requires calculation of the optimal Q-function
+for R, an expensive operation. Therefore, we use a modi- Theorem 4. Given an MDP M =(S, A, T, γ) with |S| =
+ﬁed version of GridWalk called PolicyWalk (Figure 3)  N, and a distribution over rewards P (R)=PrX (R|OX )
+                                                                                                     n
+that is more efﬁcient: While moving along a Markov chain, deﬁned by (3) with uniform prior PR over C = {R ∈ R |−
+the sampler also keeps track of the optimal policy π for the Rmax ≤ Ri ≤ Rmax}.IfRmax = O(1/N ) then P can be
+current reward vector R. Observe that when π is known, efﬁciently sampled (within error  )inO(N 2 log 1/ ) steps by
+the Q function can be reduced to a linear function of the algorithm PolicyWalk.
+reward variables, similar to equation 4. Thus step 3b can
+                                                                                                      R
+be performed efﬁciently. A change in the optimal policy Proof. Since the uniform prior is the same for all points ,
+can easily be detected when moving to the next reward vec- we can ignore it for sampling purposes along with the normal-
+                                                                               f R     α  E  O  , R
+tor in the chain R˜, because then for some (s, a) ∈ (S, A), izing constant. Therefore, let ( )= X ( X ).Now
+ π        ˜       π     ˜                             choose some arbitrary policy π and let
+Q  (s, π(s), R) <Q(s, a, R) by Theorem 1. When this                           
+                                                                                   π
+happens, the new optimal policy is usually only slightly dif-      fπ(R)=αX      Q  (s, ai, R)
+ferent from the old one and can be computed by just a few                      i
+
+                                                IJCAI-07
+                                                  2589                       Reward Loss                                            Policy Loss
+          80                                                     30
+                  QL/BIRL                                               QL/BIRL
+          70  k-greedy/BIRL                                          k-greedy/BIRL
+                  QL/IRL                                         25      QL/IRL
+          60   k-greedy/IRL                                           k-greedy/IRL
+                                                                 20
+          50
+
+
+        L  40                                                 L  15
+          30
+                                                                 10
+          20
+                                                                  5
+          10
+           0                                                      0
+            10             100           1000                     10             100            1000
+                          N                                                      N
+
+                Figure 4: Reward Loss.                                 Figure 5: Policy Loss.
+
+
+                                                                              Posterior Samples
+Note that fπ is a linear function of R and f(R) ≥ fπ(R),       1
+     R  ∈ C
+for all    .Alsowehave,                                       ) 0.5
+                                                              2
+                                                              s
+                                            R                 (
+     Q∗  s, a      Qπ  s, a       V π  s ≤   max              R 0
+ maxs,a (   )=maxs,a,π (  )=maxs,π max( )
+                                            1 − γ             −0.5
+
+                ∗          Rmax                                −1
+               Q  s, a ≥−                  f R   ≤             −1 −0.8 −0.6 −0.4 −0.2 0 0.2 0.4 0.6 0.8 1
+Similarly, mins,a (  )      1−γ . Therefore, ( )                                R(s1)
+α NR                   α NR
+ X   max    f  R   ≥−   X   max                                               True Rewards
+   1−γ   and π(  )       1−γ   and hence                       1
+
+
+                                                              ) 0.5
+                            αX NRmax                          2
+                           2                                  s
+            fπ(R) ≥ f(R) −                                    (
+                              1 − γ                           R 0
+
+                                                              −0.5
+So for all R1, R2 ∈ C and λ ∈ [0, 1],
+                                                               −1
+                                                               −1 −0.8 −0.6 −0.4 −0.2 0 0.2 0.4 0.6 0.8 1
+                                                                                R(s1)
+ f(λR1  +(1−  λ)R2)   ≥   fπ(λR1 +(1−  λ)R2)
+                      ≥   λfπ(R1)+(1−   λ)fπ(R2)
+                      ≥   λf(R1)+(1−   λ)f(R2)        Figure 6: Scatter diagrams of sampled rewards of two arbi-
+                                                      trary states for a given MDP and expert trajectory. Our com-
+                            2αX NRmax
+                          −                           puted posterior is shown to be close to the true distribution.
+                               1 − γ
+  Therefore, f satisﬁes the conditions of Lemma 1 with β =
+                   1                                  a policy by Q-learning on the MDP + reward function. The
+2αX NRmax        O( N )
+   1−γ    =2N  · 1−γ  = O(1) and                      learning rate was controlled so that the agent was not allowed
+                                                      to converge to the optimal policy but came reasonably close.
+        |f R   − f R   |    α  NR
+    α     (  1)   (  2) ≤  2 X    max    O N          The second agent executed a policy that maximized the ex-
+      =   R  − R                  1  =   ( )                                    k      k
+             1    2 ∞     (1 − γ)O( N )               pected total reward over the next steps ( was chosen to be
+                                                      slightly below the horizon time).
+Hence the Markov chain induced by the GridWalk al-      For BIRL, we used PolicyWalk  to sample the posterior
+gorithm (and the PolicyWalk algorithm) on P  mixes    distribution (3) with a uniform prior. We compared the results
+                    P
+rapidly to within of   in a number of steps equal to  of the two methods by their average 
+2 distance from the true
+O N 2 1 N 2eO(1)    /    O N 2     / 
+ (   N 2       log 1 )=    (   log 1 ).               reward function (Figure 4) and the policy loss with 
+1 norm
+                                                      (Figure 5) of the learned policy under the true reward. Both
+  Note that having Rmax = O(1/N ) is not really a restric-
+                                                      measures show substantial improvement. Note that we have
+tion because we can rescale the rewards by a constant factor k
+                                                      used a logarithmic scale on the x-axis.
+after computing the mean without changing the optimal pol-
+                                                        We also measured the accuracy of our posterior distribu-
+icy and all the value functions and Q functions get scaled by
+                                                      tion for small N by comparing it with the true distribution
+k as well.
+                                                      of rewards i.e. the set of generated rewards that gave rise to
+                                                      the same trajectory by the expert. In Figure 6, we show scat-
+6  Experiments                                        ter plots of some rewards sampled from the posterior and the
+We compared the performance of our BIRL approach to the true distribution for a 16-state MDP. These ﬁgures show that
+IRL algorithm of [Ng and Russell, 2000] experimentally. the posterior is very close to the true distribution.
+First, we generated random MDPs with N states (with N
+varying from 10 to 1000) and rewards drawn from i.i.d. Gaus- 6.1 From Domain Knowledge to Prior
+sian priors. Then, we simulated two kinds of agents on these To show how domain knowledge about a problem can be in-
+MDPs and used their trajectories as input: The ﬁrst learned corporated into the IRL formulation as an informative prior,
+
+                                                IJCAI-07
+                                                  2590

@@ -1,0 +1,387 @@
+                       A Hybridized Planner for Stochastic Domains
+
+              Mausam                      Piergiorgio Bertoli                 Daniel S. Weld
+  Dept. of Computer Sc. and Engg.              ITC-IRST              Dept. of Computer Sc. and Engg.
+      University of Washington             via Sommarive 18              University of Washington
+         Seattle, WA-98195              38050 Povo, Trento, Italy            Seattle, WA-98195
+ mausam@cs.washington.edu                 bertoli@itc.it              weld@cs.washington.edu
+
+                    Abstract                          aimed at different objectives. For example, algorithm portfo-
+                                                      lios run multiple algorithms in parallel and thus reduce the
+    Markov Decision Processes are a powerful frame-   total time to obtain a solution; bound and bound uses a solu-
+    work for planning under uncertainty, but current al- tion from one algorithm as a bound for the other algorithm. In
+    gorithms have difﬁculties scaling to large problems. this paper we employ a tighter notion of hybridization, where
+    We present a novel probabilistic planner based on we explicitly incorporate solutions to sub-problems from one
+    the notion of hybridizing two algorithms. In partic- algorithm into the partial solution of the other.
+    ular, we hybridize GPT, an exact MDP solver, with
+                                                        We present a novel algorithm, HYBPLAN, which hy-
+    MBP, a planner that plans using a qualitative (non-
+                                                      bridizes two planners: GPT and MBP. GPT (General Plan-
+    deterministic) model of uncertainty. Whereas ex-  ning Tool) [Bonet and Geffner, 2005] is an exact MDP
+    act MDP solvers produce optimal solutions, quali- solver using labeled real time dynamic programming (RTDP).
+    tative planners sacriﬁce optimality to achieve speed
+                                                      MBP  (Model Based Planner) [Bertoli et al., 2001], is a non-
+    and high scalability. Our hybridized planner, HYB- deterministic planner exploiting binary decision diagrams
+    PLAN, is able to obtain the best of both techniques (BDDs). Our hybridized planner enjoys beneﬁts of both al-
+    —  speed, quality and scalability. Moreover, HYB- gorithms, i.e., scalability and quality. To the best of our
+    PLAN  has excellent anytime properties and makes  knowledge, this is the ﬁrst attempt to bridge the efﬁciency-
+    effective use of available time and memory.       expressiveness gap between the planners dealing with quali-
+                                                      tative vs. probabilistic representations of uncertainty.
+1  Introduction                                         HYBPLAN   has excellent anytime properties — it produces
+                                                      a legal solution very fast and then successively improves on
+Many real-world domains involve uncertain actions whose          1
+execution may stochastically lead to different outcomes. this solution . Moreover, HYBPLAN can effectively han-
+Such problems are frequently modeled as an indeﬁnite hori- dle interleaved planning and execution in an online setting,
+zon Markov Decision Process (MDP) also known as stochas- makes use of the available time and memory efﬁciently, is
+tic shortest path problem [Bertsekas, 1995]. While MDPs are able to converge within a desired optimality bound, and re-
+a very general framework, popular optimal algorithms (e.g., duces to optimal planning given an indeﬁnite time and mem-
+LAO* [Hansen and Zilberstein, 2001], Labeled RTDP [Bonet ory. Our experiments demonstrate that HYBPLAN is competi-
+and Geffner, 2003]) do not scale to large problems.   tive with the state-of-the-art planners, solving problems in the
+  Many researchers have argued for planning with a quali- International Planning Competition that most other planners
+tative, non-deterministic model of uncertainty (in contrast to could not solve.
+numeric probabilities). Such contingent planners (e.g., MBP
+[Bertoli et al., 2001]) cannot make use of quantitative likeli- 2 Background
+hood (and cost) information. Because they solve a much sim- Following [Bonet and Geffner, 2003], we deﬁne an in-
+pler problem, these planners are able to scale to much larger deﬁnite horizon Markov decision process as a tuple
+problems than probabilistic planners. By stripping an MDP S, A, Pr, C, G,s0:
+of probabilities and costs, one could use a qualitative contin- •Sis a ﬁnite set of discrete states. We use factored MDPs,
+gent planner to quickly generate a policy, but the quality of i.e., S is compactly represented in terms of a set of state
+the resulting solution will likely be poor. Thus it is natural to variables.
+ask “can we develop an algorithm with the beneﬁts of both •A
+frameworks?”.                                                is a ﬁnite set of actions. An applicability function,
+                                                          Ap  : S→P(A), denotes the set of actions that can be
+  Using two (or more) algorithms to obtain the beneﬁts of                      P
+both is a generic idea that forms the basis of many proposed applied in a given state ( represents the power set).
+algorithms, e.g., bound and bound [Martello and Toth, 1990] 1While RTDP is popular as an anytime algorithm itself, for prob-
+and algorithm portfolios [Gomes and Selman, 2001]. Vari- lems with absorbing goals it may not return any legal policy for as
+ous schemes hybridize multiple algorithms differently and are much as 10 min. or more.
+
+                                                IJCAI-07
+                                                  1972  •Pr   : S×A×S      →[0, 1] is the transition function. RTDP, conceptually, is a lazy version of value iteration in
+    Pr(s|s, a) denotes the probability of arriving at state s which the states get updated in proportion to the frequency
+    after executing action a in state s.              with which they are visited by the repeated executions of the
+  •C:  A→+    is the cost model.                     greedy policy. Speciﬁcally, RTDP simulates the greedy pol-
+                                                      icy along a single trace execution, and updates the values of
+  •G⊆S
+          is a set of absorbing goal states, i.e., the process the states it visits using Bellman backups. An RTDP trial is
+    ends once one of these states is reached.         a path starting from s0 and ending when a goal is reached
+  • s0 is a start state.                              or the number of updates exceeds a threshold. RTDP repeats
+                                                      these trials until convergence. Note that common states are
+  We assume full observability, and we seek to ﬁnd an opti-
+                                                      updated frequently, while RTDP wastes no time on states that
+mal stationary policy, i.e., a function π: S→A, which mini-
+                                                      are unreachable, given the current policy. The complete con-
+mizes the expected cost (over an indeﬁnite horizon) incurred
+                                                      vergence (at every state) is slow because less likely (but po-
+to reach a goal state. A policy π and its execution starting
+                                                      tentially important) states get updated infrequently. Further-
+from the start state induces an execution structure Exec[π]: a
+                                                      more, RTDP is not guaranteed to terminate.
+directed graph whose nodes are states from S and transitions
+                                                        Labeled RTDP ﬁxes these problems with a clever labeling
+are labeled with the actions performed due to π. We denote
+                                                      scheme that focuses attention on states where the value func-
+this graph to be free of absorbing cycles if for every non-goal
+                                                      tion has not yet converged [Bonet and Geffner, 2003]. Specif-
+node there always exists a path to reach a goal (i.e., the prob-
+                                                      ically, states are gradually labeled solved signifying that the
+ability to reach a goal is always greater than zero). A policy
+                                                      value function has converged for them. The algorithm back-
+free of absorbing cycles is also known as a proper policy.
+                                                      propagates this information starting from the goal states and
+  Note that any cost function, J: S→, mapping states to
+                                                      the algorithm terminates when the start state gets labeled.
+the expected cost of reaching a goal state deﬁnes a greedy
+                                                      Labeled RTDP is guaranteed to terminate. It is guaranteed
+policy as follows:
+                                                    to converge to the optimal value function (for states reach-
+                                                     able using the optimal policy), if the initial value function is
+                                        
+  πJ (s) = argmin C(a)+     Pr(s |s, a)J(s )    (1)   admissible. This algorithm is implemented in GPT (General
+          a∈Ap(s)        s∈S                         Purpose Tool) [Bonet and Geffner, 2005].
+                                                 ∗      (Labeled) RTDP is popular for quickly producing a rela-
+  The optimal policy derives from a value function, J ,
+                                                      tively good policy for discounted reward-maximization prob-
+which satisﬁes the following pair of Bellman equations.
+                                                      lems, since the range of inﬁnite horizon total rewards is ﬁnite.
+                                                      However, problems in the planning competition are undis-
+    J ∗ s   ,   s ∈G                                  counted cost minimization problems with absorbing goals.
+      ( )=0   if    else                    
+                                                     Intermediate RTDP policies on these problems often contain
+     ∗                                  ∗  
+    J (s)=   min    C(a)+     Pr(s |s, a)J (s ) (2)   absorbing cycles. This implies that the expected cost to reach
+           a∈Ap(s)
+                          s∈S                        the goal is inﬁnite! Clearly, RTDP is not an anytime algo-
+                                                      rithm for our problems because ensuring that all trajectories
+2.1  Labeled RTDP                                     reach a goal takes a long time.
+Value iteration is a canonical algorithm to solve an MDP. In
+this dynamic programming approach the optimal value func- 2.2 The Model-Based Planner
+tion (the solution to equations 2) is calculated as the limit of a An MDP without cost and probability information trans-
+series of approximations, each considering increasingly long lates into a planning problem with qualitative uncertainty.
+action sequences. If Jn(s) is the value of state s in iteration A strong-cyclic solution to this problem — one that admits
+n, then the value of state s in the next iteration is calculated loops but is free of absorbing cycles — can be used as a le-
+with a process called a Bellman backup as follows:    gal solution to the original MDP, though it may be highly
+                                                      sub-optimal. However, because we are solving a much easier
+                                             
+                                                     problem, the algorithms for solving this relaxed problem are
+                                                    highly scalable. One such algorithm is implemented within
+   Jn+1(s)=   min    C(a)+     Pr(s |s, a)Jn(s )
+            a∈Ap(s)                                   MBP
+                           s∈S                           .
+                                                        The Model-Based Planner, MBP [Bertoli et al., 2001], re-
+  Value iteration terminates when ∀s ∈S,  |Jn(s) −    lies on effective BDD-based representation techniques to im-
+Jn−1(s)|≤, and this termination is guaranteed for >0. plement a set of sound and complete plan search and veri-
+Furthermore, the sequence of {Ji} is guaranteed to converge ﬁcation algorithms. All the algorithms within MBP are de-
+to the optimal value function, J ∗, regardless of the initial val- signed to deal with qualitatively non-deterministic planning
+ues. Unfortunately, value iteration tends to be quite slow, domains, deﬁned as Moore machines using MBP’s input lan-
+since it explicitly updates every state, and |S| is exponential guage SMV. The planner is very general and is capable of ac-
+in the number of domain features. One optimization restricts commodating domains with various state observability (e.g.,
+search to the part of state space reachable from the initial fully observable, conformant) and different kinds of planning
+state s0. Two algorithms exploiting this reachability analy- goals (e.g., reachability goals, temporal goals).
+sis are LAO* [Hansen and Zilberstein, 2001] and our focus: MBP has two variants of strong-cyclic algorithm denoted
+RTDP [Barto et al., 1995].                            by “global” and “local”. Both share the representation of the
+
+                                                IJCAI-07
+                                                  1973policy π as a binary decision diagram, and the fact that it is Algorithm 1 HYBPLAN(hybtime, threshold)
+constructed by backward chaining from the goal. The general 1: deadends ←∅
+idea is to iteratively regress from a set of solution states (the 2: repeat
+current policy π), ﬁrst admitting any kind of loop introduced 3: run GPT for hybtime
+by the backward step, and then removing those “bad” loops 4: open ←∅; closed ←∅
+for which no chance of goal achievement exists. On top of 5: open.insert(s0)
+this, the “local” variant of the algorithm prioritizes solutions 6: while open is non-empty do
+                                                       7:    remove s from open
+with no loops, in order to retrieve strong solutions whenever          s
+possible. The search ends either when π covers the initial 8: closed.insert( )
+                                                       9:    if s is labeled solved inside GPT then
+state, or when a ﬁxed point is reached. Further details can be
+                                                      10:       πHYB(s) ← πGPT(s)
+found in [Cimatti et al., 2003].                      11:     else
+                                                      12:       if visit(s)>threshold then
+                                                                  π  (s) ← π  (s)
+3HYBPLAN: A Hybridized Planner                        13:          HYB      GPT
+                                                      14:       else
+Our novel planner, HYBPLAN, hybridizes GPT and MBP.On
+                                                      15:         ASSIGNMBPSOLUTION(s)
+the one hand, GPT produces cost-optimal solutions to the                                
+                                                      16:     for all s s.t. Pr(s |s, πHYB(s)) > 0, s ∈/ closed do
+original MDP; on the other, MBP ignores probability and 17:     if s ∈ deadends then
+cost information, but produces a solution extremely quickly. 18:  ASSIGNMBPSOLUTION(s)
+HYBPLAN   combines the two to produce high-quality solu- 19:    else
+tions in intermediate running times.                  20:         open.insert(s)
+  At a high level, HYBPLAN invokes GPT with a maximum 21:   remove absorbing cycles from Exec[πHYB]
+                                                                  π              J  (s )
+amount of time, say hybtime. GPT preempts itself after run- 22: evaluate HYB by computing HYB 0
+                                                             π
+ning for this much time and passes the control back to HYB- 23: if HYB is the best policy found so far, cache it
+PLAN. At this point GPT has performed several RTDP tri- 24: until all resources exhaust or desired error bound is achieved
+als and might have labeled some states solved. However, the
+whole cost function Jn has not converged and the start state Function 2 ASSIGNMBPSOLUTION(s)
+                                                  2
+is not yet solved. Despite this, the current greedy partial if MBP(s) succeeds then
+
+policy (as given by Equation 1) contains much useful infor- πHYB(s) ← πMBP(s)
+                                          π                                          
+mation. HYBPLAN  combines this partial policy ( GPT) with for all s s.t. Pr(s |s, πHYB(s)) > 0, s ∈/ closed do
+                                                                      
+the policy from MBP (πMBP) to construct a hybridized policy open.insert(s )
+(πHYB) that is deﬁned for all states reachable following πHYB, else
+and is guaranteed to lead to the goal. We may then evaluate if s = s0 then
+                                                            problem is unsolvable; exit()
+πHYB by computing JHYB(s0) denoting the expected cost to
+                                                          else
+reach a goal following this policy. In case we are dissatisﬁed          s
+with π  , we may run some more RTDP trials and repeat       closed.remove( )
+     HYB                                                    deadends.insert(s)
+the process. We describe the pseudo-code for the planner in               
+                                                            for all s s.t. πHYB(s ) leads directly to s do
+                                                                                  
+Algorithm 1.                                                  ASSIGNMBPSOLUTION(s  )
+  The construction of the hybridized policy starts from the
+start state and uses the popular combination of open and
+closed lists denoting states for which an action needs to be may return with a failure implying that no solution exists from
+assigned and have been assigned, respectively. Additionally the current state. Clearly, the choice of the action (in the pre-
+we maintain a deadends list that memoizes all states starting vious step) is faulty because that step led to this dead-end.
+from which we cannot reach a goal (dead-end).         The procedure ASSIGNMBPSOLUTION   recursively looks at
+                                                      the policy assignments at previous levels and debugs π by
+Deciding between GPT and MBP (lines 9 to 15): For every                                            HYB
+                                                      assigning solutions from π . Additionally we memoize the
+state s,HYBPLAN decides whether to assign the action using                  MBP
+                                                      dead-end states to reduce future computation.
+πGPT or πMBP.Ifs is already labeled solved then we are cer-
+tain that GPT has computed the optimal policy starting from Cleaning, Evaluating and Caching π (lines 21-23): We
+s                                                                                     HYB
+ (lines 8-9). Otherwise, we need to assess our conﬁdence in can formulate the evaluation of π as the following system
+π   s                                                                             HYB
+ GPT( ). We estimate our conﬁdence on GPT’s greedy policy of linear equations:
+by keeping a count on the number of times s has been updated
+inside labeled RTDP. Intuitively, smaller number of visits to
+      s                                                    J  (s)=0,   if s ∈Gelse
+a state corresponds to our low conﬁdence on the quality of  HYB               
+π  (s) and we may prefer to use π (s) instead. A user-                                            
+ GPT                          MBP                          J  (s)=C(π(s)) +      Pr(s |s, π(s))J (s ) (3)
+deﬁned threshold decides on how quickly we start trusting   HYB                               HYB
+                                                                             s∈S
+GPT.
+                                                        These equations are tricky to solve, because it is still possi-
+MBP returning with failure (Function 2): Sometimes MBP
+                                                      ble that there is an absorbing cycle in Exec[πHYB]. If the rank
+  2It is partial because some states reachable by the greedy policy of the coefﬁcient matrix is less than the number of equations
+might not even be explored yet.                       then there is an absorbing cycle. We can convert the matrix
+
+                                                IJCAI-07
+                                                  1974into row-echelon form by using row transformations and in 3.2 Implementation of HYBPLAN
+parallel perform the same transformations on the identity ma- We now address two different efﬁciency issues in implement-
+trix. When we ﬁnd a row with all zeros the non-zero entries ing HYBPLAN. First, instead of pre-computing an MBP pol-
+of the same row in the transformed identity matrix reveals the icy for the whole state space, we do this computation on de-
+states in the original system that form absorbing cycle(s). We mand. We modify MBP so that it can efﬁciently solve the
+pick one of these states, assign the MBP action for it and re- sub-problems without repeating any computation. We mod-
+peat this computation. Note that this system of equations is ify MBP’s “local” strong cyclic planning algorithm in the fol-
+on a very small fraction of the overall state space (which are lowing ways — 1) we cache the policy table (π ) produced
+       π                                                                                     MBP
+in Exec[ HYB]), hence this step is not expensive. As we ﬁnd by previous planning episodes, 2) at each planning episode,
+intermediate hybridized policies, we cache the best (i.e., the we analyze the cached result π , and if the input state is
+                J    s                                                           MBP
+one with minimum HYB( 0)) policy found so far (line 23). solved already, search is skipped, 3) we perform search by
+                                                      taking π  as a starting point (rather than the goal).
+Termination (line 24): We may terminate differently in dif-  MBP
+                                                        Second, in our implementation we do not evaluate π
+ferent situations: given a ﬁxed amount of time, we may stop                                           HYB
+                                                      by solving the system of linear equations. Instead, we ap-
+GPT when the available time is about to expire and follow it
+                                                      proximate this by averaging repeated simulations of the pol-
+with a hybridized policy computation and terminate. Given
+                                                      icy from the start state. If any simulation exceeds a maxi-
+a ﬁxed amount of memory, we may do the same with mem-
+                                                      mum trajectory length we guess that the hybrid policy has
+ory. If we need to terminate within a desired fraction of the
+                                                      an absorbing cycle and we try to break the cycle by recur-
+optimal, we may repeat hybridized policy computation at reg-
+                                                      sively assigning the action from π for a state in the cycle.
+ular intervals and when we ﬁnd a policy whose error bound is                      MBP
+                                                      This modiﬁcation speeds up the overall algorithm. Although
+within the desired limits, we terminate.
+                                                      in theory this takes away the guarantee of reaching the goal
+Error Bound: We develop a simple procedure to bound the with probability 1 since there could be some low probabil-
+                                                      ity trajectory not explored by the simulation that may contain
+error in πHYB. Since labeled RTDP is always started with an
+admissible heuristic, GPT’s current cost function Jn remains an absorbing cycle, in practice this modiﬁcation is sufﬁcient
+                                 ∗
+a lower bound of the optimal (Jn ≤ J ). However the hy- as even the planning competition relies on policy simulation
+bridized policy is clearly worse than the optimal and hence for evaluating planners. In our experiments, our hybridized
+        ∗      J  (s0)−Jn(s0)
+J   ≥ J         HYB                         π         policies reach the goal with probability 1.
+ HYB     . Thus,   J (s )   bounds the error of HYB.
+                    n 0                                 We ﬁnally remark that while GPT takes as input a planning
+Properties of HYBPLAN:    HYBPLAN   uses the current  problem in probabilistic PDDL format, MBP’s input is a do-
+greedy policy from GPT, combines it with solutions from MBP main in SMV format. Our translation from PDDL to SMV is
+for states that are not fully explored in GPT and ensures that systematic but only semi-automated; we are implementing a
+the ﬁnal hybridized policy is proper, i.e., free of absorbing cy- fully automated procedure.
+cles. Thus HYBPLAN has excellent anytime properties, i.e.,
+                                                      4   Experiments
+once πMBP(s0) has returned with success, HYBPLAN is capa-
+ble of improving the quality of the solution as the time avail- We evaluate HYBPLAN on the speed of planning, quality of
+able for the algorithm increases. If inﬁnite time and resources solutions returned, anytime behavior, and scalability to large
+are available for the algorithm, then the algorithm reduces to problems. We also perform a sensitivity experiment testing
+GPT, whereas if the available resources are extremely limited, the algorithm towards sensitivity to the parameters.
+then it reduces to MBP. In all other cases, the hybridized plan-
+ner demonstrates intermediate behavior.               Methodology
+                                                      We compare HYBPLAN   with GPT and MBP. In the graphs
+3.1  Two Views of the Hybridized Planner              we plot the expected cost of the cached policy for both HYB-
+                                                      PLAN  and GPT as a function of time. The ﬁrst value in the
+Our hybridized planner may be understood in two ways. The HYBPLAN curve is that of MBP (since initially for each state
+
+ﬁrst view is MBP-centric. If we run HYBPLAN without any s, visit(s) = 0, and thus πHYB = πMBP). We also plot the
+                       π
+GPT computation then only MBP will be outputted. This so- current Jn(s0) value from labeled RTDP. As this admissible
+lution will be a legal but possibly low quality. HYBPLAN value increases, the error bound of the solution reduces.
+successively improves the quality of this basic solution from We run the experiments on three large probabilistic PDDL
+MBP by plugging in additional information from GPT.   domains. The ﬁrst two domains are probabilistic variants of
+  An alternative view is GPT-centric. We draw from the in- the Rovers and MachineShop domains from the 2002 AIPS
+
+tuition that, in GPT, the partial greedy policy (πGPT) improves Planning Competition. The third is the Elevators domain
+gradually and eventually gets deﬁned for all relevant states from the 2006 ICAPS Planning Competition. The largest
+accurately. But before convergence, the current greedy pol- problem we attempted was in the Elevators domain and had
+icy may not even be deﬁned for many states and may be in- 606 state variables.
+accurate for others, which have not been explored enough. For our experiments we terminate when either labeled
+HYBPLAN  uses this partial policy as much as reasonable and RTDP terminates or when the memory goes out of bound.
+completes it by adding in solutions from MBP; thus making For most experiments, we initialize HYBPLAN with hybtime
+the ﬁnal policy consistent and useful. In essence, both views = 25 sec and threshold = 50. We also perform experiments to
+are useful: each algorithm patches the other’s weakness. analyze the sensitivity to these parameters.
+
+                                                IJCAI-07
+                                                  1975               A Rover Domain (without dead-ends)               A MachineShop Domain (with dead-ends)
+      120                                                70
+                             Exp. Cost (GPT)
+                           Exp. Cost (HybPlan)
+      100                      J-value (GPT)             60
+                             J-value (HybPlan)
+                                                         50
+       80
+                                                         40
+       60
+                                                         30
+       40
+                                                         20
+   Best  Expected Cost                                Best  Expected Cost
+                                                J-value  of start state        Exp. Cost (GPT)     J-value  of start state
+                                                                             Exp. Cost (HybPlan)
+       20                                                10                      J-value (GPT)
+                                                                              J-value (HybPlan)
+       0                                                  0
+         0   100  200  300  400  500  600  700  800        0     200   400    600   800   1000   1200
+                       Time (in sec)                                      Time (in sec)
+
+Figure 1: Anytime properties of HYBPLAN: On one Y-axis we show the expected cost of the cached policy and on the other
+the Jn(s0) values. Jn converges when the two curves meet. We ﬁnd that HYBPLAN’s policy is superior to GPT’s greedy policy.
+The ﬁrst time when GPT’s policy has non-inﬁnite expected cost occurs much later in the algorithm.
+
+
+Anytime Property                                                      A Large Rover Domain (with dead-ends)
+We ﬁrst evaluate the anytime properties of HYBPLAN for        100
+                                                                    Exp. Cost (GPT)
+moderate sized planning problems. We show results on two          Exp. Cost (HybPlan)
+                                                                      J-value (GPT)
+problems, one from the Rovers domain and the other from        80  J-value (HybPlan)
+the MachineShop domain (Figures 1(a), 1(b)). These prob-
+lems had 27 state variables and about 40 actions each. We      60
+
+observe that πHYB has a consistently better expected cost than
+did πGPT, and that the difference between the two algorithms   40
+is substantial. For example, in Figure 1(b) the ﬁrst time, when
+                                                           Best  Expected Cost
+π                                                                                                     J-value  of start state
+ GPT has a non-inﬁnite expected cost (i.e., all simulated paths  20
+reach the goal), is after 950 seconds; whereas HYBPLAN al-
+ways constructs a valid policy.                                0
+  Figure 1(a) is for a domain without any dead-ends whereas      0    200   400   600   800   1000  1200
+in the domain of Figure 1(b) there are some ’bad’ actions                     Time (in sec)
+from which the agent can never recover. While HYBPLAN
+obtains greater beneﬁts for domains with dead-ends, for all Figure 2: Plot of expected cost on a problem too large for
+the domains the anytime nature of HYBPLAN is superior to GPT to converge.
+the GPT. Also notice the Jn(s0) values in Figure 1. HYB-
+PLAN  sometimes takes marginally longer to converge be-
+cause of overheads of hybrid policy construction. Clearly this Notice the Elevator problems in Table 3. There are 606
+overhead is insigniﬁcant.                             variables in this domain. These problems were the largest test
+                                                      problems in the Elevators domain for the Planning Competi-
+  Recall that the ﬁrst expected cost of πHYB is the expected
+                                                      tion 2006 and few planners could solve it. Thus HYBPLAN’s
+cost of following the MBP policy. Clearly an MBP policy is
+not of very high quality and is substantially improved as time performance is very encouraging.
+progresses. Also, the initial policy is computed very quickly. Sensitivity to Parameters
+Scaling to Large Problems                             HYBPLAN   is controlled by two parameters: hybtime and
+If we desire to run the algorithm until convergence then HYB- threshold. We evaluate how sensitive HYBPLAN is to these
+PLAN is no better than GPT. For large problems, however, parameters. We ﬁnd that increasing hybtime reduces the total
+running until convergence is not a practical option due to lim- algorithm time but the difference is marginal, implying that
+ited resources. For example, in Figure 2 we show experiments the overhead of hybrid policy construction is not signiﬁcant.
+on a larger problem from the rovers domain where the mem- However, smaller values result in repeated policy construc-
+ory requirements exceed our machine’s 2 GB. (typically, the tion and this helps in ﬁnding a good quality solution early.
+memory ﬁlls up after the algorithm explores about 600,000 Thus small values of hybtime are overall more effective.
+states) In such cases hybridization provides even more bene- Varying threshold does not affect the overall algorithm
+ﬁts (Table 3). For many of the large domains GPT is in fact un- time. But it does marginally affect the ﬁrst time a good so-
+able to output a single policy with ﬁnite expected cost. While lution is observed. Increasing threshold implies that an MBP
+one might use MBP directly for such problems, by hybridiz- policy is used until a state is sufﬁciently explored in GPT.
+ing the two algorithms we are able to get consistently higher For Rovers domain this translates to some extra time before
+quality solutions.                                    a good policy is observed. For MachineShop we observe the
+
+                                                IJCAI-07
+                                                  1976

@@ -1,0 +1,315 @@
+ Evolino: Hybrid Neuroevolution / Optimal Linear Search for                    Sequence Learning
+
+                  Jurgen¨ Schmidhuber1,2, Daan Wierstra2,      and  Faustino Gomez2
+                                     {juergen, daan, tino}@idsia.ch
+
+                 1  TU Munich, Boltzmannstr. 3, 85748 Garching, M¨unchen, Germany
+                            2  IDSIA, Galleria 2, 6928 Lugano, Switzerland
+
+                    Abstract                            Echo State Networks (ESNs; [Jaeger, 2004a]) deal with
+                                                      temporal dependencies by simply ignoring the gradients as-
+    Current Neural Network learning algorithms are    sociated with hidden neurons. Composed primarily of a large
+    limited in their ability to model non-linear dynami- pool of neurons (typically hundreds or thousands) with ﬁxed
+    cal systems. Most supervised gradient-based recur- random weights, ESNs are trained by computing a set of
+    rent neural networks (RNNs) suffer from a vanish- weights analytically from the pool to the output units using
+    ing error signal that prevents learning from inputs fast, linear regression. The idea is that with so many ran-
+    far in the past. Those that do not, still have prob- dom hidden units, the pool is capable of very rich dynamics
+    lems when there are numerous local minima. We     that just need to be correctly “tapped” by adjusting the output
+    introduce a general framework for sequence learn- weights. This simple approach is currently the title holder in
+    ing, EVOlution of recurrent systems with LINear   the Mackey-Glass time-series benchmark, improving on the
+    outputs (Evolino). Evolino uses evolution to dis- accuracy of all other methods by as much as three orders of
+    cover good RNN hidden node weights, while us-     magnitude [Jaeger, 2004a].
+    ing methods such as linear regression or quadratic  The drawback of ESNs, of course, is that the only truly
+    programming to compute optimal linear mappings    computationally powerful, nonlinear part of the net does not
+    from hidden state to output. Using the Long Short- learn at all. This means that on some seemingly simple tasks,
+    Term Memory RNN Architecture, the method is       such as generating multiple superimposed sine waves, the
+    tested in three very different problem domains: 1) method fails. According to our experience, it is also not able
+    context-sensitive languages, 2) multiple superim- to solve a simple context-sensitive grammar task [Gers and
+    posed sine waves, and 3) the Mackey-Glass sys-    Schmidhuber, 2001]. Moreover, because ESNs use such a
+    tem. Evolino performs exceptionally well across   large number of processing units, they are prone to overﬁt-
+    all tasks, where other methods show notable deﬁ-  ting, i.e. poor generalization.
+    ciencies in some.                                   One method that adapts all weights and succeeds in us-
+                                                      ing gradient information to learn long-term dependencies is
+                                                      Long Short-Term Memory (LSTM; [Hochreiter and Schmid-
+1  Introduction                                       huber, 1997; Gers and Schmidhuber, 2001]). LSTM uses a
+Real world non-linear dynamical systems are black-box in na- specialized network architecture that includes linear memory
+ture: it is possible to observe their input/output behavior, but cells that can sustain their activation indeﬁnitely. The cells
+the internal mechanism that generates this behavior is often have input and output gates that learn to open and close at
+unknown. Modeling such systems to accurately predict their appropriate times either to let in new information from out-
+behavior is a huge challenge with potentially far-reaching im- side and change the state of the cell, or to let activation out
+pact on areas as broad as speech processing/recognition, ﬁ- to potentially affect other cells or the network’s output. The
+nancial forecasting, and engineering.                 cell structure enables LSTM to use gradient descent to learn
+  Artiﬁcial Neural Networks with feedback connections or dependencies across almost arbitrarily long time spans. How-
+Recurrent Neural Networks (RNNs; [Werbos, 1990; Robin- ever, in cases where gradient information is of little use due
+son and Fallside, 1987; Williams and Zipser, 1989]) are to numerous local minima, LSTM becomes less competitive.
+an attractive formalism for non-linear modeling because of An alternative approach to training RNNs is neuroevolu-
+their ability, in principle, to approximate any dynamical sys- tion [Yao, 1999]. Instead of using a single neural network,
+tem with arbitrary precision [Siegelmann and Sontag, 1991]. the space of network parameters is searched in parallel using
+However, training RNNs with standard gradient descent algo- the principle of natural selection. A population of chromo-
+rithms is only practical when a short time window (less than somes or strings encoding, for instance, network weight val-
+10 time-steps) is sufﬁcient to predict the correct system out- ues and connectivity is evaluated on the problem, and each
+put. For longer temporal dependencies, the gradient vanishes chromosome is awarded a ﬁtness value that quantiﬁes its rel-
+as the error signal is propagated back through time so that ative performance. The more highly ﬁt chromosomes are
+network weights are never adjusted correctly to account for combined by exchanging substrings (crossover) and by ran-
+events far in the past [Hochreiter et al., 2001].     domly changing some values (mutation), producing new so-                                                      problem. Properties that require non-linearity and recurrence
+                  y1(t) y2(t) y (t)
+                             m                        are then dealt with by evolution.
+                                                        Figure 1 illustrates the basic operation of an Evolino net-
+                                                                                                    m
+                                    Linear Output     work. The output of the network at time t, y(t) ∈ R , is
+                                      Layer  W        computed by the following formulas:
+                                                                         y(t) = W φ(t),               (1)
+               φ (t) φ(t) φ (t) φ(t) φ (t)
+                1   2   3   4     n                              φ(t) = f(u(t), u(t − 1), . . . , u(0)), (2)
+                                                      where φ(t) ∈ Rn is the output of a recurrent neural network
+                   Recurrent                          f(·), and W is a weight matrix. Note that because the net-
+                                                      works are recurrent, f(·) is indeed a function of the entire in-
+                Neural Network                        put history, u(t), u(t − 1), . . . , u(0). In the case of maximum
+                                                      margin classiﬁcation problems [Vapnik, 1995] we may com-
+                                                      pute W by quadratic programming. In what follows, how-
+              u (t) u (t) u (t) u (t) u (t)
+               1   2   3   4     p                    ever, we focus on mean squared error minimization problems
+                                                      and compute W by linear regression.
+Figure 1: Evolino network. A recurrent neural network receives In order to evolve an f(·) that minimizes the error between
+sequential inputs u(t) and produce the vector (φ1, φ2, . . . , φn) at ev- y and the correct output, d, of the system being modeled,
+ery time step t. These values are linearly combined with the weight Evolino does not specify a particular evolutionary algorithm,
+matrix W to yield the network’s output vector y(t). While the RNN
+is evolved, the output layer weights are computed using a fast, opti- but rather only stipulates that networks be evaluated using the
+mal method such as linear regression or quadratic programming. following two-phase procedure.
+                                                        In the ﬁrst phase, a training set of sequences obtained from
+                                                      the system, {ui, di}, i = 1..k, each of length li, is presented
+lutions that hopefully improve upon the existing population. to the network. For each sequence ui, starting at time t = 0,
+This approach has been very effective in solving continu- each input pattern ui(t) is successively propagated through
+ous, partially observable reinforcement learning tasks where the recurrent network to produce a vector of activations φi(t)
+the gradient is not directly available, outperforming conven-                      k i
+                                                      that is stored as a row in a n × Pi l matrix Φ. Associated
+tional methods (e.g. Q-learning, SARSA) on several difﬁ-        i                      i
+cult learning benchmarks [Moriarty and Miikkulainen, 1996; with each φ (t), is a target row vector d in D containing the
+Gomez and Miikkulainen, 1999]. However, neuroevolution correct output values for each time step. Once all k sequences
+is rarely used for supervised learning tasks such as time se- have been seen, the output weights W (the output layer in ﬁg-
+ries prediction because it has difﬁculty ﬁne-tuning solution ure 1) are computed using linear regression from Φ to D. The
+parameters (e.g. network weights), and because of the pre- column vectors in Φ (i.e. the values of each of the n outputs
+vailing maxim that gradient information should be used when over the entire training set) form a non-orthogonal basis that
+it is available.                                      is combined linearly by W to approximate D.
+  In this paper, we present a novel framework called EVO- In the second phase, the training set is presented to the net-
+lution of recurrent systems with LINear outputs (Evolino) work again, but now the inputs are propagated through the
+that combines elements of the three aforementioned meth- recurrent network f(·) and the newly computed output con-
+ods, to address the disadvantages of each, extending ideas nections to produce predictions y(t). The error in the predic-
+proposed for feedforward networks of radial basis functions tion or the residual error is then used as the ﬁtness measure
+(RBFs) [Maillard and Gueriot, 1997]. Applied to the LSTM to be minimized by evolution.
+architecture, Evolino can solve tasks that ESNs cannot, and Neuroevolution is normally applied to reinforcement learn-
+achieves higher accuracy in certain continuous function gen- ing tasks where correct network outputs (i.e. targets) are not
+eration tasks than conventional gradient descent RNNs, in- known a priori. Here we use neuroevolution for supervised
+cluding gradient-based LSTM.                          learning to circumvent the problems of gradient-based ap-
+  Section 2 explains the basic concept of Evolino and de- proaches. In order to obtain the precision required for time-
+scribes in detail the speciﬁc implementation used in this pa- series prediction, we do not try to evolve a network that makes
+per. Section 3 presents our experiments using Evolino in predictions directly. Instead, the network outputs a set of vec-
+three different domains: context-sensitive grammars, contin- tors that form a basis for linear regression. The intuition is
+uous function generation, and the Mackey-Glass time-series. that ﬁnding a sufﬁciently good basis is easier than trying to
+Section 4 and 5 discuss the algorithm and the experimental ﬁnd a network that models the system accurately on its own.
+results, and summarize our conclusions.                 In this study, Evolino is instantiated using Enforced Sub-
+                                                      Populations to evolve LSTM networks. The next sections de-
+                                                      scribe ESP and LSTM, and the details of how they are com-
+2  The Evolino Framework                              bined within the Evolino framework.
+Evolino is a general framework for supervised sequence
+learning that combines neuroevolution (i.e. the evolution of 2.1 Enforced Subpopulations
+neural networks) and analytical linear methods that are opti- Enforced SubPopulations differs from standard neuroevolu-
+mal in some sense, such as linear regression or quadratic pro- tion methods in that instead of evolving complete networks,
+gramming. The underlying principle of Evolino is that often a it coevolves separate subpopulations of network components
+linear model can account for a large number of properties of a or neurons (ﬁgure 2). Evolution in ESP proceeds as follows:                 Time series                                                             peephole
+                                                                                               output
+                                                                   GF
+
+
+             fitness          ESP
+                                                                               S         Go
+
+
+     input
+                                                                    Σ         GI
+
+                                 output                   external inputs
+                                                      Figure 3: Long Short-Term Memory. The ﬁgure shows an LSTM
+                               pseudo−inverse
+                               weights                memory cell. The cell has an internal state S together with a forget
+                                                      gate (GF ) that determines how much the state is attenuated at each
+         LSTM Network                                 time step. The input gate (GI ) controls access to the cell by the
+                                                      external inputs that are summed into the Σ unit, and the output gate
+Figure 2: Enforced SubPopulations (ESP). The population of (GO) controls when and how much the cell ﬁres. Small dark nodes
+neurons is segregated into subpopulations. Networks are formed by represent the multiplication function.
+randomly selecting one neuron from each subpopulation. A neuron
+accumulates a ﬁtness score by adding the ﬁtness of each network
+in which it participated. The best neurons within each subpopula- functions needed to form good networks because members of
+tion are mated to form new neurons. The network shown here is an different evolving sub-function types are prevented from mat-
+LSTM network with four memory cells (the triangular shapes). ing. Subpopulations also reduce noise in the neuron ﬁtness
+                                                      measure because each evolving neuron type is guaranteed to
+ 1. Initialization: The number of hidden units H in the net- be represented in every network that is formed. This allows
+    works that will be evolved is speciﬁed and a subpopula- ESP to evolve recurrent networks, where SANE could not.
+    tion of n neuron chromosomes is created for each hidden If the performance of ESP does not improve for a predeter-
+    unit. Each chromosome encodes a neuron’s input, out- mined number of generations, a technique called burst muta-
+    put, and recurrent connection weights with a string of tion is used. The idea of burst mutation is to search the space
+    random real numbers.                              of modiﬁcations to the best solution found so far. When burst
+                                                      mutation is activated, the best neuron in each subpopulation
+ 2. Evaluation: A neuron is selected at random from each
+                                                      is saved, the other neurons are deleted, and new neurons are
+    of the  subpopulations, and combined to form a recur-
+         H                                            created for each subpopulation by adding Cauchy distributed
+    rent network. The network is evaluated on the task and
+                                                      noise to its saved neuron. Evolution then resumes, but now
+    awarded a ﬁtness score. The score is added to the cu-
+                                                      searching in a neighborhood around the previous best solu-
+    mulative ﬁtness of each neuron that participated in the
+                                                      tion. Burst mutation injects new diversity into the subpopu-
+    network.
+                                                      lations and allows ESP to continue evolving after the initial
+ 3. Recombination: For each subpopulation the neurons are subpopulations have converged.
+    ranked by ﬁtness, and the top quartile is recombined us-
+    ing 1-point crossover and mutated using Cauchy dis- 2.2 Long Short-Term Memory
+    tributed noise to create new neurons that replace the
+    lowest-ranking half of the subpopulation.         LSTM  is a recurrent neural network purposely designed to
+                                                      learn long-term dependencies via gradient descent. The
+ 4. Repeat the Evaluation–Recombination cycle until a suf-
+                                                      unique feature of the LSTM architecture is the memory cell
+    ﬁciently ﬁt network is found.
+                                                      that is capable of maintaining its activation indeﬁnitely (ﬁg-
+  ESP searches the space of networks indirectly by sampling ure 3). Memory cells consist of a linear unit which holds the
+the possible networks that can be constructed from the sub- state of the cell, and three gates that can open or close over
+populations of neurons. Network evaluations serve to pro- time. The input gate “protects” a neuron from its input: only
+vide a ﬁtness statistic that is used to produce better neurons when the gate is open, can inputs affect the internal state of
+that can eventually be combined to form a successful network. the neuron. The output gate lets the state out to other parts
+This cooperative coevolutionary approach is an extension to of the network, and the forget gate enables the state to “leak”
+Symbiotic, Adaptive Neuroevolution (SANE; [Moriarty and activity when it is no longer useful.
+Miikkulainen, 1996]) which also evolves neurons, but in a The state of cell i is computed by:
+single population. By using separate subpopulations, ESP
+                                                                           in      forget
+accelerates the specialization of neurons into different sub- si(t) = neti(t)gi (t) + gi (t)si(t − 1), (3)where gin and gforget are the activation of the input and for- Training data Gradient LSTM Evolino LSTM
+get gates, respectively, and net is the weighted sum of the   1..10         1..28           1..53
+external inputs (indicated by the Σs in ﬁgure 3):             1..20         1..66           1..95
+                  cell              cell                      1..30         1..91          1..355
+   neti(t) = h(X wij cj (t − 1) + X wik uk(t)), (4)           1..40         1..120         1..804
+               j                k
+                                                      Table 1: Generalization results for the anbncn language. The
+where h is usually the identity function, and cj is the output table compares Evolino-based LSTM to Gradient-based LSTM. The
+of cell j:                                            left column shows the set of legal strings used to train each method.
+                          out
+             cj (t) = tanh(gj (t)sj (t)).       (5)   The other columns show the set of strings that each method was able
+      out                                             to accept after training. The result for LSTM with gradient descent
+where g  is the output gate of cell j. The amount each gate are from [Gers and Schmidhuber, 2001]. Averages of 20 runs.
+gi of memory cell i is open or closed at time t is calculated
+by:
+   type           type               type             was found useful for continuous function generation tasks,
+  gi  (t) = σ(X  wij  cj (t − 1) + X wik uk(t)), (6)
+              j                  k                    but interferes to some extent with performance in the discrete
+where type can be input, output, or forget, and σ is the context-sensitive language task.
+standard sigmoid function. The gates receive input from the
+output of other cells cj , and from the external inputs to the 3 Experimental Results
+network.
+                                                      Experiments were carried out on three test problems: context-
+2.3  Combining ESP with LSTM in Evolino               sensitive languages, multiple superimposed sine waves, and
+We apply our general Evolino framework to the LSTM archi- the Mackey-Glass time series. The ﬁrst two were chosen to
+tecture, using ESP for evolution and regression for comput- highlight Evolino’s ability to perform well in both discrete
+ing linear mappings from hidden state to outputs. ESP co- and continuous domains. For a more detailed description of
+evolves subpopulations of memory cells instead of standard setups used in these two problems, and further experiments,
+recurrent neurons (ﬁgure 2). Each chromosome is a string we direct the reader to [Wierstra et al., 2005]. The Mackey-
+containing the external input weights and the input, output, Glass system was selected to compare Evolino with ESNs, the
+and forget gate weights, for a total of 4 ∗ (I + H) weights reference method on this widely used time series benchmark.
+in each memory cell chromosome, where I is the number of
+external inputs and H is the number of memory cells in the 3.1 Context-Sensitive Grammars
+network. There are four sets of I + H weights because the Learning to recognize context-sensitive languages is a difﬁ-
+three gates (equation 6) and the cell itself (equation 4) receive cult and often intractable problem for standard RNNs because
+input from outside the cell and the other cells. ESP, as de- it can require unlimited memory. For instance, recognizing
+scribed in section 2.1, normally uses crossover to recombine the language anbncn (i.e. strings where the number of as, bs,
+neurons. However, for the present Evolino variant, where ﬁne and cs is equal) entails counting the number of consecutive as,
+local search is desirable, ESP uses only mutation. The top bs, and cs, and potentially having to remember these quan-
+quarter of the chromosomes in each subpopulation are dupli- tities until the whole string has been read. Gradient-based
+cated and the copies are mutated by adding Cauchy noise to LSTM has previously been used to learn anbncn, so here we
+all of their weight values.                           compare the results in [Gers and Schmidhuber, 2001] to those
+  The linear regression method used to compute the output of Evolino-based LSTM.
+weights (W in equation 2) is the Moore-Penrose pseudo-  Four sets of 20 simulations were run each using a different
+inverse method, which is both fast and optimal in the training set of legal strings, {anbncn}, n = 1..N, where N
+sense that it minimizes the summed squared error [Penrose, was 10, 20, 30, and 40. Symbol strings were presented to the
+1955]—compare [Maillard and Gueriot, 1997] for an appli- networks, one symbol at a time. The networks had 4 input
+cation to feedforward RBF nets. The vector φ(t) consists of units, one for each possible symbol: S for start, a, b, and
+both the cell outputs, ci (equation 5), and their internal states, c. An input is set to 1.0 when the corresponding symbol is
+si (equation 3), so that the pseudo-inverse computes two con- observed, and -1.0 when it is not present. At every time step,
+nection weights for each memory cell. We refer to the con- the network predicts what symbols could come next, a, b,
+nections from internal states to the output units as “output c, and the termination symbol T , by activating its 4 output
+peephole” connections, since they peer into the interior of the units. An output unit is considered to be “on” if its activation
+cells.                                                is greater than 0.0.
+  For continuous function generation, backprojection (or ESP evolved LSTM   networks with 4 memory cells,
+teacher forcing in standard RNN terminology) is used where weights randomly initialized to values between −0.1 and 0.1.
+the predicted outputs are fed back as inputs in the next time The Cauchy noise parameter α for both mutation and burst
+step: φ(t) = f(u(t), y(t − 1), u(t − 1), . . . , y(0), u(0)). mutation was set to 0.00001, i.e. 50% of the mutations is kept
+  During training, the correct target values are backprojected, within this bound. Evolution was terminated after 50 gener-
+in effect “clamping” the network’s outputs to the right values. ations, after which the best network in each simulation was
+During testing, the network backprojects its own predictions. tested.
+This technique is also used by ESNs, but whereas ESNs do The results are summarized in Table 1. Evolino-based
+not change the backprojection connection weights, Evolino LSTM learns in approximately 3 minutes on average, but,
+evolves them, treating them like any other input to the net- more importantly, it is able to generalize substantially better
+work. In the experiments described below, backprojection than gradient-based LSTM.                        predicted                     MGS) in this domain to show its capacity for making precise
+                       system                         predictions. We used the same setup in our experiments as
+                                                      in [Jaeger, 2004a]. Networks were trained on the ﬁrst 3000
+                                                      time steps of the series using a “washout time” of 100 steps.
+                                                      During the washout time the vectors φ(t) are not collected for
+                                                      calculating the pseudo-inverse.
+                                                        We evolved networks with 30 memory cells for 200 gen-
+                                                      erations, and a Cauchy noise α of 10−7. A bias input of
+300             300            600 1000         1300  1.0 was added to the network, and the backprojection values
+                     time steps
+Figure 4: Performance of Evolino on the triple superimposed were scaled by a factor of 0.1. For testing, the outputs were
+sine wave task. The plot show the behavior of a typical network clamped to the correct targets for the ﬁrst 3000 steps, after
+produced after 50 generations (3000 evaluations). The ﬁrst 300 steps which the network backprojected its own prediction for the
+                                                                 1
+(the data-points left of the vertical dashed line) were used as training next 84 steps . The cell input (equation 4) was squashed with
+data, the rest must be predicted by the network during testing. Time- the tanh function. The average NRMSE84 for Evolino with
+                                                                                      −3             −4 2
+steps above 300 show the network predictions (dashed curve) during 30 cells over the 15 runs was 1.9 × 10 compared to 10 .
+testing plotted against the correct system output (solid curve). The for ESNs with 1000 neurons [Jaeger, 2004a]. The Evolino
+inset is a magniﬁed detail that more clearly shows the two curves. results are currently the second-best reported so far.
+                                                        Figure 5 shows the performance of an Evolino network on
+                                                      the MG time-series with even fewer memory cells, after 50
+3.2  Multiple Superimposed Sine Waves                 generations. Because this network has fewer parameters, it
+Jaeger [Jaeger, 2004b] reports that Echo State Networks are is unable to achieve the same precision as with 30 neurons,
+unable to learn functions composed of multiple superim- but it demonstrates how Evolino can learn complex functions
+posed oscillators. Speciﬁcally, functions like sin(0.2x) + very quickly; in this case within approximately 3 minutes of
+sin(0.311x), in which the individual sines have the same am- CPU time.
+plitude but their frequencies are not multiples of each other.
+ESNs have difﬁculty solving this problem because the dy- 4 Discussion
+namics of all the neurons in the ESN “pool” are coupled,
+whereas truly solving the task requires an internal representa- The real strength of the Evolino framework is its general-
+tion of multiple attractors due to the non-periodic behavior of ity. Across different classes of sequence prediction prob-
+the function.                                         lems, it was able to compete with the best known methods
+  We evolved networks with 10 memory cells to predict and convincingly outperform them in several cases. In partic-
+the aforementioned double sine, sin(0.2x) + sin(0.311x), ular, it generalized much better than gradient-based LSTM in
+and network with 15 cells for a more complex triple sine, the context-sensitive grammar task, and it solved the super-
+sin(0.2x) + sin(0.311x) + sin(0.42x). Evolino used the imposed sine wave task, which ESNs cannot. These results
+same parameter settings as in the previous section, except that suggest that Evolino could be widely applicable to model-
+backprojection was used (see section 2.3). Networks for both ing complex processes that have both discrete and continuous
+tasks were evolved for 50 generations to predict the ﬁrst 300 properties, such as speech.
+time steps of each function, and then tested on data points Evolino avoids the problem of vanishing gradient and local
+from time-steps 300..600.                             minima normally associated with RNN training by searching
+  The average summed squared error over the training set the space of networks in parallel through evolution. Further-
+was 0.011 for the double sine and 0.2 for the triple sine. The more, by using LSTM memory cells, Evolino searches in a
+average error over the test set was 0.044 and 1.58, respec- weight space that is already biased toward extracting, retain-
+tively. These error levels are barely visible out to time-step ing, and relating discrete events that may be very far apart in
+600. Figure 4 shows the behavior of one of the triple sine time. And, by borrowing the idea of linear regression from
+wave Evolino networks out to time-step 1300. The magni- ESNs, Evolino is capable of making very precise predictions
+ﬁed inset illustrates how even beyond 3 times the length of in tasks like the Mackey-Glass benchmark.
+the training set, the network still makes very accurate predic- Apart from its versatility, another advantage of Evolino
+tions.                                                over ESNs is that it produces more parsimonious solutions.
+                                                      ESNs have large pools of neurons that are more likely to over-
+3.3  Mackey-Glass Time-Series Prediction              ﬁt the data. Evolino networks can be made much smaller and,
+                                                      therefore, potentially more general, less susceptible to noise,
+The Mackey-Glass system (MGS; [Mackey and Glass, 1977]) and more easily comprehensible by, for instance, RNN rule
+is a standard benchmark for chaotic time series prediction. extraction techniques.
+The system produces an irregular time series that is produced Evolino is a template that can be instantiated by plugging
+by the following differential equation: y˙(t) = αy(t−τ)/(1+ in (1) alternative analytical methods for computing optimal
+       β
+y(t − τ) ) − γy(t), where the parameters are usually set to linear mappings to the outputs, given the hidden state, (2) dif-
+α = 0.2, β = 10, γ = 0.1. The system is chaotic whenever ferent neuroevolution algorithms, and (3) various recurrent
+the delay τ > 16.8. We use the most common value for the network architectures. In particular, our implementation used
+delay τ = 17.
+                                                         1
+  Although the MGS can be modeled very accurately us-     The normalized root mean square error (NRMSE84) 84 steps
+ing feedforward networks with a time-window on the input, after the end of the training sequence, is the standard comparison
+we compare Evolino to ESNs (currently the best method for measure used for this problem.

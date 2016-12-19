@@ -1,0 +1,344 @@
+               Machine Learning for On-Line Hardware Reconﬁguration
+
+                 Jonathan Wildstrom∗, Peter Stone, Emmett Witchel, Mike Dahlin
+                                   Department of Computer Sciences
+                                   The University of Texas at Austin
+                             {jwildstr,pstone,witchel,dahlin}@cs.utexas.edu
+
+
+                    Abstract                            Previous research [Wildstrom et al., 2005] has shown that
+                                                      the potential exists for performance to be improved through
+    As computer systems continue to increase in com-
+                                                      autonomous reconﬁguration of CPU and memory resources.
+    plexity, the need for AI-based solutions is becom-
+                                                      Speciﬁcally, that work showed that no single conﬁguration
+    ing more urgent. For example, high-end servers
+                                                      is optimal for all workloads and introduced an approach to
+    that can be partitioned into logical subsystems and
+                                                      learning, based on low-level system statistics, which conﬁg-
+    repartitioned on the ﬂy are now becoming avail-
+                                                      uration is most effective for the current workload, without di-
+    able. This development raises the possibility of re-
+                                                      rectly observing the workload. Although this work indicated
+    conﬁguring distributed systems online to optimize
+                                                      that online reconﬁguration should, in theory, improve perfor-
+    for dynamically changing workloads. However, it
+                                                      mance, to the best of our knowledge it has not yet been estab-
+    also introduces the need to decide when and how
+                                                      lished that online hardware reconﬁguration actually produces
+    to reconﬁgure. This paper presents one approach
+                                                      a signiﬁcant improvement in overall performance in practice.
+    to solving this online reconﬁguration problem. In
+                                                        This paper demonstrates increased performance for a trans-
+    particular, we learn to identify, from only low-level
+                                                      action processing system using a learned model that reconﬁg-
+    system statistics, which of a set of possible conﬁg-
+                                                      ures the system hardware online. Speciﬁcally, we train a ro-
+    urations will lead to better performance under the
+                                                      bust model of the expected performance of different hardware
+    current unknown workload. This approach requires
+                                                      conﬁgurations, and then use this model to guide an online re-
+    no instrumentation of the system’s middleware or
+                                                      conﬁguration agent. We show that this agent is able to make
+    operating systems. We introduce an agent that is
+                                                      a signiﬁcant improvement in performance when tested with a
+    able to learn this model and use it to switch conﬁg-
+                                                      variety of workloads, as compared to static conﬁgurations.
+    urations online as the workload varies. Our agent
+                                                        The remainder of this paper is organized as follows. The
+    is fully implemented and tested on a publicly avail-
+                                                      next section gives an overview of our experimental testbed.
+    able multi-machine, multi-process distributed sys-
+                                                      Section 3 details our methodology in handling unexpected
+    tem (the online transaction processing benchmark
+                                                      workload changes, including the training of our agent (Sec-
+    TPC-W). We demonstrate that our adaptive con-
+                                                      tion 3.1) and the experiments used to test the agent (Sec-
+    ﬁguration is able to outperform any single ﬁxed
+                                                      tion 3.2). Section 4 contains the results of our experiments
+    conﬁguration in the set over a variety of work-
+                                                      and some discussion of their implications. Section 5 gives an
+    loads, including gradual changes and abrupt work-
+                                                      overview of related work, and Section 6 concludes.
+    load spikes.
+                                                      2   Experimental Testbed and System Overview
+1  Introduction
+                                                      Servers that support partitioning into multiple logical subsys-
+The recent introduction of partitionable servers has enabled tems (partitions) are now commercially available [Quintero et
+the potential for adaptive hardware reconﬁguration. Proces- al., 2004]. Each partition has independent memory and pro-
+sors and memory can be added or removed from a system cessors available, enabling it to function as if it were an in-
+while incurring no downtime, even including single proces- dependent physical machine. In this way, partitions (and ap-
+sors to be shared between separate logical systems. While plications running on separate partitions) are prevented from
+this allows for more ﬂexibility in the operation of these sys- interfering with each other through resource contention.
+tems, it also raises the questions of when and how the system Furthermore, these servers are highly ﬂexible, both allow-
+should be reconﬁgured. This paper establishes that automated ing different quantities of memory and processing resources
+adaptive hardware reconﬁguration can signiﬁcantly improve to be assigned to partitions, as well as supporting the addition
+overall system performance when workloads vary.       and removal of resources while the operating system contin-
+  ∗currently employed by IBM Systems and Storage Group. Any ues running. Hardware is also available that allows partition-
+opinions expressed in this paper may not necessarily be the opinions ing on the sub-processor level; e.g., a partition can use as little
+                                                         1
+of IBM.                                               as 10 of a physical processor on the hosting system [Quintero
+
+                                                IJCAI-07
+                                                  1113et al., 2004]. Because reconﬁgurable hardware is not (yet)      RBE         Frontend      Backend
+easily available, the research reported in this paper simulates EB          Application
+reconﬁguration of partitions on multiple desktop computers.                   Server
+                                                                EB                        Database
+  The remainder of this section gives a high-level overview                                Server
+of the testbed setup. A brief description of the TPC-W bench-   EB            Image
+mark and a discussion of some modiﬁcations in our testbed                     Server
+can be found in Section 2.1. The software packages we use     TuningAgent
+are given in Section 2.2. The hardware and simulation of
+sub-processor partitioning and reconﬁguration are explained
+                                                            Figure 1: The 3 machines used in the physical setup.
+in Section 2.3. Finally, an overview of the implementation of
+the tuning agent is presented in Section 2.4. Further testbed
+and system details can be found in [Wildstrom et al., 2006]. implementation, a set of items is cached for 30 seconds and
+                                                      reused for all pages desiring these promotional items during
+2.1  TPC-W                                            that time period. Other modiﬁed speciﬁcations can be found
+TPC-W is a standardized benchmark published by the Trans- in [Wildstrom et al., 2006].
+action Processing Performance Council. It dictates an instan- The primary reason speciﬁcations are modiﬁed is that our
+tiation of an online bookstore, with 14 dynamically generated intention is to overwhelm the system, whereas the TPC-W
+web pages as the user interface. These pages are divided into speciﬁcations are explicitly designed to prevent this from
+six browsing and eight ordering pages. Relative performance happening. Nonetheless, we use TPC-W because it is a con-
+of the System Under Test (SUT) is determined by using one venient way of generating realistic workloads.
+or more external machines, called the Remote Browser Em-
+ulators (RBEs), running a set of Emulated Browsers (EBs). 2.2 Software
+These EBs represent individual users of the site and may be Any TPC-W implementation must implement at least 3 mod-
+browsing the store, searching, and/or placing orders. ules as part of the SUT: a database, an application server, and
+  Each user follows one of three deﬁned workloads, or mixes: an image server. The implementation used in this work uses
+shopping, browsing,orordering. Given a current page re- PostGreSQL 8.0.4 for the database and Apache Jakarta Tom-
+quested, the speciﬁcation deﬁnes the respective probabilities cat 5.5.12 as both the application and image servers. The
+of each possible next page for each mix. This results in differ- Java code used by the application server (both for dynamic
+ent ratios of browsing and ordering page references for each web page generation and database interaction) is derived from
+mix. These relative percentages are summarized in Table 1. a freely available TPC-W implementation from the Univer-
+                                                      sity of Wisconsin PHARM project [Cain et al., 2001]. Slight
+                               Mix                    modiﬁcations are made to the code: ﬁrst, to use Tomcat and
+                   Browsing  Shopping  Ordering       PostGreSQL; second, to allow limited caching of data; and
+     Browsing pages 95%        80       50            third, to allow the number of connections to the database to
+     Ordering pages 5%         20       50            be limited. The number of connections is controlled through a
+Table 1: Expected access percentages of different pages for the TPC- Java semaphore (with fairness enabled). The number of con-
+W mixes, speciﬁed by [Garcia and Garcia, 2003].       nections allowed is one reconﬁgurable resource, controlled
+                                                      through a new administrative servlet.
+  A single run of the benchmark involves measuring the  Furthermore, the RBE is modiﬁed in two ways. First, con-
+throughput during a ﬁxed-length measurement interval. The nection timeouts are not treated as fatal and are rather retried.
+system is allowed to warm up prior to the measurement inter- Also, the EBs are not required to all run the same mix and can
+val. Throughput is measured in Web Interactions Per Second change which mix they are using during a benchmark run.
+(WIPS), which is the overall average number of page requests
+returning in a second.                                2.3  Hardware
+  Many commercial systems that publish performance re- The physical hardware used in this work consists of 2 identi-
+sults involve large numbers or heterogeneous machines in cal Dell Precision 360n systems, each with a 2.8 GHz proces-
+complex setups. For simplicity, this work only considers the sor and 2GB RAM. A gigabit ethernet switch networks the
+situation with a single database server (back-end) and a sin- systems through the built-in gigabit ethernet interfaces. As
+gle web server (front-end); an illustration can be found in Fig- show in Figure 1, one machine is used for each of the front-
+ure 1. Although the throughput of this relatively small system and back-end systems, while a separate machine hosts the
+(reported in Section 4) is signiﬁcantly less than that of a com- RBE and the tuning agent. In a true reconﬁgurable system,
+mercially built system, this is due to the substantial difference the tuning agent would likely reside either inside the parti-
+in overall resources, and the throughput is not unexpected for tionable system or on a management system.
+an experimental system.                                 Although, in practice, the front- and back-end systems are
+  The TPC-W speciﬁcation places some strict restrictions on physically independent machines, they are meant to represent
+various facets of the system. One example is that most pages partitions within a single reconﬁgurable system with a total
+contain a set of random promotional items displayed at the of 2.8GHz of processing power and 2 GB RAM. In order to
+top; these items are expected to be randomly selected each simulate partitioning such a system into 2 partitions, CPU and
+time the page is generated. We relax this requirement: in our memory are artiﬁcially constrained on the two machines. The
+
+                                                IJCAI-07
+                                                  1114CPU is constrained by a highly favored, periodic busy-loop all of the workload, this would require customizing the mid-
+process; memory is constrained using the Linux mlock() sub- dleware for each online store.
+routine. The constraints on the two systems are set in such a However, previous work [Wildstrom et al., 2005] has
+way as to only allow, overall, one full 2.8 GHz processor and shown that low-level operating system statistics can be used
+2GB memory to be used by the combined front- and back- instead to help suggest what conﬁguration should be used in
+ends. For example, if the back-end is allowed 2.0 GHz, the a workload-oblivious way. This approach has the advantage
+front-end only has 0.8 GHz available.                 of not requiring any customized instrumentation. By instead
+  By using both of these constraining processes simultane- using out-of-the-box versions of software, this method allows
+ously, simulation of any desired hardware conﬁguration is for easy replacement of any part of the system without need-
+possible. Additionally, the processes are designed to change ing signiﬁcant reimplementation. Low-level statistics also do
+the system constraints on the ﬂy, so we can simulate recon- not refer to workload features, and so might be easier to gen-
+ﬁguring the system. In order to ensure that we never exceed eralize across workloads. For these reasons, we use the low-
+the total combined system resources, we must constrain the level statistics in preference to customized instrumentation of
+“partition” that will be losing resources before granting those either the operating system or the middleware.
+resources to the other “partition.”
+                                                      3.1  Training the model for a learning agent
+2.4  The tuning agent
+                                                      In order to automatically handle workload changes, we train a
+The tuning agent handles real-time reconﬁguration. There
+                                                      model to predict a target conﬁguration given system statistics
+are three phases to the reconﬁguration. First, the number of
+                                                      about overall resource use. To collect these statistics, each
+allowed database connections is modiﬁed. Once this com-
+                                                      machine runs the vmstat command and logs system statistics.
+pletes, any CPU resources being moved are constrained on
+                                                      Because it is assumed that a true automatic reconﬁgurable
+the machine losing CPU and added to the other; then memory
+                                                      system would supply these statistics through a more efﬁcient
+is removed from the donor system and added to the receiving
+                                                      kernel-level interface, this command is allowed to take prece-
+system. Each step completes before the next is begun.
+                                                      dence over the CPU constraining process.
+  There are two types of tuning agents we simulate. The ﬁrst
+is an omniscient agent, which is told both the conﬁguration vmstat reports 16 statistics: 2 concerning process quantity,
+to switch to and when the reconﬁguration should occur based 4 concerning memory use, 2 swapping, 2 I/O, 4 CPU use,
+on perfect knowledge. The omniscient agent is used to obtain system interrupts, and context switches. In order to make this
+upper bound results. This uses a known set of conﬁgurations more conﬁguration-independent, the memory statistics are
+that maximizes the system performance, thus allowing us to converted to percentages. The resulting vector of 32 statis-
+have a known optimal performance against which to compare. tics (16 from each partition), as well as the current conﬁg-
+                                                      uration of the system, comprise the input representation for
+  The second agent is one that makes its own decisions as to
+when to alter the conﬁguration. This decision can be based on our trained model. The model then predicts which conﬁgura-
+                                                      tion will result in higher throughput, and the agent framework
+a set of hand-coded rules, a learned model, or any number of
+                                                      reconﬁgures the system accordingly.
+other methods. The agent we discuss in this paper is based on
+a learned model that uses low-level system statistics to predict For our experiments, we consider two possible system con-
+the better option of two conﬁgurations. This learned version ﬁgurations using 3 resources: CPU, memory, and number of
+of the tuning agent is discussed in detail in Section 3.1 connections (Table 2). A wide range of possible CPU, mem-
+                                                      ory, and connection limits were investigated, and the selected
+                                                      conﬁgurations maximize the throughput for the extreme situ-
+3  Handling Workload Changes                          ations. In particular, connection limits, although not a hard-
+While provisioning resources in a system for a predictable ware resource, were necessary to keep the database from
+workload is a fairly common and well-understood is-   becoming overwhelmed by large numbers of queries during
+sue [Oslake et al., 1999], static conﬁgurations can perform heavy browsing periods.
+very poorly under a completely different workload. For ex-
+ample, there is a common phenomenon known as the “Slash-              Database      Webserver
+dot effect,” where a little-known site is inundated by trafﬁc Conﬁg. CPU  Mem.    CPU    Mem.    Conn.
+after being featured on a news site. We consider the situation      11             5
+                                                         browsing   16   0.75 GB   16   1.25 GB   400
+where this site is an online store, which is conﬁgured for a        13             3
+                                                          ordering       1.25 GB        0.75 GB  1000
+normal workload of ordering and shopping users. The large           16             16
+number of unexpected browsing users appearing can over- Table 2: Conﬁgurations (resource distributions and database con-
+whelm such a site that is not prepared for this unexpected nections allowed) used in the experiments.
+change in workload. We call this situation a workload spike.
+  In addition to such drastic changes, the situation where the In order to acquire training data, 100 pairs of varied TPC-
+workload gradually changes is also possible and must be han- W runs are done. Each pair of runs consists of one run of a
+dled appropriately.                                   set workload on each conﬁguration; the workload consists of
+  Unfortunately, in practice, the workload is often not an eas- 500 shopping users and a random number (between 500 and
+ily observable quantity to the system. While it is possible to 1000) of either browsing or ordering users (50 pairs each).
+instrument the system in various ways to help observe part or Each run has 240 seconds of ramp-up time, followed by a
+
+                                                IJCAI-07
+                                                  1115400 second measurement interval, during which 200 seconds 3.2 Evaluating the learned model
+of vmstat data are also collected.                    We present two types of workload changes: the gradual
+  From the combination of WIPS and system statistics gath- change and the workload spike. We concentrate our evalu-
+ered on each run, a set of training data points are created for ation on the workload spike, as sudden changes in workload
+each pair in the following way. First, the system statistics require faster adaptation than a gradual change.
+from each run are divided into non-overlapping 30 second in- For simplicity, we describe only the simulation of a
+tervals. The average system statistics over each interval are browsing spike below; ordering spikes are simulated in
+the input representation for one data point. Next, the conﬁg- a similar fashion. Three random numbers are generated
+uration with the higher throughput (in WIPS) is determined {X1,X2,X3}∈[500, 1000]. The base workload consists
+to be the preferred conﬁguration for all data points generated of 500 shopping users with X1 ordering users. This work-
+from this pair. In this way, each of the 100 pairs of runs gen- load reaches the steady state (240 seconds of ramp-up time),
+erates 12 data points.                                and then there are 200 seconds of measurement time. At that
+  Given training data, the WEKA [Witten and Frank, 2000] point, the workload abruptly changes to a browsing inten-
+package implements many machine learning algorithms that sive workload, with X2 browsing users replacing the order-
+can build models which can then be used for prediction. In ing users. The spike continues for 400 seconds. After this
+order to obtain human-understandable output, the JRip [Co- time, the workload abruptly reverts to an ordering intensive
+hen, 1995] rule learner is applied to the training data. For the workload, with X3 ordering users. After 200 more seconds,
+generated data, JRip learned the rules shown in Figure 2. the measurement interval ends.
+  As can be seen in Figure 2, JRip determines a complex rule We also simulate a gradual change. For this, we begin
+set that can be used to identify the optimal conﬁguration for with a workload that consists of 500 shopping users and 800
+unobserved workload. 8 of the 32 supplied systems statistics browsing users. After 240 seconds of ramp-up time and 200
+are determined to be of importance; these 8 are evenly split seconds of measurement time, 200 browsing users are con-
+over the front- and back-end machines. We can see that all verted to the ordering mix; this repeats every 100 seconds un-
+of the front-end statistics used are either related to execution til all the users are running the ordering mix, at which point
+time or memory use, while the back-end statistics sample al- the measurement interval continues for 300 more seconds.
+most all statistic areas. We also note that the rules specify Each workload is tested under 4 hardware conﬁgurations.
+a means of identifying one conﬁguration over the other; the As baselines, both static conﬁgurations execute the workload.
+browsing-intensive conﬁguration is taken as the “default.” Additionally, because we know when the spike takes place
+  If we look at the rules in some more depth, we can identify and when it ends, we can test the optimal set of conﬁgura-
+certain patterns that indicate that the rules are logical. For tions with the omniscient agent. For the gradual change, we
+example, rules 1 and 3 both set a threshold on the amount of can see where each conﬁguration is optimal and force the om-
+time spent by the database waiting for I/O, while rule 5 indi- niscient agent to reconﬁgure the system at that point. Finally,
+cates that a large percentage of the memory on the database is the learning agent is allowed to completely control the con-
+in use. All three of these indicators point to a situation where ﬁguration based on its observations.
+more memory could be useful (as in the database-intensive The agent continuously samples the partitions’ system
+conﬁguration). When memory is constrained, the database statistics and predicts the optimal conﬁguration using a slid-
+ﬁles will be paged out more frequently, so more time will be ing window of the most recent 30 seconds of system statis-
+spent waiting on those pages to be read back in. Other trends tics. If a conﬁguration chance is determined to be beneﬁcial,
+are discussed in [Wildstrom et al., 2006].            it is made immediately. After each conﬁguration change, the
+                                                      agent sleeps for 30 seconds to allow the system statistics to
+  To verify our learned model, we ﬁrst evaluate the perfor- reﬂect the new conﬁguration.
+mance of JRip’s rules using stratiﬁed 10-fold cross valida-
+tion. In order to prevent contamination of the results by hav-
+ing samples from a single run appearing in both the training 4 Results and Discussion
+and test sets, this was done by hand by partitioning the 100 Evaluation of the learning agent is performed over 10 ran-
+training runs into 10 sets of 10 runs (each set having 120 data dom spike workloads. Of these workloads, half are browsing
+points). The 10 trials each used a distinct set as the test set, spikes and half are ordering spikes. Each workload is run
+training on the remaining 9 sets. In this test, JRip correctly 15 times on each of the static conﬁgurations, as well as with
+predicts the better target conﬁguration 98.25% of the time. the learning agent making conﬁguration decisions, and ﬁnally
+  One important facet of the rules learned is that they are with the omniscient agent forcing the optimal hardware con-
+domain-speciﬁc; although these rules make sense for our dis- ﬁguration. The average WIPS for each workload are com-
+tributed system, different rules would be necessary for a sys- pared using a student’s t-test; all signiﬁcances are with 95%
+tem where, for example, both processes are CPU-heavy but conﬁdence, except where noted.
+perform no I/O (such as a distributed mathematical system). Overall, the learning agent does well, signiﬁcantly outper-
+While we do not expect rules learned for one system to apply forming at least one static conﬁguration in all 10 trials, and
+to a completely different system, training a new set of rules outperforming both static conﬁgurations in 7 of them. There
+using the same methodology should have similar beneﬁts. By are only 2 situations where the adaptive agent does not have
+learning a model, we remove the need to explore the set of the highest raw throughput, and in both case, the adaptive
+possibly relevant features and their thresholds manually. agent is within 0.5 WIPS of the better static conﬁguration.
+
+                                                IJCAI-07
+                                                  1116The ordering-biased conﬁguration should be used if any column in the following table is satisﬁed:
+               Execution time waiting for I/O   > 6.96%              > 5.45%
+               Memory active                                                              > 82.76%
+               Context switches per second      > 509.38
+                                                                     < 2761.88
+           Database Blocks received per second
+               Execution time in user space               < 44.90%
+               Execution time in kernel space                                  < 32.53%
+               Memory active                   > 30.15%
+          App.
+            Server Memory idle                                       < 49.19%  < 40.94%
+Otherwise, the browsing-biased conﬁguration should be used.
+                   Figure 2: JRip rules learned by WEKA. Numbers are averages over a 30-second interval.
+
+                         Conﬁguration                 provement than in the ordering spike tests; on average, the
+  Spike Type  adapt.  browsing  ordering omnisc.      learning agent is 1.3 WIPS below the omniscient agent.
+   ordering    77.0     69.2      69.1     77.0         In many of the trials, we see some sudden, anomalous
+   browsing    70.7     64.6      69.5     72.1       drops in throughput (at approximately 900 seconds in the
+Table 3: Average results (in WIPS) of different conﬁgurations run- browsing and omniscient conﬁgurations in Figure 3). These
+ning a spike workload.                                drops can sometimes confuse the agent. We believe this
+                                                      confusion is due to abnormal database activity during the
+                                                      anomaly. The cause of the anomalies has been identiﬁed2;
+The agent never loses signiﬁcantly to either static conﬁgura- future work will eliminate these anomalies.
+tion. Results can be found in Table 3.                  In addition to spikes of activity, we test gradual changes in
+  In addition to performing well as compared to static con- workload to verify that the agent is capable of handling grad-
+ﬁgurations, the learning agent even approaches the accuracy ual changes as detailed in Section 3.2. Over 20 runs, the aver-
+of the omniscient agent. In 4 of the 5 ordering spike tests, the age throughputs of the browsing- and ordering-intensive con-
+adaptive agent is no worse than 0.5 WIPS below the omni-
+                                                 1    ﬁguration are 70.7 and 69.3 WIPS, respectively. The learning
+scient agent, actually showing a higher throughput in 2 tests . agent handles this gradual change gracefully, winning overall
+One typical example of the throughputs of each of the four with an average throughput of 76.6 WIPS. There is also room
+conﬁgurations on an ordering spike can be seen in Figure 3. for improvement, as the omniscient agent, which switches
+                                                      conﬁgurations when there are 400 users running each of the
+                                                      browsing and ordering workloads, signiﬁcantly outperforms
+                                                      the learning agent with an average throughput of 79.1 WIPS.
+                                                        This method for automatic online reconﬁguration of hard-
+                                                      ware has deﬁnite beneﬁts over the use of a static hardware
+                                                      conﬁguration. Over a wide variety of tested workloads, it
+                                                      is apparent that the adaptive agent is better than either static
+                                                      conﬁguration considered. While the agent has room for im-
+                                                      provement to approach the omniscient agent, omniscience is
+                                                      not a realistic goal. Additionally, based on the rule set learned
+                                                      by the agent, it is apparent that the problem of deciding when
+                                                      to alter the conﬁguration does not have a trivial solution.
+
+                                                      5   Related Work
+                                                      Adaptive performance tuning through hardware reconﬁgura-
+                                                      tion has only recently become possible, so few papers address
+                                                      it directly. Much of the work done in this ﬁeld thus far deals
+Figure 3: WIPS throughput for each of the conﬁgurations during with maintaining a service level agreement (SLA). While this
+an ordering spike, averaged over 15 runs. The graph at the bottom work is similar (relevant examples are cited below), this is a
+shows how many learning agents had chosen each conﬁguration at a fundamentally different problem than that which we are in-
+given time; these choices are all averaged in the “adaptive” graph. vestigating, where there is no formal SLA against which to
+                                                      determine compliance. This section reviews the most related
+  In handling browsing spikes, the agent consistently ex- work to that reported in this paper.
+ceeds the throughput of one static conﬁguration and always IBM’s Partition Load Manager (PLM) [Quintero et al.,
+performs at least as well as the other static conﬁguration. In 2 2004] handles automatic reallocation of resources. While
+of the 5 tests, the agent actually wins signiﬁcantly over both
+conﬁgurations. However, the agent has more room for im-  2The database was not reanalyzed after population; as a result, all
+                                                      administrative tasks took a very long time performing sorts, which
+  1Presumably due to measurement noise.               put a massive strain on the database
+
+                                                IJCAI-07
+                                                  1117

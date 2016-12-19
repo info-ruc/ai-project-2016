@@ -1,0 +1,361 @@
+                        An Experts Algorithm for Transfer Learning
+
+                                   Erik Talvitie and Satinder Singh
+                                         University of Michigan
+                                   Computer Science and Engineering
+                                     {etalviti, baveja}@umich.edu
+
+
+                    Abstract                          on the number of experts, rather than the size of the problem.
+                                                      In order to enforce this restriction, the algorithm we present
+    A long-lived agent continually faces new tasks in makes no use of state observations or the actions being taken
+    its environment. Such an agent may be able to use by the experts, even if this information is available.
+    knowledge learned in solving earlier tasks to pro-  What can we expect from such an agent? Let πB denote the
+    duce candidate policies for its current task. There
+                                                      “best” expert, the one that has the largest expected asymptotic
+    may, however, be multiple reasonable policies sug- average reward. One objective could be to have the agent’s
+    gested by prior experience, and the agent must    actual return at every time step be near the asymptotic re-
+    choose between them potentially without any apri-         B
+                                                      turn of π . This is clearly unreasonable because even if the
+    ori knowledge about their applicability to its cur- agent knew the identity of πB to begin with, any mediator
+    rent situation. We present an “experts” algorithm would need time close to the (unknown) mixing time of πB
+    for efﬁciently choosing amongst candidate policies
+                                                      to achieve that return. Intuitively, the mixing time of a policy
+    in solving an unknown Markov decision process
+                                                      is the amount of time it takes to thereafter guarantee return
+    task. We conclude with the results of experiments close to its asymptotic return. Thus we need a more reason-
+    on two domains in which we generate candidate
+                                                      able objective. In this paper, we provide a mediator algorithm
+    policies from solutions to related tasks and use our
+                                                      that, in time polynomial in T , accomplishes an actual return
+    experts algorithm to choose amongst them.         close to the asymptotic return of the best expert that has mix-
+                                                      ing time at most T . Thus, as the mediator is given more time
+1  Introduction                                       to run it competes favorably with a larger subset of experts.
+An agent in a sufﬁciently complex environment will likely
+face tasks related to those it has already solved. Given a good 1.1 Relationship to Existing Work
+policy for a related task, the agent could determine a reason- The idea of using state mappings to known MDPs to gener-
+able policy for its current task by mapping its current situa- ate knowledge about other MDPs is not entirely novel. For
+tion to an analogous one in the task it knows about, and then instance, homomorphisms between MDPs have been used to
+taking the action it would take in that situation. There may, generate abstractions of problems, allowing for compact rep-
+however, be many reasonable ways for the agent to apply its resentations that induce policies in the full problem [?].In
+experience to its new situation and, without any knowledge this work, we do not restrict mappings to any special class,
+about the new problem, there may be no way to evaluate them nor do we seek an optimal mapping. Rather, we consider
+apriori.                                              that, though an optimal mapping may be difﬁcult (or impos-
+  In particular, we represent the agent’s sequential decision sible) to calculate, a set of “reasonable” mappings may be
+making problem as a Markov decision process (MDP). We heuristically generated. Though there will be no guarantee
+assume it has learned an optimal policy for one MDP, M, on the quality of any of these policies, we will use “experts”
+and now faces a new, unknown MDP, M . The agent has a algorithms to efﬁciently choose amongst them to ﬁnd a good
+group of candidate policies for M  which are generated from (albeit suboptimal) policy quickly.
+mappings from the states in M  to those in M along with There is much work in learning to use the advice of a
+the agent’s policy in M. Following terminology used often team of “experts” to perform a task, though traditionally
+in supervised learning settings, we can think of these policies this has been focused on a supervised learning setting [?;
+as “experts” that advise the agent on what to do. The agent, ?; ?]. However, because of its sequential nature, our prob-
+then, must mediate these experts in order to leverage their lem is more clearly related to the multi-armed bandit prob-
+knowledge in learning a solution to its new task.     lem [?], which has long stood as a canonical example of the
+  The agent could simply ignore the expert advice and learn “exploration-exploitation” tradeoff in on-line learning. An
+the new task from scratch. Ideally, however, the experts agent is presented with a slot machine with several arms.
+would provide signiﬁcant savings in learning time. Therefore Each pull of an arm yields some reward, drawn from an un-
+we desire an algorithm with a sample complexity dependent known, ﬁxed distribution. The agent’s goal is to minimize its
+
+                                                IJCAI-07
+                                                  1065regret (the difference between the reward it would have got- A policy π on an MDP M is a probability distribution over
+ten by always pulling the best arm and the reward it actually actions, conditioned on state and time. We write πt(s, a)=
+receives). Lai and Robbins provided an algorithm that, for T P(a|s, t), the probability of taking action a in state s at time
+                                                                                        
+pulls, achieves a regret of O(log T ) as T →∞[?]. Though t. A policy is stationary if πt(s, a)=πt (s, a) ∀t, t.Forthe
+the similarity to our setting is clear, these results relied on the remainder, all policies mentioned are assumed to be station-
+fact that each arm has a ﬁxed reward distribution over time, ary unless otherwise stated.
+which is not the case when the “arms” are policies on a shared A T -path in M is a sequence p of T states and we will
+                                                            π
+MDP.                                                  write PM (p) to mean the probability of traversing p in M
+  An important generalization of the multi-armed bandit while following policy π. A policy is called ergodic if, as
+problem removed all statistical assumptions about the se- the number of steps approaches inﬁnity, the probability of be-
+quence of rewards assigned to each arm, allowing an adver- ing in any particular state approaches a ﬁxed limiting value.
+sary to select the reward distribution√ of each arm at every time An MDP M is called unichain if all stationary policies are
+step [?]. Auer et al. provide a O( T ) bound on the regret us- ergodic. We restrict our attention to unichain MDPs.
+ing their algorithm Exp3, even in this adversarial setting. In Let M be an MDP, π be a policy on M,andp be a T -
+their analysis, Auer et al. assumed the adversary creates an path in M. Then the expected undiscounted return along p is
+                                                      U   p    1 R    ... R          R
+a priori ﬁxed sequence of reward distributions, which is not M ( )= T ( i1 + + iT ),where i is the expected return
+affected by the actions of the decision maker. Since choosing at state i. The expected undiscounted T -step return from state
+                                                                                π             π
+different sequences of experts may result in different dynam- i when following policy π is UM (i, T )= p PM (p)UM (p)
+ics on the underlying MDP, the bounds on Exp3 do not apply and the asymptotic expected undiscounted return from state
+                                                           π                π
+in our setting. Nevertheless, because of the clear similarity of i is UM (i) = limT →∞ UM (i, T ). Note that for an ergodic
+                                                                π                                      π
+its setting to ours, we will compare our algorithm to Exp3 in policy π, UM (i) is independent of i and so we will write UM
+our empirical work.                                   for the asymptotic return. Hereafter, we will drop the explicit
+  The algorithm we present here is most closely related to dependence on the unknown but ﬁxed MDP M.
+a family of algorithms collectively called “Exploration Ex- In our problem setting, an agent is acting on an unknown
+ploitation Experts methods” (EEE) [?]. These algorithms MDP. It is provided with a set E of stationary policies, or
+select amongst experts in an adversarial setting, in which “experts.” At each step, the agent must choose one of the
+the environment “chooses” observations bt depending on the experts to act on its behalf. It does not perceive the current
+agent’s past actions a1,a2, ..., at−1, giving the agent reward state or the action taken, but it does receive the reward signal.
+R(a(t),b(t)) at each time step. They say an expert e has an The goal of the agent is to achieve an undiscounted return
+achievable τ-value μ if there exists a constant cτ ≥ 0 such close to the expected asymptotic return of the best expert in
+            s                       h
+that at any step 0 with any possible history s0 and any num- an efﬁcient amount of time.
+berofstepst,                                            The central problem is that the agent does not know the
+                                                    experts’ mixing times. It can never be sure that following an
+              s0+t                    c
+            1      R  a s ,b s   ≥ μ −  τ             expert for any ﬁnite number of steps will provide it with a
+        E   t        ( e( ) ( ))       sτ             good estimate of that expert’s asymptotic quality. We now
+             s=s0+1                                   present our algorithm, which explicitly addresses this issue.
+  The EEE algorithms achieve a return close to the highest
+achievable τ-value in time polynomial in cτ .         3   AtEase: A Policy-Mediating Algorithm
+  Our setting is a special case of that considered by de Farias
+and Megiddo, as we assume the environment is governed by In this section we present a stylized algorithm that facil-
+an MDP, rather than allowing it to depend on the entire his- itates analysis. In our experiments, we will introduce a
+tory. As such, our algorithm is quite similar to those in the few practically-minded alterations. We call our algorithm
+EEE family. By considering this special case, however, we AtEase for ”Alternating trusting Exploration and suspicious
+                                                                                                    T
+can characterize its direct dependence on the mixing times exploitation.” It proceeds in iterations indexed by =
+                                                       , , ,...
+of the policies, rather than on the abstract quantity cτ .This 1 2 3 . Each iteration involves a trusting exploration
+allows us to formally understand how our algorithm will per- phase followed by a suspicious exploitation phase. In the
+                                                                                                     T
+form during its entire run-time and also gives us strong intu- trusting exploration phase, AtEase tries every expert for exp
+                                                                 T                         T
+ition for when our algorithm will be most useful.     steps (where exp is a ﬁxed polynomial of ), regardless of
+                                                      any previous disappointments the expert may have caused
+                                                      and regardless of how poorly it may be doing during that
+2  Preliminaries                                      ﬁxed time. In the suspicious exploitation phase, AtEase ranks
+In a Markov Decision Process (MDP) an agent perceives the experts according to their performance in the exploration
+the state of the world (from a ﬁnite set S) and decides on phase. It then tries using the best expert for a constant num-
+an action (from a set A). Given that state and action, the ber of batches (which we shall call l), each Texp steps long. If
+world probabilistically transitions to a new state and the agent the return of any of those batches is much lower than the ex-
+receives some reward (drawn from a distribution associated pert’s return in the exploration phase, AtEase stops using the
+with the new state). We will assume that rewards are bounded expert and proceeds to exploit the next best. This process of
+and non-negative (if the former holds, the latter is easy to elimination is continued until either there are no more experts
+obtain by adding the minimum reward to all reward signals). or until one expert lasts long enough in the exploitation phase
+
+                                                IJCAI-07
+                                                  1066                 Arguments: >0, 0 <δ<1,   Rmax >  0,setE of experts
+                 Initialize: T ← 1
+                 Trusting Exploration Phase
+                 1. Run each expert for Texp (polynomial of T) steps, recording their Texp–step returns
+                 2. Set E ← E
+                                    
+                 3. Sort the experts in E by their Texp–step returns, U˜.
+                 Suspicious Exploitation Phase
+                 4. If E = ∅ then set T ← T +1and goto 1.
+                                                                   
+                 5. Let e be the expert with the highest Texp–step return in E .
+                 6. Run e for a batch of Texp steps.
+                                                    e                      
+                 7. If return of e for the batch is less than U˜ − 4 then remove e from E and goto 4.
+                 8. If e has run for lTexp steps then T ← T +1and goto 1. Otherwise goto 6.
+
+                                 Table 1: Pseudocode for the AtEase algorithm
+
+
+                                                             T,
+without being eliminated. These two phases are repeated with of opt(ΠE ) with probability at least 1−δ in time polynomial
+                                                               1 1
+increasing durations in order to allow for the possibility that in T , |E|,  , δ , and Rmax.
+some experts may have long mixing times but will perform Note that if the mixing time of the asymptotically best ex-
+well in the long run. Pseudocode is provided in Table ??. pert is T ∗, then the actual return of AtEase will compete with
+  Note that if we ever reach an iteration which has an associ- that expert in time polynomial in T ∗. So, if the asymptoti-
+ated exploration time greater than the mixing time of all of the cally best expert mixes quickly, the performance of AtEase
+experts, the problem of choosing the best expert is precisely will compare favorably to that expert quickly even if other
+the stochastic multi-armed bandit problem. Unfortunately, experts have much longer mixing times.
+there is no way for the agent to ever know it has reached this At ﬁrst glance, Theorem ?? seems to imply that the sample
+point. Thus, each iteration is conceptually like a bandit al- complexity of AtEase is completely independent of the num-
+gorithm trying to choose amongst the unknown set of experts ber of states and actions in the MDP environment. This is not
+that have mixing times less than the exploration time. Ex- the case, however, because the mixing time of the experts will
+perts are rejected during exploitation in order to minimize the in general be dependent on the size of the MDP state space.
+effect of experts that have not yet mixed.            Indeed the mixing time of the asymptotically best expert may
+  AtEase will take as input a conﬁdence parameter δ,anap-
+                                                     be exponential in the size of the state space. However, as
+proximation parameter , a bound on the maximum reward we have pointed out before, no algorithm can avoid at least
+Rmax, and a set of experts E. We will show that with high
+                   T                    T             running the best experts for its mixing time and the only de-
+probability and for all , in time polynomial in the actual pendence of AtEase on the complexity of the MDP is entirely
+return of AtEase will compare favorably with the expected due to this unavoidable dependence on the mixing time.
+return of the best policy that mixes in time T .
+  Rather than use the standard concept of mixing time, we
+will use the weaker, but more directly applicable notion of - 4 Empirical Illustrations
+expected-return mixing time [?]1 (they also related it to more In this section, we use two toy problems to study the applica-
+standard deﬁnitions of mixing time).                  bility of the AtEase algorithm in comparison to other experts
+                                                      algorithms. It has been found that, despite the existence of
+Deﬁnition 1. Let M be an MDP and let π be an ergodic
+                                                      more sophisticated techniques, a simple -greedy algorithm,
+policy on M.The-expected-return mixing time of π, denoted
+                                          π          which either chooses the arm that looks the best so far or,
+Tπ is the smallest T such that for all t ≥ T,maxi |U (i, t) −
+ π                                                    with probability  chooses an action at random, was difﬁcult
+U  |≤.
+                                                      to beat in practice [?]. We therefore use -greedy as our repre-
+Deﬁnition 2. Let E be a set of stationary, ergodic experts sentative of bandit algorithms. We compare -greedy and the
+                   T,
+on MDP  M.ThenΠE       denotes the set of experts in E previously discussed Exp3 algorithm to a slightly more prac-
+whose -expected-return mixing time is at most T and deﬁne tical version of AtEase, denoted AtEasel (for AtEase-lite),
+     T,              π
+opt(ΠE )=maxπ∈ΠT,   U  .                             which contains a few modiﬁcations designed to help speed
+                  E                                   convergence.
+                              T       l
+  So, with appropriate selection of exp and , in time poly- AtEasel differs from AtEase in how it increases the ex-
+nomial in any mixing time, T , AtEase will achieve return
+            T,                                       ploration time, the number of exploitation batches, and how
+close to opt(ΠE ), with high probability. We now formalize it chooses experts to be eliminated in the exploitation phase.
+this claim in Theorem 1, which, because of its similarity to After each full iteration, the exploration time is multiplied
+de Farias and Megiddo’s results, we present without proof. by some constant, C, rather than incremented. These larger
+Theorem  1. For all T , given input parameters , δ, and jumps in exploration time help expand the number of mixing
+Rmax,theAtEase  algorithm’s actual return will be within  experts more quickly. Rather than a large constant, the num-
+                                                      ber of exploitation batches is set equal to the exploration time,
+  1Kearns & Singh called it -return mixing time.     reducing the impact of earlier iterations. Finally, during the
+
+                                                IJCAI-07
+                                                  1067                (a)  10−armed Bandit Problem (b) Mixing Problem      (c)
+                 1                        1                              The Mixing Problem
+                  ε−Greedy
+                                                                         B:0       B:0
+                                                                              A:0
+                0.8                       0.8   AtEasel
+
+                          AtEasel                  ε−Greedy               12
+                0.6                       0.6
+                    Exp3
+                                                                              A:0
+                                                                         C:0.5
+                0.4                       0.4                                      C:1
+                                                                        Expert 1  Expert 2
+                                                                                0.9
+                                          0.2                                      0.1
+                0.2                          Exp3
+                                         Average  Reward per Time Step
+               Average  Reward per Time Step 0 0
+                 0   2000 4000 6000 8000   0   2000 4000 6000 8000       1.0
+                         Time Step                Time Step           1.0             1.0
+
+ Figure 1: Results from toy problems. See text for descriptions. Results for all three algorithms were averaged over 100 runs.
+
+suspicious exploitation phase, experts are abandoned if the (a) RoboCup Keepaway (b)  Delivery Domain
+performance of any batch falls below the next best expert’s         Ball                       1
+                                                                               Queue 1
+estimate minus some constant . This ensures that even if the                          1
+best expert has not yet mixed, it will continue to be exploited Keeper
+                                                                    Taker                       Conveyor
+if it has been performing better than the alternatives. For the                                 Belts
+sake of clarity in these simple experiments, we set C =10
+and  = ∞ (so the exploitation phase is not suspicious).                         Queue 2
+                                                                                      2        2
+  The ﬁrst problem (Figure ??) is a standard 10-armed bandit
+problem. The underlying MDP has one state and two actions,
+one giving a reward of 1, the other a reward of 0. Each expert Figure 2: The RoboCup Soccer Keepaway domain (a) and the
+i ∈ 1, 2, ..., 10 chooses the rewarding action with probabil- Delivery Domain (b). See text for descriptions.
+   i
+ity 10 andsoexperti has an expected asymptotic return of
+ i                                          
+10 and an -expected-return mixing time of 1 for all .The 5 Applications To Transfer Learning
+algorithms perform similarly in the beginning, though even-
+tually AtEasel is surpassed. This illustrates an aspect of the We now demonstrate the utility of experts algorithms in trans-
+AtEasel algorithm, namely that it continues to explore low- fer settings. As described in the introduction, we imagine an
+return experts for longer and longer periods of time in hopes agent that applies its knowledge from one task to another via
+that they may perform better in the long run. This is neces- some mapping from the original state-space to the new one.
+sary in the case that the underlying domain is an MDP with a Such a mapping, combined with a policy for the old problem
+long mixing time. In this case, however, the result is a much induces a policy on the new state space. Because the agent
+slower convergence time in comparison to the bandit algo- may not be able to identify the optimal mapping, it may be
+rithms. The “sawtooth” pattern seen here shows clearly the advised by multiple “experts” which provide different state
+effects of the alternating exploration and exploitation phases. mappings. The problem of automatically discovering a small
+                                                      set of “reasonable” mappings is a deep one, and well outside
+  The second problem (Figure ??) is a 2-state, 3-action MDP the scope of this paper. In our experiments the mappings are
+(shown in ??). There are two experts. One always choses heuristically created by hand.
+action C in state 1 and action A in state 2. Thus, it has an In this section, we consider two transfer learning problems.
+expected asymptotic return of 0.5 and mixes very quickly. In the ﬁrst, the agent is presented with a task more complex
+The other expert always choses action C in state 2 and in than the one it has learned. Its mappings will therefore rep-
+state 1 choses B with probability 0.9 and A with probabil- resent different ways to discard some state information, in
+ity 0.1. The second expert has an expected asymptotic return order to make use of its knowledge about a simpler space. In
+of 1, but takes longer to mix. This problem highlights the the second, we imagine an agent that loses the use of some of
+strength of AtEasel. Neither -greedy nor Exp3 are likely to its sensors. This agent’s mappings must be educated guesses
+stay with one expert long enough to allow it to mix so they do about how to add state information so as to obtain advice
+not receive good estimates of experts 2’s quality. In contrast from a policy that depends on richer observations.
+AtEasel discovers the second expert quickly and adopts it in
+every subsequent iteration, which accounts for the superior 5.1 RoboCup Soccer Keepaway
+return seen in ??.                                    For the ﬁrst experiment, we used a modiﬁed version of
+                                                      Stone’s RoboCup Keepaway testbed [?]. This domain sim-
+  The results of these simple exeriments are intended to high- ulates two teams of robots: the keepers and the takers (see
+light the strengths and weaknesses of AtEase. In particu- Figure ??). The keepers attempt to keep a ball from the takers
+lar we have seen that AtEase is not effective at solving the for as long as possible. Though this is intended to be a multi-
+stochastic bandit problem in comparison to algorithms specif- agent learning problem, we considered a simpler problem by
+ically designed for that purpose, but when the mixing time of ﬁxing all but one agent’s policy as the provided hand-coded
+the experts is unknown, it may signiﬁcantly outperform algo- policy. The other modiﬁcation made was to the reward signal.
+rithms that do not take mixing time into account.     As originally posed, the reward for any action was the number
+
+                                                IJCAI-07
+                                                  1068       −3  RoboCup Experts                −3 AtEasel and SARSA               −3     ε−Greedy
+ (a) x 10                           (b) x 10                            (c) x 10
+   −2                                 −2                                  −2
+
+   −3                                 −3                                  −3
+
+   −4                                 −4                                  −4
+
+   −5                                 −5                                  −5
+
+   −6                                 −6                                  −6
+
+   −7                                 −7                                  −7
+   Avg.  Reward per Simulation Step   Avg.  Reward per Simulation Step
+                                                                         Avg.  Reward per Simulation Step
+   −8                                 −8                                  −8
+    0       5      10      15           0      5      10      15           0      5       10     15
+          Training Time (hours)              Training Time (hours)              Training Time (hours)
+
+Figure 3: Results from Keepaway. Figure (a) shows the performance of a typical set of experts. In (b), AtEasel ( = .001,
+C = 100), is shown in solid lines, and SARSA (α = .125,  = .01), in dashed lines. In (c) we see -greedy ( = .01).
+
+of steps until the agent next recieved the ball. In this case the       Delivery Domain Results
+                                                            0.2
+average reward will always be 1. Instead, we used a reward                      H−learning
+signal in which the agent recieved no reward for any action       Q1H1          AtEasel
+and at the end of an episode, recieved a reward of -1 (inci- 0.15
+                                                                   Q2H1         ε−Greedy
+dentally, we found that reinforcment learning agents learned        Q2H2
+faster with this reward signal).                                                 Exp3
+                                                            0.1    Q1H2
+  Following [?] we used SARSA(0) with 1D tile-coding and
+a linear function approximator to train agents in 3v2 keep- 0.05
+away for 2000 episodes and then asked if we could use the
+resulting policies to do well in 4v2 keepaway. We gener-
+                                                          Average  Reward per Time Step
+                                                             0
+ated 11 experts, each mapped to 3v2 keepaway by ignoring      0      1      2      3      4       5
+                                                                            Time Steps           5
+a keeper using a different criterion (such as closest, furthest,                               x 10
+“most open,” etc.). A typical spectrum of the performance of
+the 11 experts in 4v2 keepaway is shown in Figure ??.
+                                                      Figure 4: Results from experiments on the Delivery Domain
+  In Figure ?? we see the performance of 10 representative (averaged over 30 runs), comparing AtEasel ( = .01 and
+runs of AtEasel compared to 10 representative runs of linear C =10) to H-learning (ρ =1and α = .001), Exp3.P.1
+SARSA learning 4v2 keepaway from scratch. In this domain, (δ = .1), and -greedy ( =0.1). The label QxHy represents
+the best expert has the longest mixing time. As such, it is no the expert that assumes queue 1 contains job x and after pick
+surprise that AtEasel does not approach the performance of up from queue 1, assumes the agent is holding job y.
+the best expert in the amount of time shown. It is, however,
+in all cases able to quickly avoid the “bad” experts. Also 5.2 The Delivery Domain
+note that, unless the optimal policy is among the experts pro-
+                                                                          [ ]
+vided to AtEasel, it will never achieve optimal return. It is In the delivery domain ? , a robot has to deliver jobs from
+therefore expected that the learning algorithm will eventually two queues to two conveyor belts (Figure ??). Queue 2 pro-
+surpass AtEasel. However, the learner spends a signiﬁcant duces only jobs of type 2, which are destined for conveyor
+amount of time performing poorly. It is this transient period belt 2 and which provide reward of 1 when delivered. Queue
+of poor performance that transfer learning attempts to avoid 1 produces jobs of type 1 and 2 with equal probability. Jobs of
+and AtEasel appears to side-step it effectively.      type 1 are destined for conveyor belt 1 and provide a reward
+                                                      of 5 when delivered. An obstacle (open circle) moves up and
+  We note, however, that because of the episodic nature of down with equal probability. The agent incurs a penalty of -5
+this domain, the return of each episode is an unbiased es- if it collides with the obstacle. The world is fully observable
+timate of an expert’s expected return. Therefore each ex- (with 6 sensors) and the agent has 6 actions available to it:
+pert’s -mixing time is one episode. Thus, by thinking of do nothing, switch lanes, move up, move down, pick up, and
+time in terms of episodes, the problem can be expressed as drop off. The pick up action is only available when the agent
+a stochastic bandit problem. As such, we compare AtEasel has no job and is at a queue. Similarly, the drop off action is
+to -greedy, where each “pull” chooses an expert for a full only available at the appropriate conveyor belt when the agent
+episode. Figure ?? shows 10 representative runs of -greedy. holds a job.
+As we might expect from our toy examples, -greedy seems Following Tadepalli, we trained agents using H-learning,
+to perform better, on the whole, than AtEasel. However, un- an average reward reinforcement learning algorithm (with
+like in the toy experiment, AtEasel does perform compet- ρ =1and α = .001). We then asked if those policies could
+itively with -greedy, and also provides theoretical perfor- still be used if the agents were to lose the 3 sensors that in-
+mance guarantees that -greedy cannot.                dicate which jobs are held in the queues and which job the
+
+                                                IJCAI-07
+                                                  1069

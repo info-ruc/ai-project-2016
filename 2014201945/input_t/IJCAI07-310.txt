@@ -1,0 +1,354 @@
+                 Constraint Partitioning for Solving Planning Problems
+                    with Trajectory Constraints and Goal Preferences∗
+           Chih-Wei Hsu and Benjamin W. Wah               Ruoyun Huang and Yixin Chen
+      Dept. of Electrical and Computer Engineering    Dept. of Computer Science and Engineering
+          and the Coordinated Science Laboratory          Washington University in St Louis
+         University of Illinois, Urbana-Champaign            St Louis, MO 63130, USA
+                  Urbana, IL 61801, USA                          rh11@cec.wustl.edu
+            {chsu,wah}@manip.crhc.uiuc.edu                       chen@cse.wustl.edu
+
+                    Abstract                          π =  (S0,t0), (S1,t1),...,(Sn,tn),whereSi is the inter-
+                                                      mediate state at time ti, a trajectory constraint can be deﬁned
+    The PDDL3    speciﬁcations include soft goals     by a logical formula, respectively, at the end of, to be always
+    and trajectory constraints for distinguishing high- true in, some time in, some time before t of, or at most once in
+    quality plans among the many feasible plans in a  the trajectory. A trajectory constraint can also deﬁned to en-
+    solution space. To reduce the complexity of solv- force one formula before another, or to enforce two formulas
+    ing a large PDDL3 planning problem, constraint    within time t in the trajectory. Clearly, trajectory constraints
+    partitioning can be used to decompose its con-    pose more challenges on planning, even when the number of
+    straints into subproblems of much lower complex-  actions or facts is not increased.
+    ity. However, constraint locality due to soft goals In view of the new features in PDDL3 problems, we study
+    and trajectory constraints cannot be effectively ex- in this paper a partition-and-resolve strategy for solving these
+    ploited by existing subgoal-partitioning techniques problems efﬁciently. For a planning problem, we represent
+    developed for solving PDDL2.2 problems.  In       the actions scheduled as variables and identify constraints on
+    this paper, we present an improved partition-and- mutual exclusion (mutex), goal state, and trajectory for ac-
+    resolve strategy for supporting the new features in tions in a given (possibly infeasible) plan. We then partition
+    PDDL3. We evaluate techniques for resolving vi-   the constraints into subproblems, solve the subproblems in-
+    olated global constraints, optimizing goal prefer- dividually by an existing but modiﬁed planner, and resolve
+    ences, and achieving subgoals in a multi-valued   those violated global constraints across the subproblems.
+    representation. Empirical results on the 5th Inter-
+                                                        Constraint partitioning has been demonstrated to be a
+    national Planning Competition (IPC5) benchmarks
+                                                      very effective technique for solving large planning prob-
+    show that our approach is effective and signiﬁ-
+                                                      lems [Chen et al., 2006]. Because each subproblem only has
+    cantly outperforms other competing planners.
+                                                      a fraction of the original constraints and is a signiﬁcant relax-
+                                                      ation of the original problem, it is of much lower complexity
+1  Introduction                                       as compared to that of the original problem. The technique,
+                                                      however, leads to global constraints across the subproblems,
+As plan quality is a major issue in many planning prob- which can be effectively resolved using the extended saddle-
+lems, traditional quality criteria in PDDL2.2 planning, like point condition [Wah and Chen, 2006].
+makespan, are inadequate. Inspired by real applications, soft
+                                                        Our constraint partitioning approach has four components:
+goals and trajectory constraints have been introduced in the
+                                                      i) problem representation, ii) attributes used for partitioning,
+PDDL3 speciﬁcations [Gerevini and Long, 2005].
+                                                      iii) partitioning algorithm, and iv) subproblem formulation.
+  Soft goals can be used for modeling goal preferences. For
+                                                      The design of each component depends on the problem rep-
+instance, one may prefer storing crate1 in depot1 to storing
+                                                      resentation and the planner used for solving the subproblems.
+crate1 in depot2, since the latter leads to a higher violation
+                                                      Note that the variables and the constraints of a planning prob-
+cost in the plan metric value. Planning with soft goals entails
+                                                      lem studied are not determined beforehand because the length
+the selection of an appropriate subset of the soft goals when
+                                                      of its solution plan is not known. Hence, we cannot directly
+it is infeasible to achieve all of them. In the worst case, an
+                                                      partition its constraints by a clustering algorithm. Instead, we
+exhaustive search is needed to identify the best subset.
+                                                      identify some problem-dependent attributes that can be used
+  Trajectory constraints, on the other hand, are hard or
+                                                      to characterize constraint localities in an initial (but possibly
+soft constraints over intermediate states during plan exe-
+                                                      infeasible) plan. We then use these attributes to partition the
+cution. They are used to express temporal logic in plan-
+                                                      constraints of the initial plan into subproblems with good lo-
+ning and to identify a good path among the many feasi-
+                                                      calities before solving the subproblems.
+ble paths to a goal state. Informally, for a plan trajectory
+                                                        For IPC4 benchmarks represented in PDDL2.2 [Edelkamp
+  ∗Research supported by the National Science Foundation Grant and Hoffmann, 2004], our original partition-and-resolve
+IIS 03-12084.                                         strategy in SGPlan4 [Chen et al., 2006] partitions the con-
+
+                                                 IJCAI07
+                                                  1924             250
+                                                      2   Partitioning Strategy
+             200
+                                                      In this section, we ﬁrst illustrate the constraint locality of a
+             150                                      PDDL3 problem when it is partitioned by its trajectory con-
+             100                                      straints and soft goals. We then present our partitioning algo-
+            Variable  ID
+             50                                       rithm and the results on some IPC5 benchmarks.
+
+                  50 100 150 200 250 300 350          2.1  Constraint Locality by Trajectory Constraints
+                      Constraint ID                        and Soft Goals
+Figure 1: The constraint-variable structure depicting a strong As is shown in Figure 2a, clustering the constraints of a
+constraint locality when the constraints of the IPC5 Rovers- PDDL3 problem by its subgoals does not lead to high con-
+Propositional-30 instance is clustered by its subgoals. straint locality. Our goal in this section is, therefore, to iden-
+                                                      tify new problem-independent attributes that allow PDDL3
+straints of these benchmarks by their subgoals. The goals of problems to be partitioned with better constraint locality.
+many of these benchmarks are a conjunctive list of facts, with Recall that a solution plan for a PDDL3 problem is rep-
+a strong locality of the mutex constraints by the subgoals of resented in multi-valued variables and satisﬁes mutex, trajec-
+each problem. Here, constraint locality is measured by the tory, and goal-state constraints. We have found that constraint
+fraction of constraints that are global, which span across mul- locality can be improved when some state variables in goal-
+tiple subproblems after the problem has been partitioned. Fig- state constraints (called guidance variables) are used for clus-
+ure 1 shows a strong locality after clustering the constraints of tering the constraints into subproblems. Since the goal-state
+the IPC5 Rovers-Propositional-30 instance [Gerevini et al., representation is also a conjunction of facts, our partition-
+2006] by its subgoals. The approach works well because the and-resolve approach in SGPlan4 can be applied directly.
+goal is indeed a conjunctive list of facts.             Figure 2b illustrates the constraint-variable distribution
+  Subgoal partitioning, however, is not always effective for when we cluster the mutex constraints (in red points) in TPP-
+PDDL3 domains. The presence of soft goals and trajectory QualitativePreferences-5 by the ﬁve guidance variables that
+constraints may lead to constraint localities that are different represent the stored quantity of the ﬁve products. Although
+from those observed in PDDL2.2 domains. Figure 2a depicts constraint locality is greatly improved over that in Figure 2a,
+the constraint-variable distribution after clustering the con- the result is still unsatisfactory because there are a number of
+straints of the TPP-QualitativePreferences-5 instance by its soft constraints (in blue points) that are not localized.
+soft goals. Because trajectory constraints are not considered To address this issue, we further cluster the soft constraints
+in clustering, the result leads to a poor constraint locality. by the same guidance variables. Figures 2c shows that all
+  In clustering constraints of IPC5 instances, we observe that the constraints are now clustered well, leading to a good
+the propositional representation of binary facts in SGPlan4 constraint locality. Note that we may have constraints that
+usually requires superﬂuous facts and obscures many mu- involve a limited number of guidance variables yet exhibit
+texes. For example, the location of truck1 in the TPP do- strong constraint locality. In the next section, we study the
+main is represented by several binary facts, like at(truck1, granularity of partitioning in order to further reduce the num-
+market1), ..., at(truck1, market8), with some implicit con- ber of global constraints.
+straints for enforcing their consistency. To represent these In addition to good locality, one advantage of using guid-
+constraints more compactly, we use a multi-valued domain ance variables is that they can be converted into classical
+formulation (MDF) in this paper based on the SAS+ formal- planning goals. This greatly reduces the efforts of implement-
+ism [B¨ackstr¨om and Nebel, 1995]. MDF has been used in ing a planner for solving a subproblem because current plan-
+several planners for the previous versions of PDDL, including ners can only solve subproblems with nonempty and conﬂict-
+Fast Downward [Helmert, 2004] and the IP planner [van den free goals. This also explains why we cannot arbitrarily con-
+Briel et al., 2005]. This representation makes implicit mu- struct subproblems with inconsistent goals or constraints us-
+texes explicit and reduces the number of global constraints ing direct graph partitioning.
+across the subproblems. For instance, the location of truck1
+can now be denoted by one variable with multiple values. 2.2 Proposed Partitioning Algorithm
+  Our main contributions in this paper are the design of a new Based on our observation that constraint locality is associated
+strategy for clustering and for partitioning the constraints of with some guidance variables, we present in this section our
+PDDL3 planning problems and the demonstration of its suc- algorithm for identifying the guidance variables, selecting a
+cess in a prototype planner. Based on the constraint locality suitable number of partitions, and clustering the constraints
+observed, we partition mutexes and hard and soft trajectory by these variables. As the algorithm requires all the con-
+constraints of a planning problem into loosely related sub- straints to be expressed in MDF, we have implemented a pre-
+problems by some multi-valued state variables. We study processing engine by following the techniques in [Helmert,
+various design options in partitioning and demonstrate their 2004] for translating a PDDL representation into MDF. The
+improvements in constraint locality. To handle the features in use of MDF does not introduce new types of constraints be-
+PDDL3, we develop new techniques, both at the global and cause any mutex in MDF must also be a mutex in PDDL.
+the subproblem levels, for optimizing goal preferences and We ﬁrst deﬁne the guidance variables to be the set of vari-
+for resolving trajectory and mutex constraints.       ables in the goal-state constraints. Once the values of these
+
+                                                 IJCAI07
+                                                  1925                                      160                                160
+    250
+                                      140                                140
+    200                               120                                120
+                                      100                                100
+    150
+                                       80                                80
+    100                                60                                60
+    Variable  ID                       40                                40
+
+     50                               MDF  Variable ID                  MDF  Variable ID
+                                       20                                20
+
+       0   1000 2000 3000 4000 5000      0  200 400 600 800 1000 1200 1400 0  200 400 600 800 1000 1200 1400
+               Constraint ID                   MDF Constraint ID                 MDF Constraint ID
+        a) Na¨ıve clustering by soft goals b) Clustering mutexes by guidance variables c) Clustering mutex and trajectory constraints
+Figure 2: The constraint-variable distributions (after some rearrangement) of the TPP-QualitativePreferences-5 instance that
+show the different degrees of constraint locality using three ways of clustering the constraints.
+
+variables have been determined by satisfying all the hard goal Table 1: Trade-offs on the number of partitions for the Trucks-
+constraints and by minimizing to some extent the penalties of TimeConstraints-20 instance.
+the soft goal constraints, we deﬁne the goal of a subproblem Partitioning Strategy No Partitioning Bottleneck Guidance
+to be a partial assignment of the set of guidance variables. # partitions     1422
+We also specify the maximum number of partitions to be the # global constraints 0        20       573
+                                                         avg. # local const.
+number of guidance variables.                                               21274       1404      230.1
+  The number of partitions is an important parameter of our per subproblem
+                                                                          >
+partitioning algorithm. Although it is desirable to enumer- time/subproblem 1800 sec.  2.04 sec. 0.16 sec.
+ate different numbers of partitions and to study their trade- Bottleneck: # partitions = min(# bottleneck var., # guidance var.)
+offs, it is not the best approach here because there are some Guidance: # partitions = # of guidance variables
+                                                       Subgoal: subgoal partitioning
+problem-dependent features that can be utilized. We employ
+a logical choice through the identiﬁcation of bottleneck vari-
+ables. In various planning domains, some limited objects are titioning is best done with respect to the bottleneck variables.
+the sources of mutexes because actions want to concurrently Finally, we cluster the guidance variables by formulat-
+access them. They can be treated as bottleneck resources that ing a graph partitioning problem. We deﬁne a node in the
+limit parallelism. Speciﬁcally, we search for a group of state graph to be a guidance variable, and an edge between two
+variables of the same type (called bottleneck variables)that nodes when there is a constraint on these variables. We
+the changes of other state variables must depend on. For do not include those constraints that are automatically sat-
+example, the locations of vehicles in the transportation do- isﬁed by the values of the guidance variables. For example,
+mains are bottleneck variables because every action asserts (imply (stored goods11 level1) (stored goods18 level2)) is true if
+the location of one vehicle. Our strategy is to set the num- we have determined the value of stored(goods11) to be level1,
+ber of partitions to be the smaller of the number of guidance and the value of stored(goods18) to be level2. For preferences
+variables and the number of bottleneck variables.     on soft constraints, we set the weight on an edge to be the
+  In addition to MDF analysis, we also identify and remove violation cost of the corresponding soft constraint. Last,
+accompanying state variables in order to eliminate possibly we apply any competent graph partitioning software, such
+redundant guidance and bottleneck variables. These are state as METIS (http://glaros.dtc.umn.edu/gkhome/
+variables whose values can be inferred from the values of views/metis/), to cluster the constraints into groups that
+other state variables. For example, on(crate1, depot0-1-1) im- are related by a minimal number of global constraints.
+plies in(crate1, depot0), given that in(depot0-1-1 depot0) is true
+(where depot0-1-1 is a storage area in depot0). This identiﬁca- 2.3 Results on Some IPC5 Benchmarks
+tion is possible because action add on(crate1, depot0-1-1) must In this section, we report the evaluation results of our pro-
+also add in(crate1, depot0), whereas delete in(crate1, depot0) posed partitioning strategies on some IPC5 benchmarks.
+must also delete on(crate1, depot0-1-1). For each candidate We have chosen the QualitativePreferences track whose in-
+state variable, we test if all its values have the above relation- stances have both soft goals and trajectory constraints. Ta-
+ship with the values of other state variables.        ble 2 shows the average fraction of all constraints that are
+  Table 1 shows the trade-offs in granularity on the IPC5 active global constraints initially for three partitioning strate-
+Trucks-TimeConstraints-20 instance. When the instance is gies. Some entries in the table are zeroes because no parti-
+partitioned with respect to the bottleneck variables, the result tioning was done for those domain-strategy combinations.
+conﬁrms our claim in Section 1 that the time for solving a sub- The result shows that partitioning based on guidance vari-
+problem decreases by three orders of magnitude, whereas the ables leads to better constraint locality than that of subgoal
+number of partitions (and the number of global constraints) partitioning. Further, our strategy for controlling granularity
+is increased by a small number. However, as the number of can avoid exorbitant resolution overheads when the locality is
+partitions is increased further (when partitioning is done with weak and when a subproblem is too complicated to be solved
+respect to the guidance variables), there is diminishing reduc- without partitioning. We address this issue in Section 3.2 us-
+tion in the time to solve a subproblem, whereas the number of ing subproblem-level decomposition techniques. Note that
+global constraints is increased dramatically. In this case, par- all three partitioning strategies work well for the Storage do-
+
+                                                 IJCAI07
+                                                  1926Table 2: Fraction of constraints that are active global con- The planner ﬁrst decides on the values of the partitioning
+straints initially averaged over all the instances of each guidance state vector x before partitioning the constraints.
+IPC5 QualitativePreferences domain under three partitioning The metric value for each assignment x of x is estimated
+strategies. (See the keys in Table 1.)                by solving the following relaxed problem:
+     Domain      Bottleneck Guidance  Subgoal                                        
+                                                                  min   J(x ,π)=Jx(x  )+Jπ(π)
+     TPP           0.0153    0.0733    0.2892                       π
+     OpenStacks    0.0000    0.1728    0.1834                 subject to  H(π)=0,R(x)=0              (1)
+     Trucks        0.0000    0.0749    0.1623                                   S   x,
+     Storage       0.0007    0.0032    0.0109                      and           n
+     Rovers        0.0227    0.0464    0.0488
+                                                      where π =  (S0,t0),...,(Sn,tn) deﬁnes the plan trajec-
+                                                      tory, H(π) is the set of hard constraints, and R(x) is the value
+                                        Techniques                                            
+       Plan        Penalty-Value         Studied      of the reachability test. The metric function J(x ,π) consists
+     Evaluation    Update Strategy                                                               
+                                          Global-     of Jx whose value can be wholly inferred from x ,andJπ
+                                         Constraint   whose value is calculated by evaluating the plan trajectory.
+                                         Resolution                               π
+           Global Constraints on Subproblems          Without additional restriction on , we prune those cases in
+                                         Handling                        H                   x
+                                         Preferences  which the violation of can be deduced from .
+                                                        We ﬁnd the best x by a heuristic search with backtrack-
+                                         Constraint             J  (π)
+         G1     G2             GN        Partitioning ing. Since π    is unknown until planning ends, we use
+    Global-Level Planning                 in MDF      J˜(x,π), the plan metric value of the relaxed plan for x,to
+                                                      estimate J(x,π). This relaxed plan is provided by the ba-
+                                         Granularity  sic planner (modiﬁed Metric-FF) and is used for reachability
+      P1,1    P1,c       PN,1    PN,c
+                1                  N      Control     tests as well. If Jπ(π) is zero, then the above search reduces
+                                                      to an enumeration of all reachable assignments of x.Inthat
+                                                                                         x
+                                         Temporal     case, the solution is optimal when the best for (1) is found.
+                Basic Planner             Engine      In general, our strategy does not guarantee optimality because
+            FF/MCDC Heuristic Planner                                                            J (π)
+                                         Trajectory   the basic planner does not ensure the optimality of π .
+                                         constraints    Sometimes the search can be decomposed by the goal-state
+        Trajectory                        Engine
+                  Temporal                            constraints, and the corresponding variables can be parti-
+        constraints          Search−space
+                   engine
+         engine               reduction   Search-     tioned into disjoint sets. However, since the number of reach-
+                                          Space       able assignments is exponential with respect to x, we gener-
+                                         Reduction
+    Subgoal-Level Planning                            ally limit the number of assignments explored when the space
+                                                      enumerated is still too large after the decomposition.
+          Figure 3: Architecture of SGPlan5.
+                                                        The handling and enumeration of general trajectory con-
+                                                      straints is difﬁcult because it involves a number of interme-
+main because its constraint locality is very strong. However, diate states rather than one ﬁnal state. Further, due to the
+since the instances in this domain have a huge number of con- large feasible space, inconsistencies between constraints are
+straints, even a small fraction of violated global constraints difﬁcult to detect. Our approach is to divide the trajectory
+would need to be resolved in many iterations.         constraints into local and global constraints. Hard local con-
+                                                      straints are enforced by the basic planner, whereas global con-
+3  Architecture of SGPlan5                            straints are resolved by the penalty method. We follow a sim-
+                                                      ilar procedure for resolving mutexes when handling global-
+SGPlan5 partitions a planning problem into subproblems, level trajectory constraints. Since soft constraints do not have
+each with a goal state, and ﬁnds a feasible plan for each to be always satisﬁed, we compute the plan metric at the end
+(Figure 3). In the global level, it partitions the problem of each iteration and record the incumbent. Note that the
+by its guidance/bottlenecek variables and resolves any vio- penalties used for resolving constraint violations differ from
+lated global constraints. In the local level, it calls a modiﬁed the preference weights used for computing the metric value.
+Metric-FF planner for solving each subproblem, using the vi-
+olated global constraints and the global preferences as biases. 3.2 Subproblem-Level Search
+3.1  Global-Level Search                              Our basic planner mainly follows Metric-FF’s heuristic algo-
+                                                      rithm [Hoffmann, 2003], but employs a new heuristic func-
+SGPlan5 solves a planning problem formulated in one ob- tion to better handle the new features in PDDL3. Using MDF,
+jective and one or more constraints. Using a penalty func- we have implemented a new heuristic that is similar to that
+tion of the objective and the transformed constraint func- in Fast Downward [Helmert, 2004].Ourminimum causal
+tions weighted by their penalties, it looks for extended sad- dependency-cost (MCDC) heuristic employs a complete re-
+dle points (ESPs) of the function [Wah and Chen, 2006].In cursive depth-ﬁrst search for generating a heuristic plan with
+each iteration, the planner solves a subproblem by generating the minimum cost and without pruning the causal graphs. In
+a feasible plan that satisﬁes the local constraints as well as to contrast, the Fast Downward heuristic is incomplete since
+minimize the weighted violations of the global constraints. it prunes arcs from the causal graphs. Although MCDC
+
+                                                 IJCAI07
+                                                  1927provides a more accurate heuristic plan, its efﬁciency can- Table 3: Slowdowns of solving some large IPC5 instances by
+not compete with Metric-FF’s “ignore-delete-lists” heuristic some ﬁxed number of partitions with respect to our proposed
+function. We only use MCDC as a better dead-end detector partitioning strategy.
+                            ˜                                        Proposed Strategy   # of Partitions
+R(x) and metric-value estimator J(x, π).                IPC5 Instance
+                                                                    (g, b)min(g, b) 1248g
+  We have implemented the parser and the preprocessor for TPP-PR-30 (20,8)   8     −−4.98        1.00 1.72
+supporting PDDL3 domains. To synchronize the checks of   TPP-MT-40  (25,10)  10    −   16.35 2.92 2.01 1.29
+                                                         TPP-MTC-22  (4,2)   2     −    1.00 −−−
+constraints and the evaluation of violation costs, we encode OpenStacks-PR-30 (100,1) 1 1.00 3.34 4.09 3.34 5.01
+each constraint (resp. preference value) by an artiﬁcial predi- OpenStacks-MT-30 (50,N/A) 50 0.76 0.76 0.76 0.76 1.00
+cate (resp. function). All constraints are grounded, and quan- Storage-PR-30 (20,5) 5 −−45.66    7.64 0.72
+                                                         Storage-TI-30 (20,5) 5    −−40.68       6.15 9.23
+tiﬁers are compiled away. During state transitions, the values Storage-TC-9 (9,5) 5 19.23 3.45 1.98 1.01 0.98
+of these artiﬁcial ﬂuents are derived from the existing trajec- Trucks-PR-20 (20,1) 1 1.00 7.82 10.45 −−
+tory using axioms. Having the above encoding and modiﬁ-  Trucks-TI-30 (32,5) 5    3.27  0.71 0.57 2.23 0.63
+                                                         Trucks-TC-20 (22,4) 4     −   209.12 1.00 12.77 −
+cation allows us to perform a breadth-ﬁrst search (BFS) in Pathways-PR-30 (30,N/A) 30 100.91 37.32 14.37 6.98 1.00
+satisfying the constraints or in optimizing the preferences. Pathways-MT-30 (40,N/A) 40 587.23 213.34 54.31 12.89 1.00
+                                                         Rovers-PR-40 (69,14) 14   −    6.98 5.01 2.78 3.44
+  To improve the efﬁciency of BFS, we incorporate new    Rovers-MT-38 (55,14) 14   −−−2.89            −
+heuristics for constraint satisfaction into Metric-FF’s heuris- PipesWorld-PR-45 (9,26) 9 − 11.73 0.89 1.34 1.00
+tic function. Our solution is to add artiﬁcial facts of local PipesWorld-MT-45 (9,26) 9 − 11.12 0.91 1.28 1.00
+                                                          b:  # of bottleneck variables; g: # of guidance variables
+constraints into the goal state of a subproblem, and compute ’−’: CPU time exceeding 30 minutes; N/A: No bottleneck variables
+the combined heuristic value as the sum of the heuristic value
+for the constraints and that for the subgoal. Since it is not Table 4: Number of instances solved by SGPlan5 with respect
+meaningful to sum the heuristic values for hard and soft con- to the total number of instances (in parenthesis) in each vari-
+                                                           −
+straints, we penalize soft- or global-constraint violations by ant. ( means no instances in that domain. MetTime for TPP
+iteratively increasing their weights.                 and OpenStacks includes both Metric and MetricTime.)
+  Before solving a partitioned subproblem, we can often Domain    Prop. MetTime Simp. Qual. Comp. Const.
+eliminate many irrelevant actions in its search space. We TPP    30(30) 79(80)  20(20) 20(20) 20(20) 18(30)
+identify relevant actions by traversing the causal graphs in OpenStacks 30(30) 40(40) 20(20) 20(20) −−
+MDF and by ignoring those actions that are not useful for Trucks 28(30) 30(30)  20(20) 20(20) 20(20) 20(20)
+achieving the current subgoal variables. We also prioritize Storage 30(30) 30(30) 20(20) 20(20) 20(20) 9(30)
+                                                        Pathways 30(30) 30(30)  30(30) −    30(30)  −
+actions that do not cause an inconsistent assignment of MDF                                   −−
+variables. This is done by ﬁrst ﬁnding the set of bottleneck Rovers 40(40) 32(40) 20(20) 20(20)
+                                                       PipesWorld 30(50) 30(50)  −−15(18)          0(20)
+variables and by applying the helpful-action idea in FF [Hoff-
+mann and Nebel, 2001] to defer those actions that concur-
+rently change the value of the bottleneck variables.  MetricTime has a similar problem structure as that of
+  With the subproblems generated, it is possible that a sub- OpenStacks-Propositional, our strategy fails to detect its
+problem is too complicated to be solved, especially when the weak locality because it does not ﬁnd any bottleneck vari-
+proposed partitioning strategy chooses a small number of par- ables. Moreover, the beneﬁt of partitioning in this domain is
+titions. Reducing the grain size further would not be effective not tangible because its instances are rather easy.
+due to the complexity of resolving the global constraints. For Table 4 summarizes the statistics of the IPC5 instances
+instance, all the subproblems in the IPC5 OpenStacks domain solved by SGPlan5 and shows that it can solve about 90%
+are trivial to solve, but the challenge is to resolve the global of all the instances. Most of the unsolved instances are in the
+constraints. In case that the basic planner fails to ﬁnd a fea- MetricTimeConstraint track and the PipesWorld domain.
+sible subplan, we use incremental planning [Hsu et al., 2005] For the MetricTimeConstraint track, the weak performance
+or landmark analysis [Hoffmann et al., 2004] to further de- of SGPlan5 is due to the ineffective heuristics for handling
+compose a subproblem into more manageable units.      trajectory constraints when one logical formula is before an-
+                                                      other, either quantitatively or qualitatively.
+                                                        For the PipesWorld domain in which SGPlan5 does not
+4  Experimental Results                               perform well, we have observed two interesting features. In
+We ﬁrst evaluate the performance of our proposed partition- this domain, the set of guidance variables overlaps with that
+ing strategy, which selects the number of partitions to be the of the bottleneck variables, and, unlike other domains, the
+minimum of the number of bottleneck variables and the num- bottleneck (resp., guidance) variables have strong causal de-
+ber of guidance variables. We test our proposed strategy on pendencies with each other. The identiﬁed locality is also
+a number of large IPC5 instances. We do not select instances weaker because the density of the shared resources is higher.
+from domains with preferences, since most of them can be Finally, Figure 4 compares the performance of SGPlan5 on
+readily solved by relaxing all their soft constraints. six domain variants with that of other competing planners that
+  Table 3 shows the slowdowns of solving each instance participated in IPC5. All the experiments were conducted on
+using some ﬁxed number of partitions with respect to our a 3-GHz Intel Xeon Linux computer under a time limit of 30
+proposed partitioning strategy. It shows that our pro- minutes and a memory limit of 1 Gbytes. The results show
+posed strategy is usually the best, except in solving the that SGPlan5 is much faster and can solve many more in-
+OpenStacks-MetricTime domain.  Although OpenStacks-   stances, when compared to other competing planners that do
+
+                                                 IJCAI07
+                                                  1928

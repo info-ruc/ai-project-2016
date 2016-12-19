@@ -1,0 +1,361 @@
+                  Kernel Conjugate Gradient for Fast Kernel Machines
+
+                              Nathan D. Ratliff, and J. Andrew Bagnell
+                             Robotics Institute, Carnegie Mellon University,
+                                       Pittsburgh, PA. 15213 USA
+                                      {ndr,dbagnell}@ri.cmu.edu
+
+
+                    Abstract                            We propose a novel variant of the conjugate gradient algo-
+                                                      rithm, Kernel Conjugate Gradient (KCG), designed to speed
+    We propose a novel variant of the conjugate gradi- up learning for kernel machines with differentiable loss func-
+    ent algorithm, Kernel Conjugate Gradient (KCG),   tions (e.g. Gaussian Process mean inference, Kernel Logistic
+    designed to speed up learning for kernel machines Regression). This algorithm is motivated by the understand-
+    with differentiable loss functions. This approach ing that all gradient-based methods rely, at least implicitly,
+    leads to a better conditioned optimization problem on a particular metric or inner product [Scholkopf¨ & Smola,
+    during learning. We establish an upper bound on   2002]. It is natural in kernel learning problems for the algo-
+    the number of iterations for KCG that indicates it rithm to inherit the metric on functions that the kernel pro-
+    should require less than the square root of the num- vides. In Section 2.4 we show that such an approach can be
+    ber of iterations that standard conjugate gradient re- interpreted as a Riemannian metric method similar to Amari’s
+    quires. In practice, for various differentiable ker- Natural Gradient [Amari & Nagaoka, 2000], although the
+    nel learning problems, we ﬁnd KCG consistently,   kernel metric is much less expensive to compute.
+    and signiﬁcantly, outperforms existing techniques.  In Section 5, we establish an upper bound on the number
+    The algorithm is simple to implement, requires no of iterations for KCG that indicates it should require fewer
+    more computation per iteration than standard ap-  than the square root of the number of iterations that stan-
+    proaches, and is well motivated by Reproducing    dard conjugate gradient requires. The algorithm is simple to
+    Kernel Hilbert Space (RKHS) theory. We further    implement, requires no more computation per iteration than
+    show that data-structure techniques recently used standard approaches, and is well motivated by Reproducing
+    to speed up kernel machine approaches are well    Kernel Hilbert Space (RKHS) theory. In practice, for various
+    matched to the algorithm by reducing the dominant differentiable kernel learning problems, we ﬁnd KCG consis-
+    costs of training: function evaluation and RKHS in- tently, and signiﬁcantly, outperforms existing techniques.
+    ner product computation.                            Recent research has demonstrated the beneﬁts of space-
+                                                      partitioning data-structures to speed up certain kernel ma-
+1  Introduction                                       chines [Shen et al., 2006; Gray & Moore, 2001]. We show
+Kernel methods, in their various incarnations (e.g. Gaussian that these techniques work well with KCG as they reduce the
+Processes (GPs), Support Vector Machines (SVMs), Kernel dominant computational burdens in training: RKHS function
+Logistic Regression (KLR)) have recently become a preferred evaluations and inner product computations.
+approach to non-parametric machine learning and statistics.
+They enjoy this status because of their conceptual clarity, 2 Preliminaries
+strong empirical performance, and theoretical foundations. Below we brieﬂy review the theory of kernel machines in
+  The primary drawback to kernel methods is their computa- terms of Reproducing Kernel Hilbert Spaces. We then de-
+tional complexity. GPs require the inversion of an n × n (co- scribe the regularized risk functionals we are interested in
+variance/kernel) matrix, implying a running time of O(n3), optimizing during learning, and ﬁnish by reviewing the func-
+where n is the size of the training set. SVMs require sim- tional gradient, a generalization of the standard gradient to
+ilar computation to solve the convex program, although in- inner product spaces of functions.
+tense research has gone into fast, specialized approximations
+[Scholkopf¨ & Smola, 2002].                           2.1  Reproducing Kernel Hilbert Spaces
+  State-of-the-art approaches to kernel learning revolve An RKHS of functions Hk is a complete inner product space,
+largely around two techniques: iterative optimization algo- known as a Hilbert space, that arises from the completion of
+                                                                           BX     {      |   ∈X}
+rithms, and learning by representing the solution with only a a set of basis functions k = k(x, .) x , where
+subset of the original data points. Our algorithm applies most k : X×X →R is a symmetric, positive-deﬁnite kernel func-
+directly to the former line of research, although we address tion, and X is a continuous domain sometimes known as an
+the latter in the conclusions.                        index set. A common kernel, and one used exclusively in our
+
+                                                IJCAI-07
+                                                  1017experiments, is the exponential Radial Basis Function (RBF) Numerous other important examples occur in the litera-
+                2
+         −x−x                                      ture [Scholkopf¨ & Smola, 2002]. We focus on these, two
+k(x, x )=e   2σ2  . The RKHS inner product between two
+                                                    of the best known kernel algorithms other than the non-
+functions f =   α k(x ,.) and g =    β k(x ,.) is de-
+               i i   i             j  j   j           differentiable Support Vector Machine, as they are particu-
+ﬁned as               
+                                                    larly important tools in machine learning for classiﬁcation
+             f,g Hk =     αiβjk(xi,xj).         (1)   and regression.
+                       i,j
+Central to the idea of an RKHS is the reproducing prop- 2.3 The Functional Gradient
+erty which follows directly from the above deﬁnition. It
+states that the basis functions k(x, .) ∈BX are represen- For large-scale problems and problems for which direct so-
+                                     k                lution is inapplicable, the most popular approach to optimiz-
+ters of evaluation. Formally, for all f ∈Hk and x ∈X,
+                                                    ing these functionals is through the use of iterative, gradient-
+ f,k(x, .) Hk = f(x). When the basis functions are normal-
+ized, this means the evaluation of f at x is the scalar projec- based techniques. Gradient-based algorithms, such as steep-
+tion of f onto k(x, .). Note that there exists a simple mapping est descent, are traditionally deﬁned with respect to the gradi-
+   X→BX                     X                  BX     ent arising from the Euclidean inner product between param-
+φ :      k between the domain and the RKHS basis k
+deﬁned by the kernel as φ(x)=k(x, .). It follows that for any eter vectors. There are many ways in which a given regular-
+x, x ∈X                                              ized risk functional can be parameterized, though, and each
+                                                      gives rise to a different parameter gradient. It is intuitively
+                                       
+    φ(x),φ(x ) Hk =  k(x, .),k(x ,.) Hk = k(x, x ).   natural to follow the gradient deﬁned uniquely by the RKHS
+A complete overview of these concepts can be found in inner product. We review some basic concepts behind the
+[Aronszajn, 1950].                                    functional gradient below.
+  A fundamental result ﬁrst proven in [Kimeldorf & Wahba, The functional gradient may be deﬁned implicitly as the
+1971] and then generalized in [Scholkopf¨ et al., 2001] is linear term of the change in a function due to a small pertur-
+the Representer Theorem, which makes possible the direct bation  in its input [Mason et al., 1999]
+minimization of a particular class of functionals. It states                    ∇            2
+                  D     {      }n   ⊂X×R                     F [f + g]=F [f]+    F [f],g + O( ).
+that given a subset  =   (xi,yi) i=1           (i.e.
+the dataset), the minimizer of a functional with the form
+                                               2      Following this deﬁnition using the RKHS inner product
+          1  1    1                          
+F [f]=c((x ,y ,f(x )),...,(xn,yn,f(xn))) + g( f Hk ),   H  allows us to deﬁne the kernel gradient of a regular-
+               2                                       ., . k
+where c : X×R    →  R is arbitrary and g :[0, ∞] → R  ized risk functional [Scholkopf¨ & Smola, 2002]. We use three
+is strictly monotonically increasing, must have the form f˜ = basic formulas that can be easily derived from this deﬁnition:
+    ∈D αik(xi,.).
+  xi                                                    1. Gradient of the evaluation functional. Deﬁne Fx :
+                                                          H   →  R
+2.2  Regularized Risk Functionals                           k       as Fx[f]=f(x)=       i αik(xi,x). Then
+                                                          ∇  F [f]=k(x, .).
+An important class of functionals, common in machine learn- k x
+ing, for which the Representer Theorem holds is the regular- 2. Gradient of the square RKHS norm. Deﬁne F.,. :
+ized risk functional [Scholkopf¨ & Smola, 2002]:          H   →   R                2        
+                                                            k       as F.,.[f]= f  Hk =   f,f Hk . Then
+               n                                         ∇
+                                 λ                          kF.,.[f]=2f.
+        R[f]=     l(x ,y ,f(x )) + f,fH       (2)
+                     i i    i    2       k              3. Chain rule. Let g : R → R be a differentiable func-
+               i=1
+                                                          tion, and let F : Hk → R be an arbitrary differentiable
+These functionals combine a data-dependent risk term, with                            
+                                                          functional. Then ∇kg(F [f]) = g (F [f])∇kF [f].
+a “prior” (or regularization) term that controls the complexity
+of the solution by penalizing the norm of the function f in the A straight forward application of the above formulas brings
+RKHS. Our work focuses on the case where l is differentiable us to the following result. The kernel gradient of a regularized
+in its third argument; many important kernel machines have risk functional (Equation 2) is
+this property. For instance, we can write Kernel Logistic Re-      n
+                                         ∈{−     }                     ∂
+gression [Zhu & Hastie, 2001] in this form. Let y 1, 1 . ∇  R[f]=        l(x ,y ,z)| ( )∇ F [f]+λf
+                                                           k          ∂z   i  i   f xi  k xi
+Then                                                               i=1
+              n               
+                                    λ                              n
+                          yif(xi)                                    ∂
+     Rklr [f]=    log 1+e         +   f,f Hk    (3)                               |
+                                                                 =       l(xi,yi,z) f(xi)k(xi,.)+     (5)
+               =1                   2                                 ∂z
+              i                                                    i=1
+Similarly, we may write the popular Gaussian Process Re-            n
+gression (for the mean function) and the Regularized Least        λ    αik(xi,.)
+Squares Classiﬁcation algorithm in this form 1:                      =1
+                                                                    i                       
+               n                                                  n
+              1              2   λ                                      ∂          |
+     Rrls [f]=    (y − f(x )) +   f,fH        (4)              =        l(xi,yi,z) f(xi) + λαi k(xi,.)
+              2     i      i     2      k                               ∂z
+               i=1                                                 i=1
+
+  1
+   These two differently motivated algorithms optimize the same where we again use αi to denote the parameters of the expan-
+functional.                                           sion of f in terms of the kernels k(xi,.).
+
+                                                IJCAI-07
+                                                  1018  Equation 5 allows us to easily ﬁnd the kernel gradient of Algorithm 1 Kernel Conjugate Gradient
+the functionals we described above and use in the remainder
+                                                                            H  →  R    ∈H
+of this paper:                                         1: procedure KCG(F  :  k     , f0   k, >0)
+                                                              ←
+  Kernel Logistic Regression (KLR):                    2:    i   0          
+                                                             ←∇             n    (0)
+              n                                       3:    g0     kF [f0]=  j=1 γj k(xj,.)
+                              yi                               ←−
+   ∇kRklr [f]=     λαi +               k(xi,.)  (6)    4:    h0     g0
+                         1+e−yif(xi)                                  
+               i=1                                     5:    while gi,gi Hk >do
+                                                                    ←
+  Regularized Least Squares (RLS), Gaussian Process:   6:       fi+1   fi + λihi where λi =argminλ F [fi +
+                  n                                               λhi]            
+       ∇                   −                                        ←∇               n    (i+1)
+        kRrls [f]=   (f(xi)  yi + λαi)k(xi,.)   (7)    7:       gi+1     kF [fi+1]=  j=1 γj   k(xj,.)
+                  i=1                                  8:       hi+1   ←−gi+1      +  ηihi where  ηi   =
+                                                                      −            (i+1) (i) T (i+1)
+                                                                    gi+1 gi,gi+1 Hk (γ   −γ  ) Kγ
+2.4  The Kernel Gradient and Riemannian Metrics                                =       (i)T  (i)
+                                                                       gi,gi Hk         γ   Kγ
+Above we described the kernel gradient as a function; that 9:   i ← i +1
+is as a linear combination of basis functions. The ker- 10:  end while
+nel gradient as in Equation 5 demonstrates a property sim- 11: return fi
+ilar to the Representer Theorem: namely that ∇kF [f]= 12: end procedure
+  n                          ∈ R
+  i=1 γik(xi,.) for appropriate γi . In other words, the
+kernel gradient of F is represented in the ﬁnite-dimensional
+                    D
+subspace SD =span{B   } of Hk. A gradient descent type 3  The Kernel Conjugate Gradient Algorithm
+              S     k
+method through D  then amounts to modifying the coefﬁ- Both in theory and in practice it is understood that conjugate
+cients αi of the current function f by γi. That is, we can gradient (CG) methods outperform standard steepest descent
+understand the kernel gradient as modifying parameters, procedures [Ashby et al., 1990]. These techniques have been
+         f˜ ← f − λ∇kF [f] ⇔ α˜i ← αi − λγi,          used profusely throughout machine learning, in particular,
+just as a standard gradient descent algorithm would. The dif- for regularized risk minimization and kernel matrix inversion
+                                                      [Gibbs, 1997; Scholkopf¨ & Smola, 2002].
+ference is that the coefﬁcients γi for the kernel gradient are
+not the same as those of the parameter gradient. One can ver- In this section, we present an algorithm we term Kernel
+                                                      Conjugate Gradient (KCG) that takes advantage of conju-
+ify that they differ by ∇αF [f]=Kγ where K is the kernel
+matrix and γ is the vector of coefﬁcients.            gate direction search while utilizing the RKHS inner prod-
+                                                                   T
+  We can derive this relation in another way. Starting from uct f,g Hk = α Kβ. Algorithm 1 gives the general (non-
+the parameter gradient, we deﬁne a Riemannian metric [Has- linear) KCG algorithm in Polak-Ribiere` form [Ashby et al.,
+sani, 1998] on the space of parameters. This deﬁnes our no- 1990]. In essence, Algorithm 1 comes directly from conju-
+tion of size in the space of parameters. We then consider an gate gradient by replacing all gradients by their functional
+alternate deﬁnition of the gradient, as the direction of steepest equivalents and replacing Euclidean inner products with an
+ascent for a “small” change in coefﬁcients α:         RKHS inner product.
+                                                        Note that the computational complexity per iteration of
+         ∇F [α]=maxF   [α + γ] s.t. γ <.
+                   γ                                  KCG is essentially identical to that of the more conventional
+It can be shown that taking γ2 as γT γ gives the vanilla pa- Parameter Conjugate Gradient (PCG) algorithm. Intuitively,
+                          α                           while the kernel inner product takes time O(n2) compared to
+rameter gradient ∇αF , while deﬁning the norm with respect
+                        2                           the O(n) vanilla inner product used by PCG, KCG is corre-
+to the RKHS inner product γ Hk =  i,j γiγjk(xi,xj)=
+ T                                         ∇          spondingly more efﬁcient in the gradient computation since
+γ Kγ  gives the functional gradient coefﬁcients kF =  ∇  F [f]=Kγ, where  ∇  F [f]=     γ k(x ,.). It is pos-
+  −1∇     [           ]                                 α                   k          i i   i
+K     αF . Hassani, 1998                              sible in the case of RLS to step through an iteration of each
+  This interpretation of the kernel gradient makes connec- algorithm and show that the number of operations is equiva-
+tions with other metric methods more clear. For instance, lent.
+      [                    ]
+Amari Amari & Nagaoka, 2000 considers the use of a met- We emphasize that despite its somewhat involved deriva-
+ric derived from information geometry that leads to the “nat- tion, the implementation of this algorithm is just a simple ex-
+ural gradient”. Such algorithms are applicable here as well
+                                                      tension of PCG. The differences amount to only a change of
+since we can compute the metric for the probabilistic models inner product αT β → α β k(x ,x )=αT Kβ, and a
+given by Gaussian Processes or KLR. Unfortunately, comput-                  i,j i j  i  j
+                                                      different, though in some ways simpler, gradient computa-
+ing the natural gradient in these cases is very expensive: for
+                                                      tion. We also point out that the line optimization (step 6) can
+instance, in Gaussian Processes it is as expensive as inverting
+                                                      be solved in closed-form in the case of quadratic risk func-
+the kernel matrix, the very computational difﬁculty we are                                
+                                                      tionals (e.g. RLS). For starting point f = α k(x ,.) and
+striving to avoid. By contrast, computing the kernel gradi-                                i i   i
+                                                      search direction h = γ k(x ,.) we have
+ent is very cheap: cheaper in fact then the standard parameter            i i   i
+       2                                                                                T
+gradient.                                                                            −α  Kγ
+                                                                  arg min F [f + λh]=   T
+  2Furthermore, in practice we often ﬁnd deriving the kernel gra-      λ               γ  Aγ
+dient using the functional gradient rules easier than deriving the pa- where A is the Hessian of the quadratic functional when pa-
+rameter gradient.                                     rameterized by α. Note that this formula differs from that
+
+                                                IJCAI-07
+                                                  1019derived under the parameter gradient (−αT γ/γT Aγ) only 5 KCG Analysis
+in the numerator’s inner product, as is a common theme We derived the Kernel Conjugate Gradient algorithm from a
+throughout this algorithm. The theoretical and experimen-                              
+                                                      normative point of view arguing that f,g Hk deﬁned the nat-
+tal results given below suggest that there is little reason why ural notion of inner product in the RKHS and hence for the
+one should prefer PCG to KCG in most (differentiable) kernel optimization procedure as well. The strong empirical perfor-
+algorithms.                                           mance of KCG noted in the previous section, while in some
+                                                      sense not surprising given we are using the “correct” inner
+4  Experimental Results - Kernel Conjugate            product, deserves analysis. We examine here the linear case
+   Gradient                                           (as in RLS) where the analysis is more transparent, although
+                                                      presumably similar results hold near the optima of non-linear
+We bench-marked KCG against PCG for both classiﬁcation risk functionals.
+and regression tasks. In all cases, KCG signiﬁcantly out per- We note a classic bound on the error reduction of CG (see
+formed PCG.                                           [Luenberger, 2003]),
+  Our ﬁrst test was performed using KLR on the USPS                         √      
+                                                                                 −    i
+dataset (with a training/test size of 7291/2007) for the com-                √κ    1
+                                                                  eiA ≤ 2            e0A,
+mon one-vs-all task of recognizing the digit 4. We used a                      κ +1
+length scale hyperparameter σ =5as was used in [Rifkin where i is the iteration number, A is the Hessian of the
+         ]                                                                                       T
+et al., 2003 for RLS classiﬁcation, and a regularization con- quadratic form with condition number κ, xA = x Ax is a
+                                                                          −   ∗
+stant λ =0. Figure 1 summarizes the results in log scale. norm on x, and ei = xi x . Loosely√ speaking, this gives a
+  Second, we used RLS for both regression and classiﬁcation running time complexity of O( κ) for PCG.
+using the Abalone and Soil datasets in addition to the USPS We start by analyzing the effective condition number of
+dataset. The Abalone dataset 3 consisted of 3133 training KCG. As with essentially all variants of CG, the algorithm’s
+examples and 1044 test examples in 8 attributes. Our exper- dynamics can be described in terms of a preconditioning to
+imental setup was equivalent to that in [Smola & Scholkopf,¨ the spectrum of the Hessian [Ashby et al., 1990]. It can be
+2000]. The Soil dataset contained three-dimensional exam- veriﬁed by inspection of the algorithm, that KCG is equiva-
+ples of soil pH levels in areas of Honduras partitioned into a lent to an implicitly preconditioned conjugate gradient algo-
+training set of size 1709 and a test set of size 383. The latter rithm with preconditioner K[Ashby et al., 1990]. The follow-
+dataset and corresponding hyperparameters (λ =0.1514 and ing theorem relates the running time of PCG to KCG in light
+σ =0.296283) were provided by [Gonzalez, 2005]. Again, of the bound given above.
+the results are summarized in Figure 1.                 Theorem.   Let κPCG be the condition number of Rrls
+  For RLS, there exists a quadratic                   (Equation 4), and let κK be the condition number of the ker-
+                                                      nel matrix K =[k(xi,xj)]i,j . Then the condition number
+                   1 T              T
+            p(α)=   α  (K + λI)α − y α                κKCG  resulting from preconditioning the RLS risk functional
+                   2
+                                                      by K has the relation κPCG = κK κKCG.
+                                                                     ≥     ≥     ≥
+that can provide a lower bound to the regularized risk [Gibbs, Proof. Let σ1 σ2 ... σn be the eigenvalues of
+1997; Scholkopf¨ & Smola, 2002]. As theory suggests (see K. The condition number of K is then κK = σ1/σn. The
+                                                                              T
+                                                      Hessian of Rrls is A = K K  + λK  and has eigenvalues
+below) the upper bound under KCG converges comparably  2
+with the lower bound, while the upper bound under PCG lags σi + λσi = σi(σi + λ), given in terms of the eigenvalues of
+considerably behind. This implies faster convergence under a K. This implies     
+gap termination criterion [Scholkopf¨ & Smola, 2002].                  σ1   σ1 + λ        σ1 + λ
+  The right-most plots of Figure 1 contrast (in iterations,    κPCG =               = κK        .
+                                                                       σn  σn + λ        σn + λ
+equivalent to multiples of wall-clock time) the speeds of PCG
+                                                      Since K is symmetric, positive-deﬁnite, the preconditioned
+and KCG for both RLS and KLR. We plot of the number of                 −1       −1   T
+iterations of each to reach the same level of performance in Hessian becomes K A = K (K K + λK)=K   + λI,
+                                                      with corresponding eigenvalues σi + λ. Thus, κPCG =
+terms of loss on the data-set. Plots are terminated when con-                                          2
+vergence is achieved as measured with the gap termination κK κKCG.
+criterion[Scholkopf¨ & Smola, 2002], and hyper-parameters The condition number κK of K is typically very large.
+were chosen on a hold-out set. These ﬁgures conﬁrm what In particular, as the regularization constant decreases, the
+analysis in the next section suggests: it takes more than the asymptotic bound on the convergence of PCG approaches
+square of the amount of time to achieve the same level of the square of the bound on KCG. Alternatively, as the reg-
+performance using PCG as it does with KCG. Finally, in Ta- ularization constant increases, κKCG approaches 1 implying
+ble 2 we directly compare the number of iterations needed an O(1) convergence bound for KCG, while the convergence
+to achieve convergence on a number of data sets, all taken bound of PCG remains bounded below by O(κK ). We would
+again from the UCI data repository, for both RLS and KLR. thus expect a number of iterations for KCG that is dramati-
+Averaged over the datasets, KCG is 54 times faster than the cally less than that of PCG.
+standard conjugate gradient approach.                   It is informative to note that the decrease in computational
+                                                      complexity from PCG to KCG (O(κ1/2) to O(κ1/4))isat
+  3See  UCI  repository: http://www.ics.uci.edu/      least the amount we see from steepest descent(O(κ) to PCG
+                                                          1 2
+∼mlearn/MLRepository.html                             O(κ  / )) [Luenberger, 2003].
+
+                                                IJCAI-07
+                                                  1020Figure 1: Upper left shows relative performances (in log scale) of KCG and PCG on the USPS data set optimizing KLR. The
+remaining three left-most plots show relative convergence under RLS; green and red lines depict PCG performance on the upper
+and lower bound gap-convergence quadratic forms, and the light blue line gives the (signiﬁcantly tighter) performance of KCG
+on the upper bound. The third column shows the beneﬁt of using KD-trees for a single run (bottom) and by training set size
+(top) using KCG. The right-most two plots show the equivalent number of PCG iterations required to achieve the performance
+per iteration of KCG on the COVTYPE data set from the UCI data repository. Top right and bottom right show the performances
+of RLS and KLR, respectively. An approximately quadratic relationship can be seen in both cases as the theory suggests.
+
+6  Tree-Augmented Algorithms                          is dominated by the computation of the parameter gradi-
+                                                      ent. We can rewrite the parameter gradient as ∇ F [f]=
+For many stationary kernels, it is often the case that the ma-                                   α
+                                                      [∇ F [f](x1), ∇ F [f](x2),...,∇ F [f](x )]T (see 2.4), re-
+jority of the basis functions in BD are nearly orthogonal. This k   k              k      n
+                          k                           ducing the complexity to that of ﬁnding ∇kF [f] ∈Hk and
+often stems from a relationship between the degree of orthog- evaluating it n times. As was the case with the KCG al-
+onality of two basis functions k(x, .),k(x,.) ∈BD and the
+                                         k           gorithm without trees, the tradeoff still balances out so that
+Euclidean distance between x and x . This is often the case the per iteration complexity is essentially equivalent between
+when using the exponential RBF kernel given above, in which KCG and PCG using tree-augmented function evaluation.
+the orthogonality between two basis functions increases ex-
+                                                        Noting [f(x1),...,f(x )]T =  Kα   suggests that the
+ponentially with the square Euclidean distance between the                   n
+           −  2                                    closed form quadratic line minimization for both the upper
+two points x  x  .                                    and lower bounds of RLS under either KCG or PCG can eas-
+  Previous work has shown how the evaluation of RKHS
+                                                      ily be augmented as well by expanding the Hessians Au =
+functions f(x)=   αik(xi,x) can be made fast when this  T
+                 i                                    K  K +λK   in the case of the upper bound and Al = K +λI
+holds using N-body type algorithms [Gray & Moore, 2001]. in the case of the lower bound. This was used in the tree-
+Intuitively, the idea is to store the training data in a space- augmented RLS experiments described below.
+partitioning tree, such as a KD-tree [Moore, 1990] as was
+used in our experiments below, and recursively descend the
+tree during evaluation, pruning negligible contributions. 7 Experimental Results - Tree-Augmented
+  The maximum and minimum impact of each set of pruned    Algorithms
+points can be easily calculated resulting in upper and lower For these experiments, in addition to using the Soil dataset
+bounds on the evaluation error. We demonstrate how such described in section 4, we performed large scale RLS regres-
+data-structures and algorithms can be used to reduce the per
+           2                                          sions using a tree-augmented KCG on variable sized sub-
+iteration O(n ) computational cost of both KCG and PCG sets of a PugetSound elevation map4 using hyperparameters
+during learning as well as evaluation.                λ =0.1/n  and σ2 =  kN/(nπ), where n is the size of the
+  The inner loop computational bottleneck of KCG is   training set, and N is the size of the entire height map. In this
+in evaluating functions and calculating the kernel inner case, we chose N = 500 × 500 = 250, 000, and k =15.
+product.  If we rewrite the RKHS inner product be-  The largest resulting datasets were on the order of 100,000
+tween f   =    i αik(xi,.),g=       i βik(xi,.) as  points. It should be noted that the naive¨ implementation in
+   
+ f,g Hk =     i,j αiβjk(xi,xj)=   i αig(xi), then re- this case did not cache kernel evaluations in a kernel matrix
+ducing the computational complexity of RKHS function  as such matrices for datasets above O(15, 000) points proved
+evaluations will simultaneously encompass both of these
+bottlenecks. Similarly, the iteration complexity of PCG  4http://www.cc.gatech.edu/projects/large     models/
+
+                                                IJCAI-07
+                                                  1021
