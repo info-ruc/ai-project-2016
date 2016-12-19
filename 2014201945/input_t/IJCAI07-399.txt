@@ -1,0 +1,373 @@
+             WiFi-SLAM Using Gaussian Process Latent Variable Models
+
+                       Brian Ferris          Dieter Fox          Neil Lawrence†
+              University of Washington, Department of Computer Science & Engineering
+                       †University of Shefﬁeld, Department of Computer Science
+
+
+                    Abstract                            The reliance on ground truth calibration data clearly lim-
+                                                      its the applicability of existing techniques. In order to enable
+    WiFi localization, the task of determining the phys- location-aware mobile devices, these devices need to be able
+    ical location of a mobile device from wireless sig- to build their own spatial representations based on sequences
+    nal strengths, has been shown to be an accurate   of raw, unlabeled signal strength data. While the robotics
+    method of indoor and outdoor localization and a   and computer vision communities have developed techniques
+    powerful building block for location-aware appli- for jointly estimating the locations of a device and a map of
+    cations. However, most localization techniques re- an environment, the nature of wireless signal strength pro-
+    quire a training set of signal strength readings la- hibits the use of standard SLAM (simultaneous localization
+    beled against a ground truth location map, which is and mapping) techniques [Thrun et al., 2005].
+    prohibitive to collect and maintain as maps grow    In this paper we present WiFi-SLAM, a novel technique
+    large. In this paper we propose a novel tech-     for building wireless signal strength maps without requir-
+    nique for solving the WiFi SLAM problem using     ing any location labels in the training data. To do so, our
+    the Gaussian Process Latent Variable Model (GP-   approach builds on Gaussian process latent variable mod-
+    LVM) to determine the latent-space locations of un- els (GP-LVM), a recently developed technique for map-
+    labeled signal strength data. We show how GP-     ping high-dimensional data to a low-dimensional latent space
+    LVM, in combination with an appropriate motion    [Lawrence, 2004]. In our context, the high-dimensional data
+    dynamics model, can be used to reconstruct a topo- corresponds to the signal strength information for all WiFi
+    logical connectivity graph from a signal strength access points in an environment. GP-LVMs map these sig-
+    sequence which, in combination with the learned   nal strength measurements to a two-dimensional latent space,
+    Gaussian Process signal strength model, can be    which can be interpreted as the xy-coordinates of the device.
+    used to perform efﬁcient localization.            Our embedding technique considers the following constraints
+                                                      to solve this challenging SLAM problem.
+1  Introduction                                         1. Locations → signal strength: Locations that are near
+The use of wireless signal strength information to localize each other should observe similar signal strength mea-
+mobile devices has gained signiﬁcant interest in several re- surements.
+search communities. This is mainly due to the increasing 2. Signal strengths → locations: Similar signal strength
+availability of 802.11 WiFi networks and the importance of measurements indicate that they were observed at loca-
+location information for applications such as activity recog- tions near each other. This constraint is extremely im-
+nition, surveillance, and context-aware computing.        portant to close loops, i.e. to detect when the person
+  The unpredictability of signal propagation through indoor returns to a previously visited location during the map-
+environments is the key challenge in location estimation  ping process. While this constraint might be violated for
+from wireless signal strength. This unpredictability makes individual access points, it is a good approximation for
+it difﬁcult to generate an adequate likelihood model of sig- typical ofﬁce envionments, where multiple access points
+nal strength measurements. Thus, the main focus of re-    are visible at each point in time.
+search in this area has been on the development of tech-           →
+niques that can generate good likelihood models from cal- 3. Locations locations: Locations that follow each other
+ibration data collected in an environment. This data typi- in the data stream should be near each other. This con-
+cally consists of signal strength measurements annotated with straint models the fact that mapping data is sequential,
+the ground truth locations of the device. The calibration collected by a person walking through the building.
+data is then often used to estimate the parameters of locally Our approach incorporates these constraints in a single, sta-
+Gaussian models, which have proven to be very effective for tistically sound way. As a result, the technique is able to build
+localization [Haeberlen et al., 2004; Letchner et al., 2005; topologically correct maps from raw signal strength mea-
+Ferris et al., 2006].                                 surements. Furthermore, the resulting map provides a signal
+
+                                                IJCAI-07
+                                                  2480strength sensor model that can be used for Bayesian ﬁltering inite Embedding (SDE) by placing additional constraints on
+for location estimation.                              the SDE similarity matrix. Speciﬁcally, when the same con-
+  This paper is organized as follows. After discussing related trol action (e.g., robot motion) is applied to two different
+work in the next section, we provide background on GPLVMs points in the latent space, their successive latent points should
+in Section 3. Their application to WiFi-SLAM is described in share a similar relative transformation. While ARE could be
+Section 4, followed by experiments and conclusions.   used in our context to represent time-series constraints be-
+                                                      tween successive signal strength readings, we wish to more
+2  Related Work                                       generally constrain higher level properties of the underlying
+                                                      generative process.
+WiFi localization techniques fall into a number of broad cat- A powerful technique for representing such constraints is
+egories. Several location estimation techniques attempt to proposed in Gaussian Process Dynamical Models [Wang et
+model directly signal propagation through space [Bahl and al., 2006]. The technique extends GP-LVM by including
+Padmanabhan, 2000], assuming known locations of access an additional likelihood model for the latent-space variables.
+points and an exponential signal attenuation model. However, Speciﬁcally, the technique models dynamic constraints via a
+even when considering the location and material of walls and Gaussian process mapping between consecutive data points.
+furniture inside buildings, the accuracy of signal propagation Though their technique was speciﬁcally designed for vision-
+models is very limited. Other techniques attempt to model based motion tracking, we have extended it for our WiFi-
+reading likelihoods on a location-speciﬁc basis [Haeberlen et SLAM approach.
+al., 2004; Letchner et al., 2005], representing signal strength
+at locations of interest with probability distributions learned 3 Gaussian Process Latent Variable Models
+from training data. While more accurate than signal propaga- In this section, we will ﬁrst describe Gaussian processes for
+tion models, these methods are inherently discrete and have regression. We will then illustrate their application to esti-
+only limited capabilities for interpolation between locations. mating a likelihood model of wireless signal strength mea-
+  To overcome these limitations, Schwaighofer and col- surements, assuming that the ground truth locations of the
+leagues [2003] showed how to apply Gaussian processes to training data are known. Finally, we will show how Gaussian
+signal strength localization, resulting in a model that provided process latent variable models can be used to handle the case
+interpolation over continuous locations with direct modeling of unknown locations.
+of uncertainty from the training data. [Ferris et al., 2006] ex-
+tended this technique to WiFi localization by combining the 3.1 Gaussian Processes
+GP signal strength model with graph-based tracking, allow- GPs can be derived in different ways. Here, we fol-
+ing for accurate localization in large scale spaces. Our WiFi- low closely the function-space view described in [Ras-
+SLAM technique builds on these recent models and extends mussen and Williams, 2005]. Let our data, D   =
+them to the case of mapping with unknown locations.   {(x1, y1), (x2, y2),dots,(xn, yn)}, be a set of training sam-
+  The robotics community has developed various approaches ples drawn from a noisy process
+for SLAM, see [Thrun et al., 2005]. However, these tech-               yi  =   f(xi)+ε,               (1)
+niques typically rely on the ability to sense and match discrete                     q
+                                                      where each xi is an input sample in  and each yi is a target
+entities such as visual landmarks or obstacles detected by value, or observation, in . The noise, ε, is assumed to come
+sonar or laser range-ﬁnders. Compared to these approaches, from a zero mean, additive Gaussian distribution with known
+our SLAM problem is particularly challenging, since we have variance σ2 . For notational convenience, we aggregate the
+only very limited information about the person’s motion, and   n
+                                                      n input vectors xi into a n × q design matrix X, and the
+since signal strength measurements vary extremely smoothly
+                                                      target values yi into the n × 1 vector denoted Y. Thus, xi
+over the location space. In principle we could extract distance
+                                                      and yi are vectors that correspond to the i-th row of X and
+to access point estimates from signal strength measurements Y, respectively. In the context of signal strength maps, X
+                              [
+and then apply range-only SLAM Newman and Leonard,    represents locations in the 2D plane, and Y represents signal
+    ]
+2003 to map the locations of access points. However, such strength measurements of a single WiFi access point.
+techniques typically rely on rather accurate range measure- A Gaussian process estimates posterior distributions over
+ments, which are clearly not available in our context. functions f from the training data D. These distributions
+  The WiFi-SLAM  problem can be seen as an application- are represented non-parametrically in terms of the training
+speciﬁc case of the general dimensionality reduction prob- points. A key idea underlying GPs is the requirement that the
+lem. Speciﬁcally, we wish to reduce high-dimensional sig- function values at different points are correlated, where the
+nal strength to some two-dimensional location space. Unfor-
+                                                      covariance between two function values, f(xi) and f(xj),
+tunately, dimensionality reduction algorithms such as PCA depends on the covariance between the two input values,
+do not typically perform well with highly non-linear mani-
+                                                      some xi and xj. This dependency can be speciﬁed via an ar-
+folds such as those found in WiFi signal propagation. A very
+                                                      bitrary covariance function, or kernel k(xi, xj). The choice
+promising class of techniques extend non-linear dimensional- of the kernel function is typically left to the user, the most
+ity reduction methods to allow the speciﬁcation of additional widely used being the squared exponential, or Gaussian, ker-
+constraints that reﬂect the generative model of the underlying
+                                                      nel:                                         
+data process. One such technique is action respecting embed-                              1
+                                                         (f(x ),f(x )) = k(x , x )=σ2 exp − |x − x |2 .
+dings (ARE) [Bowling et al., 2005], which extends Semidef- cov i  j       i  j    f      2l2  i   j    (2)
+
+                                                IJCAI-07
+                                                  2481      2
+Here, σf is the signal variance and l is a length scale that de-
+termines the strength of correlation between points. Both pa-
+rameters control the smoothness of the functions estimated by
+a GP. As can be seen in (2), the covariance between function
+values decreases with the distance between their correspond-
+ing input values.
+  Since we do not have access to the function values, but
+only noisy observations thereof, it is necessary to represent
+the corresponding covariance function for noisy observations:
+                                 2
+        cov (yr, ys)=k(xi, xj)+σnδrs .          (3)
+      2
+Here σn is the Gaussian observation noise variance and δrs
+is one if r = s and zero otherwise. For an entire set of input
+     X                                                Figure 1: GP model for signal strength of one access point.
+values , the covariance over the corresponding observations Black dots indicate training data along the ground truth path.
+Y becomes
+                              2
+              cov (Y)=K   + σ  I,               (4)
+                              n                       3.2  Application to Signal Strength Modeling
+where K is the n × n covariance matrix of the input values,
+        [  ]=  (x  x )                                GPs have been applied very successfully to signal strength
+that is, K i, j k i, j .                                                          X
+  Note that (4) represents a prior over functions: For any set modeling, where the input values correspond to locations,
+                                                      and the observations Y correspond to signal strength mea-
+of values X, one can generate the matrix K and then sam-
+                                                                                       [
+ple a set of corresponding targets Y that have the desired surements obtained at these locations Schwaighofer et al.,
+                                                                          ]
+covariance [Rasmussen and Williams, 2005]. The sampled 2003; Ferris et al., 2006 . Here, the GP posterior is estimated
+                                          2           from a trace of signal strength measurements annotated with
+values are jointly Gaussian with Y ∼N(0,K+ σnI). More
+relevant, however, is the posterior distribution over functions their locations. Assuming independence between different
+                                                      access points, these techniques estimate a GP for each access
+given training data X, Y. Here, we are intrested in predict-
+                                                      point separately.
+ing the function value at an arbitrary point x∗, conditioned on
+training data X, Y. From (2) follows that the posterior over Fig. 1 illustrates the GP signal strength model for one ac-
+                                                2     cess point in an environment of size 60 × 50 meters, includ-
+function values is Gaussian with mean μx and variance σ :
+                                 ∗            x∗    ing hallways, ofﬁces, and open areas. Fig. 1 clearly demon-
+ ( (x ) | x X  Y)=N      (x );     2
+p f  ∗    ∗,  ,         f  ∗  μx∗ ,σx , where         strates that signal strength propagation cannot be represented
+                                  ∗
+                  = k T    +   2  −1 Y                adequately by a parametric sensor model such as one that
+              μx∗     ∗  K    σnI                 (5)
+                                                    estimates the location of an access point and then assumes
+               2                 T       2  −1
+              σx  = k(x∗, x∗) − k∗  K + σnI    k∗ (6). a radial signal propagation model. The GP on the other
+                ∗                                     hand, smoothly approximates the data points (see [Ferris et
+Here k∗ is the × 1 vector of covariances between x∗ and
+             n                                        al., 2006] for details).
+the n training inputs X, and K is the covariance matrix of
+the inputs X. As can be seen from (5), the mean function is 3.3 Latent Variable Models
+a linear combination of the training observations Y, where
+                                                      So far we have assumed that the locations X of the train-
+the weight of each observation is directly related to k∗,the
+                                                      ing data are observed. The goal of our research is to build
+correlation between the test point x∗ and the corresponding
+                                                      GP signal strength maps without relying on location data. To
+training input. The middle term is the inverse of the covari-
+                                                      build such maps, we treat the locations X as hidden, or latent,
+ance function (4). The covariance of the function estimate,
+ 2                                                    variables. The resulting, much more challenging problem
+σ  , is given by the prior covariance, k(x∗, x∗), minus the
+ x∗                                                   can be addressed by Gaussian process latent variable mod-
+information provided by the training data (via the inverse of
+                                                      els (GP-LVM), which were introduced by [Lawrence, 2004;
+the covariance matrix K). Note that the covariance is inde-
+                                                      2005] in the context of data visualization.
+pendent of the observed values Y 1.
+                                                        In the previous section we treated different access points
+  Finally, in order to get the predictive distribution for a noisy
+                                                      individually, resulting in a 1-dimensional observation space.
+observation, y∗, one simply has to add the observation noise:
+                                                     Here, it will be necessary to jointly consider the sig-
+ ( ∗|x∗ X Y)=      ( ∗| (x∗)) ( (x∗)|x∗ X Y) d (x∗)   nal strength of multiple access points, which results in d-
+p y   ,  ,       p y  f     p f      ,  ,    f                              y
+                                                    dimensional observations i, reporting the signal strength s
+             =N           2     2                     of d access points. The traditional probabilistic approach to
+                  y∗; μx∗ ,σx + σn                (7)
+                           ∗                          latent variable techniques models the relationship between
+This predictive distribution summarizes the key advantages latent variables, X ∈n×q, and a set of observed data,
+of GPs in the context of wireless signal strength models. In Y ∈n×d, through the parameterized function
+addition to providing a regression model based on training
+data, the GP also represents the uncertainty of the prediction,     yij = f(xi; wj)+,                (8)
+taking both sensor noise and model uncertainty into account.
+                                                      where yij is the element from the i-th row and j-th column of
+  1Observed values Y may impact the parameters of the covari- Y, xi is the vector formed from the ith row of X, wj are the
+ance function via hyperparameter estimation [Ferris et al., 2006]. parameters of the (possibly non-linear) function f(·), and  is
+
+                                                IJCAI-07
+                                                  2482a zero mean noise term. This function, which is the same as their underlying positions X in the two-dimensional coordi-
+(1) with explicit parameters, implies a probabilistic relation- nate space. The likelihood of our model takes the form:
+                                        (  |x w  )
+ship between the latent variables and the data, p yij i, j .        (X Y)=    (Y|X)  (X)
+If independence is assumed across the dimensions and instan-       p  ,      p      p                (13)
+tiations of the data this relationship factorizes as                           (Y|X)
+                                                     In the GP-LVM framework, p     is modeled by a GP and
+                                                      p(X) is the expression of our latent-space dynamics model.
+         p(Y|X, W)=      p(yij|xi, wj) .        (9)
+                       ij                             The set of constraints we discussed in the introduction of the
+                                                      WiFi-SLAM problem are nicely captured within these terms,
+Since the latent variables are unknown, they must now be as we shall describe below.
+dealt with. Traditionally this is done through marginaliza- Location → signal strength: We wish to constrain that
+tion, necessitating the deﬁnition of a prior distribution. A similar locations should have similar signal strengths. This
+common choice of prior is the normalized zero mean Gaus- property is captured by most dimensionality reduction tech-
+sian, p(xij)=N (xij;0, 1), p(X)=  ij p(xij). Since the niques, including GP-LVM. Speciﬁcally, the GP used to
+noise is assumed to be drawn from a zero mean Gaussian with model p(Y|X) provides this property, where the similarity
+               2
+a given variance σn, the parametric relationship between the of points in the latent space is controlled by the underlying
+latent variables and the data can then be recovered through kernel function. For the WiFi case, we use the squared expo-
+optimization of the marginal likelihood. If the functional re- nential kernel (2) with parameter values trained from previ-
+lationship between the latent variables and the data is linear, ously labeled WiFi training data.
+                                                               →
+                (x ; w )=wT  x                        Location   location: We wish to model the motion of the
+              f   i  j     j  i ,              (10)   person collecting the mapping data. These constraints en-
+then the marginal likelihood is of the form [Tipping and compass the dynamics component of the GP-LVM. For the
+Bishop, 1999]                                         WiFi case, we do not have strong odometry data, so we addi-
+                                                      tionally constrain X against a generative model of a generic
+        (Y|W)=N     (Y; 0 WWT   +  2 )
+       p                ,         σnI .        (11)   ofﬁce building. Remember that X is an n × q design matrix,
+The likelihood of this model can then be maximized with re- where each row xi is the latent position of the WiFi readings
+spect to W with the result that W spans the principal sub- yi. We model three constraints in our dynamics models:
+space of the data [Tipping and Bishop, 1999]. In the context • Distance between successive positions
+of WiFi mapping, however, f(xi; wj) is clearly non-linear
+                                                        • Change in orientation between successive positions
+and thus the marginalization to obtain (11) cannot be per-
+formed without reverting to approximations.             • Alignment of parallel line segments
+  In the GP-LVM an alternative approach is proposed. The We represent the constraints as a conjunction of probabilities:
+GP-LVM  is inspired from the Bayesian point of view. In
+the Bayesian approach, rather than maximizing the likeli- p(X)=p(distance)p(orientation)p(alignment). (14)
+hood of the parameters, they are treated as latent variables and
+                                                      To constrain the distance between successive points, we apply
+marginalized. Unfortunately, even for the linear case we have
+                                                      a simple time-series constraint based on a Gaussian prior on
+just described, it is not possible to marginalize both the latent
+                                                      walking velocity N ( v v), which results in
+variables and the parameters. If we do not wish to turn to             μ  ,σ
+approximate methods we are therefore faced with a choice of          n−1
+what to marginalize: the latent variables or the parameters. In p(distance)= N (||xi+1 − xi||;Δiμv, Δiσv). (15)
+[Lawrence, 2004; 2005] it was shown that if the prior distribu-      i=1
+tion for the parameters is Gaussian, p(wij)=N (wij;0, 1),
+                                                      Here, Δi is the time difference between consecutive measure-
+p(W)=      ij p(wij), then maximizing the likelihood with
+                                                      ments. We also consider the change in orientation between
+respect to X still leads to principal component analysis. For
+                                                      successive points, where i is the change in orientation be-
+this case the marginal likelihood takes the form                            θ
+                                                     tween ui = xi − xi−1 and ui+1 = xi+1 − xi. We assume
+                               T    2
+       p(Y|X)=     N (yj; 0, XX  + σnI).       (12)   that for a general ofﬁce environment, most time will be spent
+                 j                                    walking in a straight line along hallways, with periodic in-
+                                                      tersections. We place a prior on change in orientation as a
+By comparison with (7) this is recognized as a product of
+                                                      zero-mean Gaussian with sigma σo. Thus, we can model the
+Gaussian process models with a linear covariance function. likelihood of latent locations against our orientation model as
+We can extend this model to arbitrary covariance relation-
+ships by considering the covariance deﬁned via a kernel func-                n−1
+tion, as in (4). Thus, maximizing (12) with respect to X de-   p(orientation)=   N (θi;0,σo).        (16)
+termines the xij values that maximize the data likelihood as-                 i=2
+suming an underlying Gaussian process model.          We ﬁnally consider the alignment constraint. The intuition
+                                                      behind this constraint is that when a trace visits the same
+4  GP-LVMs for WiFi SLAM                              hallway twice, there will be two roughly parallel paths that
+We utilize the GP-LVM framework to probabilistically model should be aligned. To model this constraint, we consider
+the relationship between WiFi signal strength readings Y and the probability that two segments u = xi → xi+1 and
+
+                                                IJCAI-07
+                                                  2483v =  xj →  xj+1 are parallel as p(parallel)=N (θ;0,σ)            
+              
+where θ is the relative orientation between the two seg-
+ments. We only align parallel segments which are already
+close to each other, as captured by p(dp < 5) where dp is
+the perpendicular distance between the two segments, mea-
+sured in meters. The inequality is modeled as the like-                          
+lihood that N (dp,σ1) is less than N (5,σ2), deﬁned as
+                                                  
+                         2    2                                                  
+1/2 1+erf   (dp − 5)/ 2(σ1 + σ2  . If both segments
+are parallel and close by, we constrain their separation dis- 
+                                                                                 
+tance to zero as p(separation)=N (dp;0,σ). Thus, our full
+alignment constraint is                                
+                                                                                                      
+ (        )=   (      ) (    5) ⇒  (         )                             
+p alignment   p parallel p dp <   p separation . (17)                                                
+                                                        
+                                                                                                
+                                                           
+All told, we have deﬁned the conjunction of three probabilis-                                   
+                                                                                      
+                                                                    
+tic models constraining distance, orientation, and alignment                                   
+                                                               
+of latent space coordinates to provide p(X) as the dynamics                                  
+model. When combined with the GP model of p(Y|X),we
+have deﬁned our full probability model. However, we have Figure 2: Comparison of ground truth Gaussian process ver-
+one constraint left.                                  sus that constructed by GP-LVM.
+Signal Strength → location: We wish to constrain that simi-
+lar signal strength readings should be mapped to similar loca-
+tions. Note that this constraint is only reasonable in dense to easily establish the topological connectivity graph for later
+WiFi environments such as ofﬁces and urban areas. This localization. We will demonstrate these ﬁner features in our
+constraint is not provided by default in GP-LVM. However, GP-LVM results.
+Lawrence and Quinonero-Candela˜ [2006] demonstrate the  We see in the ﬁnal plot in Fig. 3 the result of the latent space
+                                              Y
+use of back constraints to constrain local distance in to optimization of GP-LVM. The plot shows clear deﬁnition of
+               X
+local distances in . Back constraints are implemented as a intersections, correct alignment of paths, and a strong topo-
+                       X  =  (Y   )
+smooth internal mapping of  g   ,φ where φ is a set of graphical similarity to the ground truth trace. We had similar
+mapping parameters. The smoothness of the mapping ensures results for our other test traces, though they are not displayed
+                 Y                 X
+that nearby points in are also nearby in .            here for brevity. The plot also demonstrates the current lim-
+                                              X
+  Finally, we optimize the marginalized latent positions by itations of our approach. The ground truth trace includes a
+minimizing the negative log-likelihood of our full GP-LVM non-right-angle intersection, which is simpliﬁed as a right an-
+                (X  Y)
+likelihood model P ,   . We can do this efﬁciently with gle in our GP-LVM result. While we have no explicit angular
+conjugate gradient-descent, where the gradient of the log- constraint in our motion model, the constraint emphasizing
+likelihood can be evaluated with respect to each element of straight and aligned paths tends to prefer a grid like structure
+X
+  . Performance is improved and local minima avoided if we in the resulting map.
+initialize the starting point of the descent with a reasonable Given the resulting latent-space optimization, it is trivial to
+value. In our case, we apply Isomap to generate an acceptable extract an intersection connectivity graph from this represen-
+initialization. We will contrast the results of Isomap with the tation. The resulting graph and the GP sensor model produced
+full GP-LVM in the results section.                   as by-product of GP-LVM are immediately applicable to the
+                                                      task of Bayesian localization, as described in [Ferris et al.,
+5  Experimental Results                               2006]. In Fig. 2, we see a comparison of a GP sensor model
+Our experimental evaluation consists of collecting a series resulting from the ground truth locations and a GP model re-
+of WiFi signal-strength traces, generating a sensor model sulting from the optimized GP-LVM latent space. We present
+and map using the WiFi-SLAM technique, and then cross- these results as a demonstration that the two models are quite
+validating the model by localizing the remaining traces and similar, suggesting our optimized latent space is reasonable.
+considering the error.                                  To evaluate localization accuracy, we cross-validated each
+  We collected three traces over one ﬂoor of a university GP-LVM result by performing localization using the remain-
+building. Traces ranged in length from 250 meters to half ing two test traces. Since the mapping from the latent coordi-
+a kilometer. Traces were collected with an iPAQ hand-held, nate system X to the underlying ground truth coordinate sys-
+a standard WiFi card, and a click-to-map-based annotation tem is not well-deﬁned, we evaluated localization accuracy
+program for establishing ground truth location. As seen in using the metric described in [Bowling et al., 2005]. Speciﬁ-
+the ground truth path in Fig. 3, traces included three loop cally, to determine the location in the ground truth coordinate
+closures and multiple trips through each hallway. For each system, we ﬁnd the closest training point in the latent space
+trace, we initialized GP-LVM with an Isomap embedding of to our current location and use its ground truth location as our
+X, which, as also seen in Fig. 3, does a reasonable job of re- own location. Put differently, whenever a person returns to a
+covering the overall structure of the WiFi trace. However, the previously visited location, we estimate how accurately our
+embedding lacks ﬁner resolution that would make it possible system can detect this event.
+
+                                                IJCAI-07
+                                                  2484

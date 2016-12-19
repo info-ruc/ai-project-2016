@@ -1,0 +1,387 @@
+                     Over-Subscription Planning with Numeric Goals
+
+             J. Benton                        Minh B. Do                Subbarao Kambhampati∗
+    Computer Sci. & Eng. Dept.         Embedded Reasoning Area          Computer Sci. & Eng. Dept.
+      Arizona State University         Palo Alto Research Center          Arizona State University
+       Tempe, AZ 85287-5406               Palo Alto, CA 94304             Tempe, AZ 85287-5406
+          j.benton@asu.edu                minh.do@parc.com                     rao@asu.edu
+
+                    Abstract                          both hard and soft goal constraints. We ﬁrst present a mo-
+                                                      tivating example before discussing our techniques to handle
+    By relaxing the hard-goal constraints from clas-  the new extensions.
+    sical planning and associating them with reward   Mars Rover:  A Rover is sent to Mars to collect soil/rock
+    values, over-subscription planning allows users   samples and take pictures at different locations. The rover
+    to concentrate on presenting what they want and   should ﬁrst land safely, roll off the lander and then go to dif-
+    leaves the task of deciding the best goals to     ferent locations to gather scientiﬁc data. While the objective
+    achieve to the planner. In this paper, we extend the is to collect as much data as possible given energy and time
+    over-subscription planning problem and its lim-   limitations, only a subset of the data can be gathered. The
+    ited goal speciﬁcation to allow numeric goals with quality of the plan will be measured by the amount of sam-
+    continuous utility values and goals with mixed    ples collected at different locations and the amount of picture
+    hard and soft constraints. Together they consid-  data transferred back to earth. Obviously, more samples and
+    erably extend the modeling power of goal spec-    picture data give better values and thus it is more natural to
+    iﬁcation and allow the user to express goal con-  model the goals of collecting them as numeric goals with the
+    straints that were not possible before. To handle utility given according to the amount actually collected.
+                                            ps
+    these new goal constraints, we extend the Sapa      The example above brings up two issues: (1) there are
+    planner’s planning graph based techniques to help certain types of goals that are better represented as numeric
+    it choose the best beneﬁcial subset of goals that goals with a range of utility values (e.g. amount of sam-
+    can include both hard or soft logical and numeric ple/data); (2) there are goals that are critical to the success
+    goals. We also provide empirical results in several of the plans (e.g. landing safely) and there are goals that are
+    benchmark domains to demonstrate that our tech-   not critical but beneﬁcial (e.g. collecting samples). Besides
+    nique helps return quality plans.                 the rover domain, those types of goals are also common in
+                                                      many other real-world planning problems such as transporta-
+                                                      tion or travel planning. We extend the goal structure by al-
+1  Introduction                                       lowing numeric goals (e.g. constraints on some continuous
+                                                      quantities) with continuous utility values that depend on the
+In classical planning, a given set of conjunctive goals must all actual value achieved by the ﬁnal plan. We also strike a mid-
+be achieved together for the plan to be a success. As planning dle ground between classical planning and over-subscription
+problems get more complicated with temporal and resource goal constraints by supporting both hard (critical) and soft
+constraints, it is harder to predict which goals are achievable. (beneﬁcial) goals. Those additional types of goal constraints
+Recently, motivated by the requirements of different NASA complement traditional logical goals and allow the user more
+planning problems such as planning for airborne, telescopes freedom in expressing what they desire from the ﬁnal plan.
+such as Hubble and SIRTF, and planning for a Mars Rover While extending the current framework of hard and soft
+             [         ]
+mission, Smith 2003; 2004 introduced the over-subscription goals to support a mixture of them is not overly challenging,
+planning problem. In this type of problem, the planner is not effective handling of the numeric goals with continuous util-
+required to achieve all the goals but instead achieve the best ity values does pose several challenges. In particular, we need
+subset of goals given the resource limitations.       to reason about the degree of satisfaction of goals. To illus-
+  While the ability to represent goals as soft constraints with trate, if the goal is Sample ≥ 5 grams, it can be satisﬁed by
+(ﬁxed) utility values makes it much easier to model goals in Sample = 6 as well as Sample = 10 at different degrees.
+many applications, the restriction to only support soft logical We need techniques to:
+goals has limitations in metric temporal planning domains. In
+this paper, we extend the framework to handle numeric goals 1. Assign utilities to different degrees of satisfaction.
+having variable utility values and mixed goal sets containing 2. Track costs of achieving goals of different degrees of
+                                                           satisfaction.
+  ∗This research is supported in part by the NSF grant IIS-0308139
+and IBM Faculty Award.                                  3. Use the achievement costs and utilities in combination                                                                              L1 Sample
+    to estimate the ﬁnal plan that maximizes the overall net           10                       Sample
+                                                             Rover                       3      Picture
+                                                                               5
+    beneﬁt achievable from a given state.                     L0                                 L2
+  We present SapaMps  an extension of Sapaps [Do &
+                                                           0            0              0            0
+                                                                       L0            L0            L0
+Kambhampati, 2004; van den Briel et al., 2004] to support L0      10
+                                              Mps                       10             8             8
+both numeric goals and mixed soft/hard goal sets. Sapa         M0,1    L1            L1            L1
+                                                                  5
+                                                               M        5       3      5             5
+signiﬁcantly extends the relaxed plan extraction procedure      0,2          M2,1    L2            L2
+                                                                  3    L2              3             3
+          ps                                                             3      6              6
+used in Sapa to support numeric goals.                          C      Ced           Ced    Sa     Ced
+                                                                             Sa1             1
+                                                                                6     19            17
+  We ﬁrst brieﬂy discuss the search framework used in                                S1            S1
+    ps                                                                       Sa2
+Sapa   in Section 2. We then show how to extend the cost                              14            14
+                                                                                4    S2            S2
+                                                                              Pi
+propagation and relaxed plan extraction routines to handle                     2      8             8
+                                                                                     P2            P2
+metric quantities and the combination of soft and hard goals Level 0  Level 1       Level 2       Level 3
+in Section 3. We present empirical results on extended ver-
+sions of some well-known planning benchmark domains in     Figure 1: Rover example and the planning graph
+Section 4 to show that the new techniques help ﬁnd larger and
+better quality plans. We conclude the paper with the related state visited before S. Thus, instead of ﬁnding a single plan,
+work and discussion.                                  the algorithm keeps searching for incrementally better plans
+                                                      in terms of the achieved net beneﬁt (g(S)) value. The heuris-
+2  Background                                         tic value h(S) is calculated by extending the cost propagation
+                                                      over the planning graph routine. It is followed by the relaxed
+We start with the formal deﬁnition of the over-subscription plan extraction process in Sapa [Do & Kambhampati, 2003].
+(aka partial-satisfaction) planning problem. We then pro- The search stops when the ﬁrst node in the queue has value
+ceed by describing the Sapaps [Do & Kambhampati, 2004; h(S) = 0 (i.e. f(S) = g(S)). For the rest of this section, we
+van den Briel et al., 2004] planner and its framework that will discuss the three steps in estimating the h(S) value.
+heuristically searches for good quality plans for the problem. Example: Figure 1 shows an example in the Mars Rover
+                                                      domain along with the complete planning graph structure for
+2.1  Over-Subscription Planning (OSP)                            2
+                                                      this example . The rover initially resides at location L0 and
+To formally deﬁne the over-subscription planning problems needs to collect samples at L1, and to take a picture of L2.
+
+[Smith, 2004; van den Briel et al., 2004], the following no- The rover can: (1) move between two locations (MLx,Ly );
+tations will be used: F is a ﬁnite set of ﬂuents and A is a (2) calibrate the equipment before taking sample/picture (C);
+ﬁnite set of actions, where each action consists of a list of (3) collect a sample at location l (Sal); and (4) take pictures
+preconditions and a list of add and delete effects. I ⊆ F is (P il). Action execution costs are depicted next to each action
+the set of ﬂuents describing the initial state and G ⊆ F is the in the complete planning graph for the example shown in
+set of goals. Hence we deﬁne a planning problem as a tuple Figure 1. The ﬁrst action layer of the graph contains three
+
+P = (F, A, I, G). The OSP problem is deﬁned as follows: actions with their respective execution costs: CM0,1 = 10,
+                                                      CM    = 5, and CC = 3.
+Deﬁnition OSP NET  BENEFIT: Given a planning problem     0,2
+P = (F, A, I, G) and, for each action a ∈ A a “cost” ca ≥ 0 Cost-propagation over the planning graph: The planning
+and, for each goal speciﬁcation g ∈ G a “utility” ug ≥ 0: ﬁnd graph propagates the achievement cost of each predicate and
+a ﬁnite sequence of actions ∆ = ha1, ..., ani starting from execution cost of each action forward starting at the initial
+                   1                                  level/time-point until ﬁx-point. To simplify the discussion
+IPthat leads toP a state S maximizing the net beneﬁt value
+      u  −       c , where S is the set of goals satisﬁed for this section, we will assume that all actions have unit du-
+  g∈SG  g    a∈∆  a        G
+in S.                                                 ration.
+                                                        Intuitively, the heuristic needs to realize that to be able to
+  Thus, in contrast to the classical planning problems, in take the picture at L2 we ﬁrst need to have the camera cal-
+OSP no goal achievement is needed to qualify the plan as ibrated and be at L2. For each action a, its execution cost
+valid (any sequence of actions is a valid plan). We thus put Ca is static and different from the cost to enable its execution
+emphasis on ﬁnding good quality plans where the objective cost(a), which is the cost to achieve all of its preconditions.
+
+function is to maximize the tradeoff between total achieved Thus, cost(P iL2 ) = cost(Ced)+cost(L2) = CC +CM0,2 =
+goal utility and total incurred action cost (both additive). 5 + 3. We also want the heuristic to capture the fact that the
+                                                      cost to have a picture involves the cost to enable execution
+2.2  Sapaps : Heuristic search for OSP
+                                                      of P iL2 and the cost to actually carry out that action. Thus:
+    ps                                                cost(P  ) = cost(P i ) + C   = 8 + 4. The propagation
+Sapa   adapts the heuristic (progression) search framework  L2          L2     P iL2
+to solve OSP problems. The quality of each search node rules are:
+S visited by the A* search algorithm in a forward plan-
+                                                        1. Initially, at t = 0: (1) ∀p ∈ I : cost(p) = 0; (2)
+ner is ranked using the value f(S) = g(S) + h(S) with:
+       P          P                                        ∀p∈ / I : cost(p) = ∞; (3) ∀a ∈ A : cost(a) = ∞.
+g(S) =       u  −       c . Starting from the initial state
+         g∈SG g     a∈∆  a
+I with the net beneﬁt value g(I), Sapaps keeps track of all 2. PAt level l: (1) ∀a ∈  A   :  cost(al)  =
+the visited states S that have better g(S) values than the best p∈P recond(a) cost(pl−1); (2) ∀p ∈ F : cost(pl) =
+
+  1States are represented just as in the Sapa planner [Do & Kamb- 2We assume that the readers are familiar with the planning graph,
+hampati, 2003].                                       which was originally described in [Blum & Furst, 1997].        [S1;S2;P2]      [S1]   [S1]                   In our ongoing example, only the goal set S = {S } can be
+               [S1;S2;P2] M2,1 L1                                                                1
+          M0,2
+    L0           L2
+                        [S2]    10                    removed because cost(AS1 ) = cost(M2,1) + cost(Sa1) =
+         [S1;S2]
+               [S1;S2]  Sa2    S2     [S1]     8      3 + 6 >  Util(S1) = 8. Figure 2 shows the relaxed plan
+                 Ced                          S1
+           C                          Sa1
+                        [P2]    12                    before and after reﬁnement.
+                               P2
+                        Pi2                             The   net  beneﬁt of  the  ﬁnal  relaxed plan  is:
+   Level 0      Level 1       Level 2       Level 3
+                                                      Util({S2, P2})  −   cost({M0,2, C, Sa2, P i2})   =
+         [S2;P2]         [S2]     10
+                [S2;P2]                               (10 + 12) −  (5 + 3 + 6 + 4) =   4.  This is used as
+          M0,2           Sa2    S2
+    L0           L2                                   the heuristic value h(S) to guide the A* search algo-
+          [S2]   [S2]    [P2]    12
+                 Ced            P2                    rithm.  In general, we deﬁne RP (S) to be the relaxed
+           C             Pi2                          plan found for state S and U(Apply(RP (S), S)) to be
+              Figure 2: The relaxed plan              the utility achieved by applying all actions in the relaxed
+                                                      plan to state S. The heuristic value is then calculated as:
+    minp∈Effect(a)cost(al−1)                          h(S) =  (U(Apply(RP  (S), S)) − U(S)) − cost(RP (S))
+                                                      where RP (S) is the ﬁnal relaxed plan.
+  Our heuristic is inadmissible due to the use of sum
+propagation in calculating the cost to execute each action.
+As we grow the graph, new actions and facts are introduced 3 Handling Numeric Goals with Utility
+and the cost to achieve facts (cost(p)) and execute actions Sapaps only supports logical achievement goals of the form
+(cost(a)) decreases due to new ways to achieve and support g = T rue (e.g. HasP icture(L2)). However, if we have the
+them. In Figure 1, we highlight the new facts and actions goal to collect at least m grams of a Mars soil sample at a
+introduced at each level and the new achievement costs for given location l (i.e. sample(l) > m), we can more naturally
+each fact. For example, L1 ﬁrst appears at level 1 with represent it as a numeric goal.
+cost(L1) = 10 (achievable by M0,1). The value of cost(L1)
+decreases to 8 at level 2 due to the new action M2,1 in level 3.1 Numeric Goal Representation
+1. While the set of achieved facts and supporting actions in Unlike logical goals that only have true/false values, there
+level 2 and level 3 are the same, we did not stop growing the are an arbitrarily large number of values that can satisfy a
+graph at level 2. This is because cost(S1) decreases at level given numeric goal. We assign a range of continuous utility
+3 due to the reduction in cost(L1) at level 2 (which leads to values for numeric goals to represent a degree of satisfaction.
+the decrease in cost(Sa1)).                           Speciﬁcally, numeric goals and their utility values are set up
+Extracting the relaxed plan: After terminating the cost- as follows:
+propagation, the cost values can be used to extract the relaxed
+                                                      Deﬁnition NUMERIC  GOAL: A numeric goal is a relation
+    RP                             G
+plan   , starting from all achieved goals , as follows: f ∈ D in which f is a mathematical formula involving an
+  1. Starting from the last level, ∀g ∈ G at level l select arbitrary number of numeric variables and D = [l, u] is an
+    action a at the action level l − 1 that supports g with the interval open or closed at either end and is bounded by two
+    lowest cost.                                      real values l ≤ u (l, u can be inﬁnity).
+  2. When action a is selected at level l, then all precondi- For example, the goal of keeping travel cost between $100
+    tions p of a at the previous level will be added to G. and $500 can be represented as: Hotel + AirT icket ∈
+  3. Stop when: G ⊂ I.                                [100, 500).
+                                                        For each numeric goal g ∈ D, the utility value u(g) is
+  All the collected actions a and the causal links between speciﬁed by a linear function. For example, if the goal is to
+them make up the relaxed plan RP .                    collect at least 10 grams of Mars sample (i.e. f = Sample >
+                                                                                               6
+Reﬁning the relaxed plan: For each goal g, we build the 10), then the utility of this goal can be u(f) = 10 ∗ Sample
+goal supporting set GS for each proposition p and action a by (i.e. it is worth 1 million dollars for each gram of Mars’ soil
+going backward using the extracted relaxed plan as follows: if we have at least 10 grams, but 0 dollars otherwise).
+  • ∀g ∈ G : GS(g) = {g}                              3.2  Cost Propagation with Numeric Goals
+             S
+  • GS(a) =    GS(p) : p ∈ Effect(a)                  To incorporate numeric goals into our current heuristic frame-
+             S
+  • GS(p) =    GS(a) : p ∈ P recond(a)                work, we ﬁrst have to be able to estimate the cost to achieve
+                                                      them. Unlike logical goals, there are multiple degrees of sat-
+  Intuitively, for each action a, GS(a) is the set of goals isfaction for a numeric goal g. Therefore, the procedure that
+that a supports. Thus, the achievement of any goal in GS(a) tracks the achievement cost for g is necessarily more compli-
+depends on the inclusion of a in the relaxed plan while for cated. Speciﬁcally:
+any goal g∈ / GS(a), g will still be achievable without a.
+In Figure 2, we show the goal supporting sets for all actions • For logical values we track the time point tp at which a
+                                                           proposition p can ﬁrst be achieved (p = T rue) and the
+and related propositions (e.g. GS(C) = {S1, S2}) and the
+corresponding utility values (e.g. Util(S ) = 10) of the three achievement cost for p at time points t ≥ tp. For nu-
+                                 2                         meric values we need to track a range of possible values
+goals in the relaxed plan. For each set SG ⊂ G, let AS =
+                                               G           [Lvi , Uvi ] for a numeric variable v at each jth update
+a : GS(a) ⊂ SG be the set of actions supporting only goals  j    k                      i
+                                                                                      th
+in SG. We will remove SG along with ASG from the relaxed   to the lower bound value and k update to the upper
+plan if Σ    cost(a) > Σ    Util(g) (i.e. cost > utility). bound value.
+       a∈ASG           g∈SG      Dur = 1       Dur = 1.25       Dur = 1.5        means that an action in the RTPG can be applied concurrently
+    Sample 1 (Sa1) Sample 2 (Sa2) Communicate (Com)   with itself an arbitrary number of times, causing the num-
+     Cost: 1 (at end) Cost: 2 (at end) (at start) Cost: 3 (at start)
+          V1 += 1        V1 += 2 V1  1     V2 := V1  ber of time points in the graph to increase signiﬁcantly. To
+                                                      avoid this problem, we disallow such concurrency as a prac-
+               C:1      C:1      C:1
+            Sa1      Sa1      Sa1                     tical compromise.
+
+              Sa2 C:2    Sa2 C:2Sa2    C:2              Figure 3 shows a RTPG for our example. We re-apply the
+                                                      numeric effects of actions directly after their duration com-
+                       Com  C:4      Com  C:4
+                                                      pletes. At time t = 1, action Sa1 completes and we add the
+                                                                        v1
+         0       1  1.25  2    2.5  3    3.75 4 t     upper bound value U1 =  1 of v1 to indicate that the col-
+    V1:         [0,0]  [0,1]    [0,3]            [0,4] [0,6]       [0,7]           [0,9] lected weight of the soil sample has increased by 1. Also at
+   cost(      ):       0          1         3        4             6            7                 9 this time point, the precondition of Com can be satisﬁed by
+                                                                 v1
+    V2:         [0,0]                [0,1]            [0,6] the bound U1 = 1, so we apply the numeric effects of the
+   cost(      ):       0               4                    9                      v2
+                                                      action, adding the upper bound U1 = 1 on the weight of
+                                                      the soil sample. At t = 1.25, Sa2 completes and we add the
+Figure 3: The RTPG for our example. Our actions are deﬁned              v1
+                                                      upper bound value U2 = 1 + 2 =  3 increasing the previ-
+above it.                                             ous upper bound of v1 the second time by 2 according to the
+                                                      numeric effect of Sa2. This continues until we reach our nu-
+  • In tracking costs to achieve logical literals, actions are                v2
+                                                      meric goal v2 > 5 (when (U2 = 6) > 5). In Figure 3, we
+    only re-applied (e.g. Sa1 at action level 2 in Figure 1) show the upper and lower bound values for v1 and v2 as we
+    when the cost to execute (i.e. cost to achieve their pre- grow the graph. Because we do not have actions that decrease
+    conditions) them decreases. However, actions having the values of v1 or v2 in this simple example, the lower bound
+    numeric effects on vi need to be applied whenever pos- values of those two variables remain unchanged.
+    sible (e.g. Sa1 in Figure 3) because their effects con- The RTPG handles numeric expressions in effects
+                             vi           vi
+    tinue to change the upper (Uk ) or lower (Lj ) bound and preconditions by applying the formulas to each
+    values of the quantity vi.                        bound.   For instance, if the bounds of three variables
+Example: To illustrate the techniques to track achievement v1, v2, v3 are v1 : [0, 20], v2 : [1, 5] and v3 : [−1, 3]
+costs for numeric goals, we will use a variation of our ongo- and we want to calculate f = v3 + v1 ∗ v2, we ﬁrst
+ing Mars Rover example. We solely concentrate on metric ﬁnd v1 ∗ v2 =   [min(0 ∗ 1, 0 ∗ 5, 20 ∗ 1, 20 ∗ 5),
+quantities in this example (illustrated in Figure 3). There are max(0 ∗ 1, 0 ∗ 5, 20 ∗ 1, 20 ∗ 5)] = [0, 100] then
+                                                      f = v3 + [0, 100] = [0 + −1, 100 + 3] = [−1, 103].
+two sample-collecting actions: sample1 (Sa1) collects a sin-
+                                                                                       vi         th
+gle gram of soil sample; sample2 (Sa2) collects 2 grams of Tracking achievement costs: We let bj refer the j upper
+soil sample. The effects of these actions occur at the end or lower bound of vi in the RTPG. The RTPG associates for
+                                                                    3  vi                     vi
+of execution. The third action, communicate (Com), com- each bound value , bj , a propagated cost, cost(bj ). The cost
+municates the sample information to a lander at the start of value estimates how costly it is to achieve a certain numeric
+execution. We use two continuous variables; v1 to track the value. The idea is that for each value n that satisﬁes some
+weight of the collected soil sample in the Rover’s store and numeric goal, the tradeoff between the cost of achieving n
+v2 to track the total amount of communicated sample. The and the utility that n incurs will be used as heuristic guidance.
+goal g is to achieve v2 > 5 and the goal utility formula is Cost propagation is not trivial in the presence of numeric
+u(g) = v2 ∗ 3 (i.e. if v2 ≤ 5 we get a utility of zero, other- expressions. Before turning to this case, let us concentrate our
+wise the utility is found using u(g)).                discussion on simple numeric effects (i.e. effects using only
+  While the connection between time and numeric goals is constant values). Numeric updates (e.g. increases and de-
+not obvious in OSP problems, one important component of creases) will generate a new bound value with respect to the
+action cost is the amount of time consumed by each action. previous one. Because of this, we base the cost of each bound
+Goal utilities also normally depend on the time the goals on the previous bound’s cost, cost(bvi ). Speciﬁcally, when
+are achieved. Like Sapaps , the SapaMps planner handles                             j−1
+                                                      an action a adds an upper or lower bound for a variable vi us-
+actions with different durations and thus we do not make ing an increase (+=) or decrease (-=) numeric effect, the prop-
+the assumption that all actions have uniform duration (as in                      vi                vi
+                                                      agated cost of the bound is cost(bj ) = cost(a)+cost(bj−1).
+previous section).                                    This lets us track the cost of executing several actions that
+Tracking the upper and lower bounds: The ﬁrst step in may be required to reach a numeric goal or precondition.
+estimating the achievement costs for numeric goals is to Bounds found using an assign (:=) numeric effect only de-
+track the possible values for numeric variables at different pend upon the action itself. So, the propagated cost is
+                                                           vi
+time points. Previous work in tracking upper/lower bounds cost(bj ) = cost(a). In our example shown in Figure 3, the
+for numeric variables using the planning graph was done cost of the new bound found by the numeric effect of Sa2 at
+                       [                                              v1                    v1
+for non-temporal planning Koehler, 1998; Hoffman, 2003; t = 1.25 is cost(U ) = cost(Sa2) + cost(U ) = 3. When
+                   ]                                                  2                     1
+Sanchez & Mali, 2003 . There, actions are either always ex- the numeric effect of Sa1 is re-applied at t = 2 and causes
+ecuted serially or marked mutually exclusive of one another
+if their numeric effects give varying results when ordered dif- 3The RTPG can ﬁnd multiple upper and lower bound values for
+              Mps
+ferently. In Sapa , the semantics of the planner disallows a variable vi at the same time point. We index the bounds in this
+interacting actions to be concurrent, whereas the relaxed tem- manner so that we may refer to previously found bounds without
+poral planning graph (RTPG) allows this. In our context, this regard to the time point that they may appear in the RTPG.                                             v1
+the third update on the value of v1 we have cost(U3 ) = and t = 2.5, we keep updating the upper bound of v1 and
+                 v1
+cost(Sa1) + cost(U2 ) = 4.                            v2 to values as shown in Figure 3. When activating Com
+                                                                                      v1
+  In our ongoing example, each numeric effect and precondi- at t = 2.5, we have the set Bvi ={U4 = 6} representing
+tion involves only two or fewer variables. However, in a more the bounds used for the expression v2 := v1. We get a new
+                                                                                                v2
+general scenario, numeric goals, action preconditions and ac- bound that satisﬁes the numeric goal with cost(U2 = 6) =
+                                                                        v1            v1
+tion effects can be a formula involving an arbitrary number of cost(Com)+cost(U4 = 6)−cost(U1 = 1) = 9. At t = 3
+                                                                                           v1
+numeric variables. These inter-dependencies between vari- the update of Sa1 completes, giving cost(U5 = 7) = 7 and
+                                                                                                v1
+ables further complicates cost propagation on bounds. That at t = 3.75, the numeric effect of Sa2 gives cost(U6 = 9) =
+is, when we calculate new bound values from expressions, we 9.
+need to ﬁnd the cost of the new bound based upon the costs Notice that even after numeric goals f ∈ [L, U] are
+of the values involved in the expression. To do this, we deﬁne satisﬁedT by the bound values on f at a given time point t (i.e.
+                                                      [L, U] [lf , uf ] 6= ∅ at t), we allow the RTPG to continue to
+for each variable vi, a set Bvi of all bound values involved
+in computing a new bound for variable vi. For example, we expand until ﬁx-point.
+have an expression f = v3 + v1 ∗ v2 and deﬁne an effect v4 Relaxed Plan Extraction with Numeric Goals: After doing
++= f. When applying this effect, we track each of the bounds cost-propagation over the RTPG, the cost information can be
+used to generate the minimum and maximum values from this used to extract a relaxed plan using an approach similar to
+formula (in this case [-1, 103]). We apply the effect using the that discussed in Section 2.2. The challenge here is in de-
+resulting bounds. For the new upper bound of v4, we have the ciding for each numeric goal f ∈ [l, u], how to select the
+           v1       v2      v3
+set Bv4 = {U  = 20,U   = 5,U  = 3} to indicate the de- most beneﬁcial value vf of f that is achievable through the
+pendencies between the upper bound of v4 and the particular planning graph and extract the action that supports that vf
+bound values of v1, v2, and v3 used to achieve this new upper value. When selecting an action a we add all of its logical and
+bound.                                                numeric preconditions into the goal set G. Also, we ensure
+  During cost propagation, bounds used to satisfy a precon- that the cost of numeric bounds used to satisfy the numeric
+dition are included in the cost of an action. For each vari- goal constraints are included with the relaxed plan. This is
+able used in expressions, we allow only a single bound of so we can accurately determine the achievement cost for each
+that variable to be included when calculating costs of new bound.
+bounds (i.e. avoid including more than one bound for each To handle relaxed plan extraction for numeric goals,
+variable when a variable is used both to support a precon- we choose the bound values that provide the best tradeoff
+dition and as part of an expression in a numeric effect). To between goal utility value4 with the achievement cost. Thus,
+                                                                                    vg  vg
+do this, we let Pa be the set of all bound values used to sat- for each achievable value vg ∈ [Lj ,Uk ] that satisﬁes the
+isfy the numeric preconditions of an action a. In our exam- goal constraint on g, we select the one that gives the greatest
+ple, P   =  {Uv1 = 1} starting at t = 1. We also deﬁne
+  T  Com                                              U(vg) − cost(vg) value. The action a that supports vg is then
+Pa  Bvi to be a set operation over the variables represented selected and added to the relaxed plan. If given a goal interval
+
+by the bounds in Pa and Bvi , where the result gives us only vi ∈ [l, u] we never ﬁnd a value v ∈ [l, u] while expanding
+the bounds in P that are not equal to the bounds in B . More the RTPG, but do ﬁnd two values vl < l and vu > u, we
+         T   a                             vi
+formally, A B = {bvi : bvi ∈ A ∧ ∃bvi ∈ B}.           say the goal is subsumed. In this case, we allow the ﬁrst
+                 j    j          k6=j                 subsuming value to support the goal. However, since we
+  For instance, if we have the sets P = {Lv1 = 1,Uv2 = 2}
+                              a     1      T1         cannot estimate the utility on this bound, we let its utility be 0.
+            v1      v2       v3
+and Bvi = {U3  = 6,U1  = 2,U1  = 1}  then Pa Bvi =
+  v1                                                  Heuristic estimation: For each numeric goal supporting
+{L1  =  1}. This result provides the means for removing bound that we select, we include the cost to support it and
+the costs of bounds in Pa that are already present in an ac- its utility value in the net beneﬁt calculation. In our on-
+tion, when we also use them in B to calculate bound cost.
+                            vi                        going example the net beneﬁt of the relaxed plan would
+Thus, the cost of a bound value of variable vi that is changed                                      v1
+                                                      be U({u(v2  = 6)}) − (C(Sa2) +  C(Com) +  C(U4   =
+by an increase (+=) or decrease (-=) effectP of an action a is v1
+     vi                  vi                           6) − C(U1  = 1)) = (6 ∗ 3) − (2 + 4 + 6 − 1) = 7.
+cost(bj ) = cost(a) + cost(bj−1) + d∈B \P cost(d) −
+P                                    vi  a
+      T   cost(e). It follows that the cost of a bound 3.3 Combining Hard & Soft Goals
+  e∈Pa Bvi
+found by an assign effect (:=) on action a is cost(bvi ) = In our work, we support hard and soft goals for both tradi-
+         P                  P                j
+                                  T                   tional logical goals and the numeric goals discussed in the
+cost(a) +  d∈B \P  cost(d) −  e∈P  B  cost(e).
+              vi a               a  vi                previous section. In the case of numeric goals, a single goal
+  As shown in Figure 3, at t = 0 both actions Sa1 and Sa2 may involve both hard and soft constraints. For example the
+are added to the RTPG. The delayed numeric effect of Sa1 goal of having the Rover collect between 5 to 10 grams of
+                                     v1
+increases v1 by 1 at t = 1 and incurs cost(U1 = 1) = 1. At Mars soil (SC = SoilCollected ∈ [5, 10]), can be modeled
+this time point, the precondition v1 ≥ 1 of Com is satisﬁable so that SC > 5 is a hard constraint (i.e. should collect at least
+                      v1                 v1
+and we have PCom =  {U1  =  1}. The cost(U1 = 1) is   5 grams) and SC < 10 is a soft constraint (i.e. 10 is enough
+included to ﬁnd cost(Com). So, when Com is put in the but more than that is not harmful).
+graph at t = 1, we have cost(Com) = 4. Its instantaneous To support both hard and soft goals in the best ﬁrst search
+                                              v2
+effect v2 := v1 leads to a new bound for v2 with cost(U1 = framework for over-subscription problem, we need to change
+1) = cost(Com) = 4. At t = 1.25, Sa2’s delayed numeric
+                                                         4
+effect is activated and increases v1 by 2 to a new bound with Recall that the utility values are given by a linear formula over
+          v1
+cost cost(U2 = 3) = 3. As we increase the time to t = 2 the goal variable, g.

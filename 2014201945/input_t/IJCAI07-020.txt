@@ -1,0 +1,420 @@
+                                Arc Consistency during Search
+
+    Chavalit Likitvivatanavong              Yuanlin Zhang                      James Bowen
+                                             Scott Shannon                  Eugene C. Freuder
+        School of Computing            Dept. of Computer Science    Cork Constraint Computation Centre
+  National University of Singapore    Texas Tech University, USA      University College Cork, Ireland
+
+
+                    Abstract                          an assignment, it will call ACS.try() with that assignment as
+                                                      the argument and make further decision based on the return
+    Enforcing arc consistency (AC) during search has  value of try(). With the explicit abstraction of ACS, we notice
+    proven to be a very effective method in solving   that after one invocation of an ACS method, say ACS.try(),
+    Constraint Satisfaction Problems and it has been  there are residual data left in the structures of ACS. We will
+    widely-used in many Constraint Programming sys-   explore how to make use of these residual data to design new
+    tems. Although much effort has been made to de-   ACS algorithms with the new measurements in mind. Empir-
+    sign efﬁcient standalone AC algorithms, there is  ical study is also carried out to benchmark the new ACS al-
+    no systematic study on how to efﬁciently enforce  gorithms and those designed using conventional techniques.
+    AC during search, as far as we know. The signif-  One of the new ACS algorithms is very simple but shows a
+    icance of the latter is clear given the fact that AC clear performance advantage (clock time) over the rest. Nec-
+    will be enforced millions of times in solving hard essary background is reviewed below.
+    problems. In this paper, we propose a framework     A binary constraint satisfaction problem (CSP) is a triple
+    for enforcing AC during search (ACS) and com-
+                                                      (V,D,C)whereV   is a ﬁnite set of variables, D ={Dx | x ∈
+    plexity measurements of ACS algorithms. Based
+                                                      V  and Dx is the ﬁnite domain of x},andC is a ﬁnite set
+    on this framework, several ACS algorithms are de- of binary constraints over the variables of V .Asusual,we
+    signed to take advantage of the residual data left in assume there is at most one constraint on a pair of variables.
+    the data structures by the previous invocation(s) of We use n, e,andd to denote the number of variables, the
+    ACS. The algorithms vary in the worst-case time   number of constraints, and the maximum domain size of a
+    and space complexity and other complexity mea-    CSP problem.
+    surements. Empirical study shows that some of
+                                                        Given a constraint cxy,avalueb ∈ Dy is a support of
+    the new ACS algorithms perform better than the
+                                                      a ∈ Dx if (a, b) ∈ cxy,andaconstraint check involves deter-
+    conventional implementation of AC algorithms in
+                                                      mining whether (u, v) ∈ cxy for some u ∈ Dx and v ∈ Dy.
+    a search procedure.
+                                                      A constraint cxy is arc consistent if each value of Dx has a
+                                                      support in Dy and every value of Dy has a support in Dx.A
+1  Introduction and background                        CSP problem is arc consistent (AC) if all its constraints are
+Enforcing arc consistency (AC) on constraint satisfaction arc consistent. To enforce arc consistency on a CSP problem
+problems (CSP) during search has been proven very success- is to remove from the domains the values that have no sup-
+ful in the last decade [Sabin and Freuder, 1994; Mackworth, port. A CSP is arc inconsistent if a domain becomes empty
+                                                      when AC is enforced on the problem.
+1977] As AC can be enforced millions of times in solving         0
+                                                        We use Dx  to denote the initial domain of x before the
+hard instances, the need for efﬁcient AC algorithms is obvi-          D
+ous. Given the numerous attempts to optimize standalone AC search starts while x the current domain at a moment during
+                                                      AC or search. A value u is present in (or absent from, respec-
+algorithms, further improvement on their performance be-    D    u ∈ D  u/∈ D
+comes very challenging. In this paper, in order to improve tively) x if x (   x respectively). For each domain
+                                                      Dx  ∈ D, we introduce two dummy values head and tail.We
+the overall efﬁciency of a search procedure employing arc                           D   ∪{     ,  }
+consistency, we focus on how to efﬁciently enforce AC dur- assume there is a total ordering on x head tail where
+                                                      head is the ﬁrst, i.e., smallest, value, and tail the last (largest)
+ingsearch(ACS), rather than on standalone AC algorithms.           a      D0      a, D       a,D
+  In this paper, we abstract ACS into a separate module that value. For any from x, succ( x) (pred( x) respec-
+                                   P                  tively) is the ﬁrst (last respectively) value of Dx∪{head, tail}
+maintains AC on a changing CSP problem with four meth-                                   a
+ods. Several complexity measurements are then proposed to that is greater (smaller respectively) than .
+evaluate the theoretical efﬁciency of ACS algorithms in term
+of these methods. A key method is ACS.try(x = a), where 2 Enforcing arc consistency during search
+x = a is an assignment. It checks whether P ∪{x = a} can We take a CSP solver as an iterative interaction between a
+be made arc consistent. Whenever a search procedure makes search procedure and an ACS algorithm. The ACS algorithm
+
+                                                IJCAI-07
+                                                   137can be abstracted into one data component and four methods: Algorithm 1: MAC and template ACS methods
+             P      P      x    a           x   a
+a CSP problem  , init( 1), try( = ), backjump( = ),         ———————————–MAC algorithm———————————–
+and addInfer(x = a), where P1 is another CSP problem, x ∈ MAC(P )
+P.V     a ∈ P.D                      P.V  P.D  x ∈         1 if (not ACS.init(P )) then return no solution
+   ,and        x. Throughout the paper,  ,   x(            2 create an empty stack s; // no assignments is made yet
+P.V ),andP.C denote the set of variables, the domain of x, 3 freevariables ← P.V
+                                                           4 while (freevariables = ∅) do
+and the set of constraints of P .                          5    Select a variable xi from freevariables and a value a for xi
+  ACS.P is accessible (read only) to a caller. When the con- 6  if (ACS.try(xi = a)) then
+                                                           7       s.push((xi,a))
+text is clear, we will simply use P , instead of ACS.P .   8       freevariables ← freevariables −{xi}
+  ACS.init(P1)setsP to be P1 and creates and initializes the 9  else
+                                         P                10       while (not ACS.addInfer(xi = a)) do
+internal data structures of ACS. It returns false if is arc in- 11    if (s is not empty) then (xi,a) ← s.pop()
+consistent, and true otherwise. ACS.try(x = a) enforces arc 12        else return no solution
+             P    P ∪{x     a}                  P         13          ACS.backjump(xi = a)
+consistency on 1 =       =    . If the new problem 1      14          freevariables ← freevariables ∪{xi};
+is arc consistent, it sets P to be P1 and returns true. Other-
+wise, x = a is discarded, the problem P remains unchanged, 15 return the assignments
+                                                            ———————————–Template ACS methods———————————–
+and try() returns false. In general, the method can accept any ACS-X.init(P1)
+                     x ≥  a              x = a           16 P ← P1, initialize the internal data structures of ACS-X
+type of constraints, e.g., . ACS.addInfer(    )en-        17 return AC(P ) // AC() can be any standalone AC algorithm
+forces arc consistency on P1 = P ∪{x = a}. If the new    ACS-X.try(x = a)
+                                                          18 backup(timestamp (x, a))
+       P1                      P      P1
+problem   is arc consistent, it sets to be and returns    19 delete all values except a from Dx
+true. Otherwise, addInfer() returns false. When MAC infers 20 Q ←{(y, x) | cyx ∈ P.C }
+    x                 a                    x   a         21 if (propagate(Q)) then return true
+that  can not take value , it calls ACS.addInfer( = ).    22 else ACS-X.restore(timestamp (x, a)), return false
+In general, any constraint can be added as long as it is in- ACS-X.addInfer(x = a)
+                                                          23 delete a from Dx, Q ←{(y, x) | cyx ∈ P.C}, return propagate(Q)
+ferred from the current assignments by the search procedure. ACS-X.backjump(x = a)
+             x = a             P                          24 restore(timestamp (x, a))
+ACS.backjump(     ) discards from all constraints added,  ACS-X.backup(timestamp (x, a))
+by ACS.try() or ACS.addInfer(), to P since (including) the 25 backup the internal data structures of ACS-X, following timestamp (x, a)
+          x    a                                          26 backup the current domains, following timestamp (x, a)
+addition of =   . The consequences of those constraints   ACS-X.restore(timestamp (x, a))
+caused by arc consistency processing are also retracted. This 27 restore the internal data structures of ACS-X, following timestamp (x, a)
+                                                          28 restore the domains of P , following timestamp (x, a)
+method does not return a value. We ignore the preﬁx ACS of ACS-X.propagate(Q)
+a method if it is clear from the context.                 29 while Q = ∅ do
+                                                          30    select and delete an arc (x, y) from Q
+  A search procedure usually does not invoke the ACS meth- 31   if revise(x, y) then
+ods in an arbitrary order. The following concept character- 32     if Dx = ∅ then return false
+                                                          33       Q ← Q ∪{(w, x) | Cwx ∈ P.C, w = y}
+izes a rather typical way for a search procedure to use ACS
+                        P                                 34 return true
+methods. Given a problem  , a canonical invocation se-    ACS-X.revise(x, y)
+quence (CIS) of ACS methods is a sequence of methods m1,  35 delete ← false
+m   ... m                                    m            36 foreach a ∈ DX do
+  2,  ,   k satisfying the following properties: 1) 1 is  37    if not hasSupport(x, a, y) then
+init(P1)andforanyi (2 ≤  i ≤  k), mi ∈{try(), addIn-      38       delete ← true, delete a from DX
+              }    m               k ≥
+fer(), backjump() ;2) 1 returns true if 2;3)forany        39 return delete
+try(x = a) and addInfer(x = a) ∈{m2, ..., mk}, x ∈       ACS-X.hasSupport(x, a, y)
+                                                          40 if (∃b ∈ Dy such that (a, b) ∈ cxy ) then return true
+ACS.P.V  and a ∈ Dx at the moment of invocation; 4) for   41 else return false
+any mi=backjump(y =  a)where2  ≤  i ≤ k, mi−1 must
+be an invocation of try() or addInfer() that returns false, and
+there exists mj such that 2 ≤ j<i− 1 and mj=try(y = a) that of AC-3 [Mackworth, 1977]. ACS-X.addInfer(x = a)
+and there is no backjump(y = a) between mj and mi;5)for (line 23) does not call backup() because x = a is an infer-
+any mi=addInfer() where 2 ≤ i ≤ k, if it returns false, mi+1 ence from the current assignments and thus no new backup is
+must be backjump(). Note that an arbitrary canonical invo- necessary.
+cation sequence might not be a sequence generated by any
+meaningful search procedure.                          2.2  Complexity of ACS algorithms
+  Example  Algorithm 1 (line 1–15) illustrates how MAC We present several types of the time and space complexi-
+[Sabin and Freuder, 1994] can be designed using ACS.  ties for ACS algorithms. The node-forward time complex-
+                                                      ity of an ACS algorithm is the worst-case time complexity of
+2.1  Template implementation of ACS methods           ACS.try(x = a)wherex  ∈ P.V and a ∈ Dx.Anincremen-
+To facilitate the presentation of our ACS algorithms, we list tal sequence is a consecutive invocations of ACS.try() where
+a template implementation for each ACS method in Algo- each invocation returns true and no two invocations involve
+rithm 1. Since try() could change the internal data structures the the same variable (in the argument). The path-forward
+and the domains of the problem P , it simply backups the cur- time complexity of an ACS is the worst-case time complexity
+rent state of data structures with timestamp(x, a) (line 18) be- of any incremental sequence with any k ≤ n (the size of P.V )
+fore it enforces arc consistency (line 19–21). An alternative is invocations. Node-forward space complexity of an ACS algo-
+to “backup the changes” which is not discussed here because rithm is the worst case space complexity of the internal data
+it does not affect any complexity measures of ACS algorithms structures (excluding those for the representation of the prob-
+(except possibly the clock time). ACS-X.propagate() follows lem P ) for ACS.try(x = a). Path-forward space complexity
+
+                                                IJCAI-07
+                                                   138                                                             x        yzx                       y
+                                                             .......... .......... .......... .......... ..........
+of an ACS algorithm is the worst case space complexity of   .... .... .... .... .... .... .... .... .... ....
+                                                            ... ...  ... ...   .... ... ... ... ... ...
+                                                            .. ..    .. ..   ..... .......c .. .. .. .. ..
+                                                            .. ..    .. ..  ... .. 1 .. .. ..  .. ..
+the internal data structures for any incremental sequence with .. ....... ............ ....... ...... . .. .. ......... ......... ..
+                                                            . a1 . ..... .......... b1 . ...... . ............... . . a1 ..... ...... b1 .
+                                                            .  .   ......... . . ................................. c . . . . .
+n                                                           .  . ........ . . .............................. .. .............. . . . ............... .
+  invocations.                                              .  . ......... ...... ..... ............ ............... . . . . ................... .
+                                                            .  ......... . . b2 ................ ...... . . . . ................. . b2 .
+                                                            . ..... . . .......... ............. . . . .................. . .
+                                                            . a ... . ............... ................ ...... ............. . . a............ ............... .
+                                                            .  ................ . b . .................................................. . . .............. . b .
+  In empirical studies, the number of constraint checks is a . . .............. . 3 ......... .... ........................ . . . ............. .. 3 .
+                                                            .. ........ ............... ............................. .. d .. .. ....... ............. ..
+                                                            .. ........ ......... .............. .... .. .. .. ........ ........ ..
+                                                            ... a .. ...... ... b .. ...... .. ... a .. ...... .. b ..
+standard cost measurement for constraint processing. We de- ... 2... ... 4...  ...d1... ... 2... ... 4...
+                                                             ..... ..... ..... ..... ..... ..... ..... ..... ..... .....
+ﬁne for ACS two types of redundant checks. Given a CIS       ......   .......   ...... ......    ......
+m1,m2, ..., mk and two present values a ∈ Dx and b ∈ Dy               (a)                   (b)
+at mt(2 ≤ t ≤ k), a check cxy(a, b) at mt is a negative repeat          Figure 1: Example
+(positive repeat respectively) iff 1) (a, b) ∈/ cxy ((a, b) ∈ cxy
+respectively), 2) cxy(a, b) was performed at ms(1 ≤ s<t), satisﬁes the following two invariants: support invariant —
+                    m    m
+and 3) b is present from s to t.                      (a, last(x, a, y)) ∈ cxy,andsafety invariant — there exists
+                                                      no support of a in Dy that comes before last(x, a, y). The
+3  ACS in folklore                                    function hasSupport() (line 15–18) follows the same way as
+                                                      AC-3.1 to ﬁnd a support. Note that in restore(), the removed
+Traditionally, ACS is simply taken as an implementation of
+                                                      values are restored in the original ordering of the domains,
+standard AC algorithms in a search procedure. Let us ﬁrst
+                                                      which is critical for the correctness of ACS-3.1record.
+consider an algorithm ACS-3 employing AC-3. It is shown
+in Algorithm 2 where only methods different from those in
+Algorithm 1 are listed.                               Theorem 1  ACS-3.1record is correct with respect to any
+                                                      CIS. Node-forward and path-forward time complexity of
+                                                      ACS-3.1record are both O(ed2) while node-forward and
+     Algorithm 2: ACS-3 and ACS-3.1record             path-forward space complexity are O(ed) and O(ned) re-
+      ————————————-ACS-3———————————                   spectively. It can neither fully avoid negative nor positive
+   ACS-3.init(P1)
+    1 P ← P1, initialize the internal data structures of ACS-X repeats.
+    2 return AC-3(P )
+   ACS-3.backup(timestamp (x, a))
+    3 backup the current domains, following timestamp (x, a) The node-forward space complexity of ACS-3.1record can
+   ACS-3.restore(P, timestamp (x, a))                 be improved to O(ed min(n, d)) [van Dongen, 2003].
+    4 restore the domains, following timestamp (x, a)
+   ACS-3.hasSupport(x, a, y)                            Example  In this example we focus on how a support is
+    5 b ← head
+    6 while b ← succ(b, Dy ) and b = tail do         found in a CIS of ACS-3.1record methods. Consider the
+         if (a, b) ∈ Cxy then return true             following CIS: mi =try(z = c) (returning false) and mi+1
+    7 return false                                    =try(z =  d). Assume before mi, P is arc consistent and
+      ————————————-ACS-3.1record———————————
+   ACS-3.1record.init(P1)                             contains some constraints and domains shown in Figure 1(a)
+    8 P ← P1                                          where only the supports of a, c,andd are explicitly drawn.
+    9 ∀cxy ∈ P.C and ∀a ∈ Dx, initialize last (x, a, y)
+    10 return AC-3.1(P )                              Assume  last(x, a, y)=b1 before mi.Duringmi, we need to
+   ACS-3.1record.backup(  (x, a))
+                   timestamp                                              a  ∈ Dx         b1
+    11 ∀cxy ∈ P, a ∈ Dx, backup last (x, a, y), following timestamp (x, a) ﬁnd a new support for because is deleted due
+    12 backup the current domains, following timestamp (x, a) to the propagation of z = c. Assume last(x, a, y) was up-
+   ACS-3.1record.restore(timestamp (x, a))                                             b        m
+    13 restore the data structure last (), following timestamp (x, a) dated by ACS-3.1record to the support 4 before i returns
+    14 restore the domains, following timestamp (x, a) false. Since P ∪{z = c} is arc inconsistent, last(x, a, y)is
+   ACS-3.1record.hasSupport(x, a, y)
+    15 b ← last(x, a, y) ; if b ∈ Dy then return true restored to be b1 by mi.Inmi+1, a new support is needed
+         b ←   b, D   b =
+    16 while succ( y ) and tail do                    for a ∈ Dx  since b1 is deleted due to the propagation of
+    17   if (a, b) ∈ cxy then { last(x, a, y) ← b ; return true }
+                                                      z =  d. ACS-3.1record needs to check b2 and b3 before it
+    18 return false
+                                                      ﬁnds the support b4.Valueb2 is present from mi to mi+1,
+                                                      and (a, b2) ∈ cxy was checked in both mi and mi+1.The
+                                                      constraint check (a, b2) ∈ cxy is a negative repeat at mi+1.
+Proposition 1 ACS-3 is correct with respect to any CIS.
+Node-forward and path-forward complexity of ACS-3 are 4   Exploiting residual data
+both O(ed3) while node-forward and path-forward space
+complexity are O(ed). It can not avoid any positive or nega- A key feature of ACS-3 and ACS-3.1record is that they are
+tive repeats.                                         faithful to the respective AC algorithms. We will focus on
+                                                      ACS and investigate new ways to make use of the fact that
+  It is well known that variable-based AC-3 can be imple- the methods of an ACS algorithm are usually invoked many
+mented with space O(n). The same is also true for ACS-3. times (millions of times to solve a hard problem) by a search
+  We next introduce ACS-3.1record, an algorithm that em- procedure.
+ploys AC-3.1 [Bessiere et al., 2005]. It is listed in Algo-
+rithm 2 in which methods that are same as the template ACS 4.1 ACS-residue
+methods are omitted. AC-3.1 improves upon AC-3 simply In this section, we design a new algorithm ACS-residue, listed
+by using a data structure last(x, a, y) to remember the ﬁrst in Algorithm 3, that extends the ideas behind AC-3 and AC-
+support of a of x in Dy in the latest revision of cxy.When 3.1. Like ACS-3.1record, ACS-residue needs a data struc-
+cxy needs to be revised again, for each value a of x,AC-3.1 ture last(x, a, y) for every cxy ∈ C and a ∈ Dx.Af-
+starts the search of support of a from last(x, a, y). last(x, a, y) ter ACS-residue.init(P1), last(x, a, y) is initialized to be the
+
+                                                IJCAI-07
+                                                   139ﬁrst support of a with respect to cxy. At every invocation a support of a. In contrast, ACS-3.1record.try(z = d) looks
+of ACS-residue.try() or ACS-residue.addInfer(), when ﬁnd- for a support for a from b1 ∈ Dy. Through this example, it is
+ing a support for a value a of Dx with respect to cxy,ACS- clear that ACS-residue can save some constraint checks that
+residue.hasSupport(x, a, y) ﬁrst checks (line 3) if last(x, a, y) ACS-3.1record can not save (the converse is also true obvi-
+is still present. If it is, a support is found. Otherwise, it ously).
+searches (line 3–5) the domain of y from scratch as AC-
+3 does. If a new support is found, it will be used to up- 4.2 ACS-resOpt
+date last(x, a, y) (line 5). The method is called ACS-residue ACS-residue’s node-forward complexity is not optimal. We
+because ACS-residue.try() or ACS-residue.addInfer() simply propose another algorithm, ACS-resOpt (listed in Algo-
+reuses the data left in the last() structure by the previous invo- rithm 3), that has optimal node-forward complexity while
+cations of try() or addInfer(). Unlike ACS-3.1record, ACS- using the residues in last(). The idea is to remember the
+residue does not maintain last() in backup() and restore(). residues in last(x, a, y)bystop(x, a, y) (line 12 and line 17)
+                                                      at the beginning of try() and ACS-resOpt.addInfer(). Then
+                                                      when hasSupport(x, a, y) looks for a support for a ∈ Dx and
+     Algorithm 3: ACS-residue
+                                                      last(x, a, y)(=b) is not present, it looks for a new support af-
+      ————————————-ACS-residue———————————
+   ACS-residue.init(P1) {same as ACS-3.1record.init(P1)} ter b (line 21), instead of the beginning of the domain. The
+   ACS-residue.backup(timestamp (x, a))
+    1 backup the current domains, following timestamp (x, a) search could go through the tail and back to the head and con-
+   ACS-residue.restore(timestamp (x, a))              tinue until encounter stop(x, a, y). For simplicity, in line 21
+    2 restore the domains of P , following timestamp (x, a)                                     P
+   ACS-residue.hasSupport(x, a, y)                    of hasSupport(), the initial domain of the problem is used:
+         x, a, y ∈ D          b ←                               0              0            0
+    3 if last( ) y then return true else head         cirSucc(a, Dy) = succ(head,Dy) if succ(a, Dy) = tail;other-
+    4 while b ← succ(b, Dy ) and b = tail do                        0           0
+    5    if (a, b) ∈ cxy then { last(x, a, y) ← b ; return true } wise cirSucc(a, Dy) = succ(a, Dy). In our experiment how-
+    6 return false                                    ever, we implement hasSupport() using the current domain.
+      ————————————-ACS-resOpt———————————
+   ACS-resOpt.init(P1)
+    7 P ← P1                                          Theorem 3  ACS-resOpt is correct with respect to any CIS.
+    8 ∀cxy ∈ P.C and ∀a ∈ Dx, initialize last (x, a, y)andstop (x, a, y)                               2
+              P                                       Node-forward and path-forward time complexity are O(ed )
+    9 return AC-3.1( )                                         3
+   ACS-resOpt.backup(timestamp (x, a))                and O(ed  ) respectively while node-forward and path-
+    10 backup the current domains of P , following timestamp (x, a)
+   ACS-resOpt.restore(timestamp (x, a))               forward space complexity are both O(ed). It fully avoids
+    11 restore the domains, following timestamp (x, a) positive repeats but avoids only some negative repeats.
+   ACS-resOpt.try(x = a)
+    12 ∀cxy ∈ P.C and ∀a ∈ Dx, stop(x, a, y) ← last(x, a, y)
+    13 backup(timestamp (x, a))                         Example  Consider the constraint cxy in Figure 1(b) be-
+    14 delete all the values except a from Dx, Q ←{(y, x) | cyx ∈ P.C }                a
+    15 if propagate(Q) then return true               fore ACS-resOpt.try(). The supports of are drawn explicitly
+    16 else {restore(timestamp (x, a)), return false } in the graph. Assume last(x, a, y)=b2 before try(). ACS-
+   ACS-resOpt.addInfer(x = a)                                                   x, a, y b
+    17 ∀cxy ∈ P.C and ∀a ∈ Dx, stop(x, a, y) ← last(x, a, y) resOpt.try() will ﬁrst set stop( )= 2. Assume in the
+    18 delete a from Dx, Q ←{(y, x) | cyx ∈ P.C }     following constraint propagation b2 is deleted due to other
+    19 return propagate(Q)
+   ACS-resOpt.hasSupport(x, a, y)                     constraints on y. ACS-resOpt.hasSupport(x, a, y) will search
+    20 b ← last(x, a, y) ; if b ∈ Dy then return true             a      b                        b
+                     0                                a support for after 2 and ﬁnd the new support 4.As-
+    21 while b ← cirSucc(b,Dy) and b ∈ Dy and b = stop (x,a,y) do
+                                                           b4
+    22   if (a, b) ∈ cxy then last(x, a, y) ← b; return true sume is later deleted by constraint propagation. ACS-
+                                                                      x, a, y            b
+    23 return false                                   resOpt.hasSupport(    ) will start from 4, go through the
+                                                      tail and back to the head, and ﬁnally stop at b2 because
+                                                      stop(x, a, y)=b2. No support is found for a and it will be
+                                                      deleted from the current domain.
+Theorem 2 ACS-residue is correct with respect to any CIS.
+Node-forward and path-forward time complexity of ACS- 5   ACS with adaptive domain ordering
+residue are O(ed3) and O(ed3) respectively while node-
+forward and path-forward space complexity are both O(ed). To explore the theoretical efﬁciency limits of ACS,wepro-
+It fully avoids positive repeats but avoids only some negative pose the algorithm ACS-ADO with optimal node-forward and
+repeats.                                              path-forward time complexity. ACS-ADO employs an adap-
+                                                      tive domain ordering: a deleted value is simply restored to
+  Compared with ACS-3.1record, ACS-residue has a better the end of its domain in restore(), while in ACS-3.1record,
+space complexity but a worse time complexity. ACS-residue it is restored in regard of the total ordering on the initial do-
+does not need to backup its internal data structures. main. As a result, when ﬁnding a support by using last(), it is
+  Example  Consider the example in the previous section. sufﬁcient for hasSupport() to search to the end of the domain
+Before mi, i.e., ACS-residue.try(z = c), the problem is arc (rather than going back to the head of the domain as done by
+consistent and last(x, a, y)=b1.Duringmi, assume ACS- ACS-resOpt).
+residue updates last(x, a, y)tobeb4 before it returns false. ACS-ADO, listed in Algorithm 4, needs the data structures
+After mi, only the deleted values are restored to the domains lastp(x, a, y), buf(a, y) for every cxy ∈ P.C and a ∈ Dx.
+but nothing is done to last() structure and thus last(x, a, y) The content of lastp(x, a, y) and buf(a, y) is a pointer p to a
+is still b4 (b4 is a residue in last()). In mi+1, i.e., ACS- supporting node that has two components p↑.bag and p↑.for.
+residue.try(z = d), when hasSupport() tries to ﬁnd a support If buf(a, y)=p, p↑.for is a and p↑.bag is the set { b ∈ Dy |
+for a of Dx, it checks ﬁrst last(x, a, y). b4 is present and thus lastp(y,b,x)↑.for=a}. lastp(x, b, y)↑.for is a value of Dy.
+
+                                                IJCAI-07
+                                                   140                                                        x   bag bag bag bag bag   x   bag bag bag bag bag
+     Algorithm 4: ACS-ADO
+                                                        head a lastp b lastp c lastp d lastp tail head a lastp b lastp c lastp d lastp tail
+   ACS-ADO.init(P1)
+    1 ∀cxy ∈ P.C and ∀a ∈ Dx, last (x, a, y) ← head
+    2 ∀cxy ∈ P.C and ∀a ∈ Dx ∪{tail} lastp (x, a, y) ← NULL
+        ←     P
+    3 ﬂag AC-3.1( ) // AC-3.1 will populate last          p1  p2  p3  p4  p5
+                                                            bag bag bag bag bag     p1 bag p2 bag p3 bag p4 bag p5 bag
+    4 foreach cxy ∈ P.C and each a ∈ Dx do              y                         y
+         b ←   x, a, y
+    5       last ( )                                    head 1 lastp 2 lastp 3 lastp 4 lastp tail head 1 lastp 2 lastp 3 lastp 4 lastp tail
+    6    if buf (b, x)=NULL then buf (b, x) ← createNode (b)
+           a    b, x ↑    x, a, y ← b, x
+    7    add to buf ( ) .bag, lastp ( ) buf ( )                   (a)                       (b)
+    8 return ﬂag
+                                                        x                         x
+   ACS-ADO.backup(P , timestamp (x, a))                     bag bag bag bag bag       bag bag bag bag bag
+    9 backup the current domains, following timestamp (x, a)
+                                                        head a lastp b lastp c lastp dlastp tail head a lastp c lastp b lastp d lastp tail
+   ACS-ADO.restore(P , timestamp (x, a))
+    10 foreach variable y ∈ P.V do
+    11   restore the deleted values to the end of Dy , following timestamp (x, a)
+    12   let v be the ﬁrst restored value
+                                                        y p1bag p2bag p3bag p4 bag p5bag y p4 bag p2 bag p3 bag p1 bag p5 bag
+    13   foreach cxy ∈ P.C do
+                  v, x      x
+    14      swap buf ( )andbuf (tail, )                 head 1 lastp 2 lastp 3 lastp 4 lastp tail head 4 lastp 2 lastp3 lastp1 lastp tail
+            swap buf (v, x)↑.for and buf (v,tail)↑.for
+                                                                  (c)                       (d)
+   ACS-ADO.remove(b, y)
+    15 c ← succ (b, Dy )                                    Figure 2: Examples for remove() and restore()
+    16 if |buf (b, x)↑.bag| > |buf (c, x)↑.bag| then
+         swap buf (b, x)andbuf (c, x), swap buf (b, x)↑.for and buf (b, x)↑.for
+    17 foreach v ∈ buf (b, x)↑.bag do update (v, c, x, y, b) The arrow from a supporting node, say p1, to the value node
+    18 delete b from Dy
+   ACS-ADO.hasSupport(x, a, y)                        1 means p1↑.for=1, and the arrow from a value node, say 1, to
+    19 b ← lastp (x, a, y)↑.for                       the supporting node p1 implies buf(1,x)=p1. An arrow from
+    20 if (a, b) ∈ cxy then return true else b1 ← b
+    21 while b ← succ(b, Dy ) and b = tail do        the lastp area of a value node, say a, to a supporting node p1
+          (a, b) ∈ c {     a, b, x, y, b  }
+    22   if     xy then update (  1), return true     implies lastp(x, a, y)↑.for=p1. An arrow from the bag area of
+           a   x, y, b
+    23 update ( , tail, 1), return false                                 p1                  a
+   ACS-ADO.createNode(b)                              a supporting node, say , to a value node, say , implies that
+    24 create a supporting node p such that p ↑.bag ←{}, p ↑.for ← b a ∈ p1↑.bag. Note that the details of lastp (buf respectively)
+    25 return p                                                             D   D
+   ACS-ADO.update(a, b, x, y, b1)                     structures of the values of y ( x respectively) are omitted.
+    26 delete a from buf (b1,x)↑.bag                    Assume value 1 is removed. Since buf(1,x)↑.bag is larger
+    27 if buf (b, x)=NULL then buf (b, x) ← createNode (b)
+    28 add a to buf (b, x)↑.bag, lastp (x, a, y) ← buf (b, x) than that of value 2 that is the ﬁrst present successor of 1,
+                                                      the method remove() swaps buf(1,x) and buf(2,x) and swap
+                                                      buf(1,x)↑.for and buf(2,x)↑.for.Nowa and b are pointing to
+                                                      value 2 through p1.Thenc of p2↑.bag is made to point p1.
+ACS-ADO maintains on lastp(x, a, y) the safety invariant, i.e.,
+                                                      Figure 2(b) shows structures after the removal of 1.
+there is no support of a before the value lastp(x, a, y)↑.for
+                                                        Consider another data structures shown in Figure 2(c). As-
+in Dy,andthepresence invariant, i.e., lastp(x, a, y)↑.for is
+                                                      sume 1 needs to be restored to Dy.Since1 is the ﬁrst restored
+present in Dy or the tail of Dy. It also maintains the cor-
+                                                      value, all values pointing to tail should now point to 1.The
+respondence invariant, i.e., lastp(x, a, y)↑.for=b if and only if
+                                                      method restore() simply swaps buf(1,x) and buf(tail, x) and
+a ∈ buf(b, x)↑.
+                                                      swaps buf(1,x)↑.for and buf(tail,x)↑.for (Figure 2(d)). In con-
+  With the safety and presence invariants on lastp(),to stant time, all the values previously pointing to tail are now
+ﬁnd a support of a ∈  Dx  with respect to cxy,ACS-
+                                                      pointing to 1 through the supporting node p5.    2
+ADO.hasSupport(x, a, y) starts from lastp(x, a, y)↑.for(line
+19) and stops by the tail of Dy (line 21). When a new support Proposition 2 Consider any incremental sequence with n
+is found, lastp(x, a, y) is updated (line 22) by update that invocations, The cumulated worst-case time complexity of
+guarantees the correspondence invariant (line 26–28). ACS- ACS-ADO.remove() in the sequence is O(ed lg d).
+ADO.hasSupport assures the safety invariant on lastp. When
+                                                      Theorem 4  ACS-ADO is correct with respect to any CIS.
+removing a value, say b of Dy, ACS-ADO.remove(b, y) ﬁnds
+                                                      Node-forward and path-forward time complexity are O(ed2)
+the ﬁrst present value c after b (line 15) and makes buf(b, x)
+point to the node with smaller bag (line 16). It then updates while node-forward and path-forward space complexity are
+                                                      O(ed)
+(line 17) lastp(x, a, y)foralla ∈ buf(b, x)↑.bag. In this way, . ACS-ADO fully avoids negative repeats but does not
+                                                      avoid any positive repeats.
+we always update the lastp() structures for a smaller number
+of values. When restoring deleted values, for each variable
+y, ACS-ADO.restore(timestamp(x, a)) restores all the deleted 6 Experiments
+values after timestamp(x, a)totheendofDy (line 11). Note The new ACS algorithms are benchmarked on random bi-
+that tail is greater than any values in Dy. Since there might nary constraint problems and Radio Link Frequency Assign-
+be some values whose lastp(x, a, y)↑.for is tail of Dy, we need ment Problems (RLFAPs). The sample results on problems
+to swap the supporting nodes in buf(v,x) and buf(tail, x) (line (n =50,e = 125) at phase transition area are shown in Fig-
+13–14).                                               ure 3 where the constraint checks are the average of 50 in-
+  Example Figure 2(a) shows the data structures of the val- stances and the time is total amount for those instances. The
+ues of Dx with respect to cxy. The nodes with 1 to 4 and experiments were carried out on a DELL PowerEdge 1850
+a to d represent values of Dy and Dx. The value of a node (two 3.6GHz Intel Xeon CPUs) with Linux 2.4.21. We use
+disconnected from the linked list is not in the current domain. dom/deg variable ordering and lexicographical value order-
+The nodes with area labelled by “bag” are supporting nodes. ing. The constraint check in our experiment is very cheap.
+
+                                                IJCAI-07
+                                                   141

@@ -1,0 +1,320 @@
+         Efﬁcient belief-state AND–OR search, with application to Kriegspiel
+
+                                    Stuart Russell and Jason Wolfe
+                                       Computer Science Division
+                              University of California, Berkeley, CA 94720
+                            russell@cs.berkeley.edu, jawolfe@berkeley.edu
+                               Content areas: Game-playing, uncertainty
+
+                    Abstract                            This follows from the fact that an opponent, by simply
+                                                      choosing moves at random, has a nonzero probability of du-
+    The paper reports on new algorithms for solving   plicating any ﬁnite behavior of an optimal opponent with full
+    partially observable games. Whereas existing al-  observation. Thus, the logical possibility that the solver can
+    gorithms apply AND-OR search to a tree of black-  guarantee a win within some bounded depth depends only
+    box belief states, our “incremental” versions treat upon the solver’s own information about the true state. This
+    uncertainty as a new search dimension, examining  implies that neither the opponent’s information state nor ran-
+    the physical states within a belief state to construct domized strategies need be considered. We will see shortly
+    solution trees incrementally. On a newly created  that the theorem does not apply to certain other strategies,
+    database of checkmate problems for Kriegspiel (a  which win with probability 1 but are not guaranteed.
+    partially observable form of chess), incrementaliza- Despite these restrictions, the problem is quite general.
+    tion yields speedups of two or more orders of mag- Indeed, it is isomorphic to that of ﬁnding guaranteed plans
+    nitude on hard instances.                         in nondeterministic, partially observable environments. Our
+                                                      particular focus in this paper is on Kriegspiel, a variant of
+1  Introduction                                       chess in which the opponent’s pieces are completely invisi-
+“Classical” games, such as chess and backgammon, are fully ble. As the game progresses, partial information is supplied
+observable. Partially observable games, despite their greater by a referee who has access to both players’ positions. The
+similarity to the real world, have received less attention in players, White1 and Black, both hear every referee announce-
+AI. The overall computational task in such games can be di- ment. There is no universally accepted set of rules; we adopt
+vided conceptually into two parts. First, state estimation is the following:
+the process of generating and updating the belief state—a • White may propose to the referee any move that would
+representation of the possible states of the world, given the be a legal chess move on a board containing just White’s
+observations to date. Second, move selection is the process of pieces; White may also propose any pawn capture.
+choosing a move given the belief state.                 • If the proposed move is illegal on the board containing
+  Partially observable games are intrinsically more com-  both White and Black pieces, the referee announces “Il-
+plicated than their fully observable counterparts. At any legal.”2 White may then try another move.
+given point, the set of logically possible states may be •
+very large, rendering both state estimation and move selec- If the move is legal, it is made. Announcements are:
+tion intractable. Furthermore, move selection must consider – If a piece is captured on square X: “Capture on X.”
+one’s own information state (gathering information is help- – If Black is now in check: “Check by D,” where D
+ful) and the opponent’s information state (revealing informa- is one or two of the following directions (from the
+tion is harmful). Finally, game-theoretically optimal strate- perspective of Black’s king): Knight, Rank, File,
+gies are randomized because restricting oneself to determinis- Long Diagonal, and Short Diagonal.
+tic strategies provides additional information to the opponent. – If Black has no legal moves: “Checkmate” if Black
+The paper by Koller and Pfeffer [1997] provides an excellent  is in check and “Stalemate” otherwise.
+introduction to these issues.                           • Finally: “Black to move.”
+  In this paper, we focus on a particular subproblem: de- (Examples of play are given in Section 4. In addition,
+ciding whether a guaranteed win exists—i.e., a strategy that more details are available online at our Kriegspiel website,
+guarantees the optimal payoff within some ﬁnite depth, re- www.cs.berkeley.edu/˜jawolfe/kriegspiel/.)
+gardless of the true state, for any play by the opponent. This One important aspect of Kriegspiel and many other par-
+is simpler than the general problem, for two reasons. First, tially observable games and planning domains is the “try-
+the state estimate need represent only the logically possible until-feasible” property—a player may attempt any number
+states, without considering their probabilities. Second, we
+have the following:
+                                                         1W.l.o.g., we assume it is White’s turn to move.
+Theorem 1 A guaranteed win exists from some initial belief 2If the move is not legal for White’s pieces alone, or if it has
+state iff it exists against an opponent with full observation. already been rejected on this turn, the referee says “Nonsense.”of actions until a legal one is found. Because the order of at- selection, and explains how self-play was used to generate the
+tempts matters, a move choice is actually a plan to try a given ﬁrst database of Kriegspiel checkmate problems with obser-
+sequence of potentially legal moves. Hence, the branching vation histories.
+factor per actual move is the number of such sequences, Section 4 develops the basic AND–OR tree structure for
+which can be superexponential in the number of potentially solving Kriegspiel-like games, allowing for possibly-illegal
+legal moves. We will see that try-until-feasible domains ad- moves. Section 5 deﬁnes two baseline algorithms—versions
+mit certain simpliﬁcations that mitigate this branching factor. of depth-ﬁrst search (DFS) and proof-number search (PNS)—
+  Kriegspiel is very challenging for humans. Even for ex- for solving such trees, and then presents some basic improve-
+perts, “announced” checkmates are extremely rare except ments for these algorithms and analyzes their performance on
+for so-called material wins—such as KQR-vs.-K—when one our checkmate database.
+side is reduced to just a king and the other has sufﬁcient (safe) Section 6 develops a new family of incremental search al-
+material to force a win. Checkmate is usually “accidental” in gorithms that treat uncertainty as a new search dimension in
+the sense that one player mates the other without knowing it addition to depth and breadth, incrementally proving belief
+in advance.                                           states by adding a single constituent “physical state” to a so-
+  Several research groups have studied the Kriegspiel check- lution at each step. This leads to a further speedup of one
+mate problem.  Ferguson [1992] exhibited a randomized or more orders of magnitude. Finally, Section 7 shows how
+strategy for the KBN-vs.-K endgame that wins with prob- state estimation and incremental checkmate search may be
+ability 1; the lone Black king can escape checkmate only interleaved.
+by guessing White’s moves correctly inﬁnitely often. Sub-
+sequently [1995], he derived a strategy for the KBB-vs.-K 2 State estimation
+endgame that wins with probability 1−ǫ for any ǫ > 0. In our
+terminology, these mates are not guaranteed, and they do not If we are to ﬁnd a guaranteed win for White, state estimation
+work if the opponent can see the board. Additional material- must identify the (logical) belief state—the set of all physical
+win strategies, all deterministic, have been developed [Cian- states (conﬁgurations for White and Black pieces) that are
+carini et al., 1997; Bolognesi and Ciancarini, 2003; 2004]. consistent with White’s history of moves and observations. A
+  As we explain in Section 4, algorithms for ﬁnding a check- naive algorithm for exact state estimation looks like this:
+mate in Kriegspiel involve searching an AND–OR tree whose • The initial belief state is a singleton, because Black’s
+nodes correspond to belief states. This idea is common    pieces start the game in their normal positions.
+enough in the AI literature on partially observable plan- • For each White move attempt, apply the move to every
+ning search (see, for example, Chapters 3 and 12 of [Rus- physical state and remove those states that are inconsis-
+sell and Norvig, 2003]). It was proposed for Kriegspiel,  tent with the subsequent percept.
+and applied to the analogous partially observable variant of • For each Black turn,
+Shogi (Japanese chess), by Sakuta and Iida; results for sev-
+eral search algorithms are summarized in Sakuta’s PhD the-  – For each sequence of k  “Illegal” percepts for
+sis [2001]. Bolognesi and Ciancarini [2004] add heuristic     the unobserved Black move attempts, remove any
+measures of “progress” to guide the tree search, but consider physical state for which there are fewer than k dis-
+only positions in which the opponent has a lone king. In all of tinct illegal moves.
+these papers, the initial belief state is determined externally. – Replace each remaining physical state by the set
+  The search algorithm developed by Ginsberg [1999] for       of updated states corresponding to all Black moves
+(partially observable) Bridge play works by sampling the ini- that are legal and yield the given percept when
+tial complete deal and then solving each deal as a fully ob-  made in that state.
+servable game. This approach gives a substantial speedup    – Remove duplicate states using a transposition table.
+                                                                                                       10
+over solving the true game tree, but never acts to gather In Kriegspiel, the belief state can grow very large—10
+or hide information (which is essential for domains such as states or more—so this algorithm is not always practical. We
+Kriegspiel). The only previous Kriegspiel-playing agent we have found, however, that with certain aggressive styles of
+know of, developed by Parker et al. [2005], uses this ap- play, the belief state remains no larger than a few thousand
+proach. It keeps track of a sample of its true belief state, states throughout the game.
+and at each point selects the move that would be best if the The naive algorithm given above can be viewed as a
+remainder of the game were played as fully observable chess. breadth-ﬁrst expansion of a physical-state tree with branch-
+  Solving Kriegspiel is an instance of nondeterministic par- ing at Black’s moves and pruning by percepts. An alternative
+tially observable planning, and could therefore be carried out method, which we adopt, performs a depth-ﬁrst search of the
+by symbolic techniques such as the ordered binary decision tree instead. This has the advantage of generating a stream
+diagram (OBDD) methods developed by Bertoli et al. [2001] of consistent current states with only a moderate amount of
+or by quantiﬁed Boolean formulae (QBF) solvers. Unfortu- effort per state. Furthermore, if the set of states found so far
+nately, the computational penalty for generating chess moves does not admit a checkmate, then the whole belief state does
+by symbolic inference methods appears to be around four or- not admit a checkmate and both state estimation and move
+ders of magnitude [Selman, personal communication].   selection can be terminated early (see Section 7).
+  This paper’s contributions are as follows. Section 2 ad- A randomized depth-ﬁrst search can generate a randomly
+dresses the problem of state estimation; for the purposes of selected sample of consistent states that can be used for ap-
+this paper, we focus on exact estimation using straightfor- proximate decision making. We explore approximate state
+ward methods. Section 3 describes a simple but complete estimation in a subsequent paper; for now, we assume that
+Kriegspiel player, combining both state estimation and move the exact belief state is available to the checkmate algorithm.3  A Kriegspiel checkmate database                     White
+                                                       to
+In order to evaluate checkmate-ﬁnding algorithms for   Move
+Kriegspiel, we require a database of test positions. Prior      1
+to this work, no such database existed.3 Our ﬁrst data-
+base consists of White’s move and percept histories for 1000
+Kriegspiel games, up to the point where a 3-ply checkmate                     Qa4
+might exist for White.4 500 of these are actual mate instances;                                  ...
+the other 500 are near-miss instances, which “almost” admit        2
+a guaranteed checkmate within 3 ply. For each near-miss in-              Illegal        Checkmate
+stance, there is a checkmate plan that works in at least half of
+the possible physical states, but not in all of them.
+  This database was created by analyzing games between        3
+two different Kriegspiel programs. The ﬁrst program, playing
+White, performs exact state estimation and makes a complex
+static approximation to 2-ply lookahead; it plays well but can                Qa3            T
+be defeated easily by a skilled human.5 The second program,       ...
+playing Black, is much weaker: it computes a limited sub-              4
+                                                                     Capture on a3   Capture on a3 &
+set of its true belief state and attempts moves that are most Black                  Short Check
+likely to be captures and checks ﬁrst. Whenever White’s be- to
+lief state has 100 Black positions or fewer, we determine if the Move
+belief state describes a mate or near-miss instance. If so, the   5              9
+move and percept history for the game-in-progress is saved.
+Games in which White’s belief state grows above 10,000 po-
+sitions are excluded. With these two programs, White’s belief
+state generally remains fairly small, and about half the games     Nb2      Nc3            Kc4
+played result in problem instances.6                           6                       10
+                                                              Capture on b2 Knight Check
+  Obviously, the checkmate problems we generate by this White
+method have belief states that never exceed 10,000 physical to
+states throughout the move history and have at most 100 phys- Move
+ical states in the ﬁnal position (the average is 11). Further- 7         8              11
+more, the solution is at most 3-ply, but may include branches
+with illegal move attempts in addition to 3 actual moves.
+  By simply re-analyzing our 3-ply near-miss problems at 5-  Qb4            Qc3            Qb3
+ply, we have also constructed a more difﬁcult database of 258 Depth ...           ...            ...
+5-ply mate instances and 242 5-ply near-miss instances. Both Limit T         T              T
+databases are available at our website (URL in Section 1).
+  As better state estimation, search, and evaluation methods Figure 1: A minimal AND–OR proof tree for a 4x4 Kriegspiel 3-
+                                                      ply checkmate problem. The grayed moves in the Black-to-Move
+are developed, it will be possible to construct more difﬁcult section are hidden from White.
+problems that better reﬂect the kinds of positions reached in
+expert play. Nonetheless, our problems are far from trivial; possible physical states, which differ in the locations and
+for example, we will see that on 97% of the 5-ply near-miss types of Black’s pieces (White will always know the num-
+instances, basic depth-ﬁrst search requires more than 2000 ber of remaining Black pieces). The ﬁgure depicts a minimal
+CPU seconds to determine that no mate exists (within 5 ply). proof tree for the problem instance, with other possible moves
+                                                      by White omitted; it describes the following strategy:
+4  Guaranteed Kriegspiel checkmates
+                                                        1. White attempts move Qa4 from belief state 1. If the
+Thanks to Theorem 1, our search problem involves a tree   right-most state (1.c) is the true state, White wins.
+whose nodes correspond to White’s belief states. Figure 1 2. Otherwise, Qa4 was illegal and White now attempts
+shows a simple example: a miniature (4x4) 3-ply Kriegspiel move Qa3 from belief state 3.
+checkmate. In the root belief-state node (1) there are three
+                                                           (a) If the subsequent percept is “Capture on a3,” Black
+  3The Internet Chess Club has a database of several thousand has two legal moves: Nb2 and Nc3.
+Kriegspiel games, but guaranteed wins cannot be identiﬁed because i. If Black makes Nb2, the referee announces
+the database omits the history of attempted moves.               “Capture on b2” and White mates with Qb4.
+  4In fact, we ﬁnd deeper mates through the simple expedient of ii. If Black makes Nc3, the referee announces
+classifying leaf nodes as wins if Black is checkmated or if White “Knight Check” and White mates with Qc3.
+has a known material win, as deﬁned above.                 (b) If the subsequent percept is “Capture on a3 & Short
+  5For ordinary play, we combine this move selection algorithm (Diagonal) Check,” Black has only one legal move:
+with an online version of our approximate depth-ﬁrst state estima- Kc4. White mates with Qb3.
+tion algorithm.
+  6To achieve this high efﬁciency, we add extra illegal move at- In general, belief-state AND–OR trees consist of three types
+tempts to White’s move history as “hints”; without these hints, fewer of nodes:
+games satisfy our belief-state size criteria.           • OR-nodes: In Figure 1, OR-nodes appear in the White    to Move sections (e.g., nodes 1, 3, 7). An OR-node rep-
+    resents a choice between possible moves for White, and function SOLVE-TOP(b) returns true or false
+    is proven iff at least one of its children is proven. Its inputs: b, a belief-state node
+    children are AND-nodes, each containing the results of
+                                                          EXPAND(b)
+    applying a single move in every possible physical state. return SOLVE(b)
+  • EXPAND-nodes: EXPAND-nodes appear in the  Black
+    to Move sections, representing Black’s moves (e.g., method SOLVE(b an OR-node) returns true or false
+    nodes 5, 9). Since Black’s moves are invisible to White, while CHILDREN(b) is not empty do
+    each EXPAND-node has only a single child, an AND-      if SOLVE-TOP(FIRST(CHILDREN(b))) then return true
+    node containing the union (eliminating duplicates) of  POP(CHILDREN(b))
+    the legal successors of its possible physical states. An return false
+    EXPAND-node is proven iff its only child is proven.
+  •                                                     method SOLVE(b an EXPAND-node) returns true or false
+    AND-nodes: AND-nodes are the thin nodes that appear   return SOLVE-TOP(CHILD(b))
+    at every other level in the tree (e.g., nodes 2, 4, 6). Phys-
+    ical states within AND-nodes are abbreviated as circles. method SOLVE(b an AND-node) returns true or false
+    An AND-node represents the arrival of a percept from  if TERMINAL(b) then return VALUE(b)
+    the referee, and can be terminal or non-terminal:     while CHILDREN(b) is not empty do
+      – If every physical state in an AND-node is a terminal if not SOLVE-TOP(FIRST(CHILDREN(b))) then return false
+        win for White, the node is terminal with value true. POP(CHILDREN(b))
+        If any physical state is a terminal draw or loss for return true
+        White, the node is terminal with value false.
+      – Otherwise, the AND-node is nonterminal, and has             Figure 2: The DFS algorithm.
+        children that form a partition of its nonterminal
+        physical states (percepts do not change the under-
+        lying physical states—see, e.g., nodes 7 and 11). method EXPAND(b an OR-node)
+                                                          for each m in MOVES(FIRST(STATES(b))) do
+    Thus, an AND-node is proven iff all of its belief-state- b′ ← a new AND-node with TERMINAL(b′)= false,
+    tree children and its terminal physical states are proven.  VALUE(b′)= true, DEPTH(b′)= DEPTH(b),
+  In Kriegspiel, the referee makes an announcement after        CHILDREN(b′)= an empty list, and
+each move attempt. Thus, Kriegspiel belief-state trees have     STATES(b′)= MAP(SUCCESSOR(*,m),STATES(b))
+                                                           for each s in STATES(b′) do
+AND-nodes at every other level. The intervening nodes alter-                                         ′
+nate between EXPAND-nodes (Black moves) and sequences        if s is a win for White then remove s from STATES(b )
+                               7                             else if s is terminal or DEPTH(b)= 1 then
+of OR-nodes (White move attempts). Because one turn for        b′ ← false; break
+White may involve several move attempts, White’s entire turn if b′ =6 false then
+has a worst-case branching factor equal to the factorial of the PUSH(b′,CHILDREN(b))
+number of possible moves.                                    if STATES(b′) is empty then
+                                                               TERMINAL(b′) ← true; break
+5  Searching belief-state AND–OR trees
+
+This section describes two common algorithms—depth-ﬁrst Figure 3: The OR-node instance of the EXPAND method, which con-
+search and proof-number search—for searching belief-state structs and evaluates the children of b.
+AND–OR trees. Like other existing algorithms, both solve
+a belief-state tree as an ordinary AND–OR tree with black- PNS (proof-number search) is a best-ﬁrst search algorithm
+box belief-state nodes. After introducing the algorithms, we for AND–OR trees, and is commonly believed to be superior
+evaluate their performance on our 5-ply checkmate database, to DFS. At each step PNS expands a “most-proving” node,
+with and without some basic improvements.             which can make the largest contribution to proving or dis-
+                                                      proving the entire tree. A most-proving node is deﬁned as any
+5.1 DFS and PNS                                       node that is a member of both a minimal proof set and a min-
+The pseudocode for DFS (depth-ﬁrst search) is shown in Fig- imal disproof set of the tree, where a minimal proof/disproof
+ure 2.8 DFS  operates using the EXPAND method, which  set is a minimal-cardinality set of unexpanded nodes that, if
+constructs and evaluates the children of a belief-state node proved/disproved, would be sufﬁcient to prove/disprove the
+(as described in Section 4); as an example, Figure 3 shows root. Every tree has at least one most-proving node; if there
+EXPAND’s OR-node instance. To use DFS, we simply initial- are multiple most-proving nodes, the PNS algorithm chooses
+ize an OR-node with the root belief state and remaining depth, one arbitrarily [Allis, 1994].9
+and pass it to SOLVE-TOP. In Figure 1, the numbers beside
+the nodes indicate an order in which DFS might expand them 5.2 Analysis and Improvements
+when searching the tree.                              Figure 4 shows the solving ability of our search algorithms
+                                                      on the 500 problems in our 5-ply database (for readability,
+  7Thanks to Theorem 1, illegal Black moves are not considered. we show only a subset of the algorithms tested). We will
+  8The pseudocode we present in this paper was written for sim-
+plicity, and does not include modiﬁcations necessary for handling 9We alter the initialization of PNS’s tree to reﬂect the fact that
+possibly-illegal moves. Our actual implementations are also more wins occur only after White moves, but do not attempt to take the
+efﬁcient (for instance, they construct only one child at a time at OR- depth limit [Allis, 1994] or the amount of uncertainty [Sakuta, 2001]
+nodes), and thus differ signiﬁcantly from the pseudocode shown. into account.                                                      PNS  (not shown) performs almost identically to PNS (which
+         1
+             IPNS                                     naturally allocates its efforts efﬁciently).
+           GL-DBU                                       Future work may investigate the effects of ordering the
+            L-DBU                                     White moves (e.g., information-gathering and likely checking
+      0.75  L-DUB                                     moves ﬁrst) and the legal percepts (e.g., checks and captures
+           LE-DFS
+            E-PNS                                     ﬁrst for Black and last for White).
+           GX-DFS
+       0.5    PNS                                     Pruning
+           GL-DFS
+            L-DFS                                     Because a proof of guaranteed checkmate is a single branch-
+              DFS                                     ing plan that must succeed in every physical state of a belief
+      0.25                                            state, we can make the following observation:
+                                                      Theorem 2  If a belief state does not admit a guaranteed
+
+  Cumulative  Proportion Problems Solved  0           checkmate, no superset of that belief state admits a guaran-
+          1          10         100        1000       teed checkmate.
+                          Time (s)
+                                                        A straightforward implementation of the EXPAND method
+         1                                            (e.g., Figure 3) constructs all elements of a belief state be-
+           GL-DBU                                     fore evaluating any of them. Theorem 2 suggests a more ef-
+            L-DBU
+            L-DUB                                     ﬁcient strategy: evaluate each physical state as soon as it is
+      0.75   IPNS                                     constructed. If a terminal physical state with value false (or
+            E-PNS                                     a nonterminal physical state at the depth limit) is found, the
+           LE-DFS                                     construction of the belief state can be halted early. In the
+           GX-DFS
+       0.5    PNS                                     best case, this reduces the effective search depth by one level
+           GL-DFS                                     (since only a single element of each belief state at the depth
+            L-DFS                                     limit will be constructed). As shown in Figure 4 (indicated
+              DFS
+      0.25                                            by E- for “early termination”), this simple idea is the most
+                                                      effective of the improvements we consider in this section.
+                                                        Theorem 2 also suggests another pruning, which is speciﬁc
+                                                      to try-until-feasible trees. Consider the situation in which
+  Cumulative  Proportion Problems Solved  0
+                100                    1000           White is in belief state b, attempts a possibly-legal move,
+                                                      and is told that the move is illegal. White’s new belief state
+                          Time (s)
+                                                      b′ ⊂ b. Theorem 2 implies that if b′ does not admit a guaran-
+Figure 4: Performance of search algorithms on our 5-ply Kriegspiel teed checkmate, then neither does b. In other words, when the
+checkmate database. Top: mate instances; Bottom: near-miss in- illegal child of an AND-node is disproved, this is sufﬁcient to
+stances. The y-axes show the fraction of problems solvable within a disprove the AND-node’s parent OR-node as well. For ex-
+given amount of CPU time (in Lisp, on a 550 MHz machine). The ample, if node 3 in Figure 1 were disproved, that would show
+algorithms are ranked in decreasing order of efﬁciency. not only that trying Qa4 ﬁrst fails to ensure checkmate, but
+                                                      also that no other White move from node 1 gives checkmate.
+introduce the DBU, DUB, and IPNS algorithms later, in Sec- Clearly, this is a useful pruning rule.
+tion 6. Performance on our 3-ply database (not shown) is
+qualitatively similar, but does not allow for accurate discrim- We call this pruning greedy, since when combined with
+ination between our improved algorithms.              the legal-ﬁrst heuristic it allows White’s turns to be solved
+  Basic DFS is by far the slowest of the algorithms tested, without backtracking, by adding moves to the plan iff they
+primarily because of the factorial branching factor for White lead to checkmate when legal. Because a move plan can-
+(which subsequent algorithms avoid, to a large extent); basic not include repetitions, a greedy algorithm such as GL-DFS
+PNS is much faster. Notice that the near-miss instances are (Greedy Legal-ﬁrst DFS) has a worst-case branching factor
+generally more difﬁcult to solve than the mate instances. per White’s turn that is only quadratic in the number of pos-
+                                                      sible moves. However, Figure 4 shows that GL-DFS only
+Heuristic ordering                                    slightly outperforms L-DFS. This is because the pruning only
+When searching a belief-state AND–OR tree using a black- applies when there are moves that lead to checkmate if legal
+box algorithm such as DFS, there are two possible opportu- but not if illegal.
+nities for heuristic ordering: White moves at OR-nodes, and Perhaps surprisingly, our experiments show that a G-DFS
+percepts at AND-nodes. In this paper we focus on the under- algorithm performs better when it tries the illegal child ﬁrst
+lying search algorithms; we do not investigate heuristic order- instead (even though the resulting algorithm is not actually
+ings for the White moves, and test only a simple but effective greedy); this algorithm, shown as GX-DFS in Figure 4, out-
+ordering for the percepts.                            performs even PNS. The power of GX-DFS stems from its
+  At AND-nodes, the legal children (children in which the ability to test a subset of its belief state using possibly-legal
+last move was legal) are generally much cheaper for DFS to moves, and terminate early if it disproves the subset.
+explore than the illegal child, since they have lower remain- We did not implement a “G-PNS” algorithm, because the
+ing depth. This suggests a simple heuristic: investigate the greedy pruning could force PNS to choose between the goals
+legal children ﬁrst. As shown in Figure 4, L-DFS (Legal-ﬁrst of proving and disproving the root (it always does both simul-
+DFS) is considerably faster than DFS. On the other hand, L- taneously). Future work may explore this issue further.

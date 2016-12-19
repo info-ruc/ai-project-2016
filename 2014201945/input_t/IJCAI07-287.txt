@@ -1,0 +1,303 @@
+   Multi-Document Summarization by Maximizing Informative Content-Words
+
+            Wen-tau Yih      Joshua Goodman         Lucy Vanderwende         Hisami Suzuki
+                                          Microsoft Research
+                                      Redmond, WA 98052, USA
+                          {scottyih, joshuago, lucyv, hisamis}@microsoft.com
+
+
+                    Abstract                          is scored as the average of the probabilities of the words in
+                                                      it. The summary is then generated through a simple greedy
+    We show that a simple procedure based on max-     search algorithm: it iteratively selects the sentence with the
+    imizing the number of informative content-words   highest-scoring content-word, breaking ties by using the aver-
+    can produce some of the best reported results for age score of the sentences. This continues until the maximum
+    multi-document summarization. We ﬁrst assign a    summary length has been reached. In order not to select the
+    score to each term in the document cluster, using same or similar sentence multiple times, SumBasic updates
+    only frequency and position information, and then probabilities of the words in the selected sentence by squar-
+    we ﬁnd the set of sentences in the document cluster ing them, modeling the likelihood of a word occurring twice
+    that maximizes the sum of these scores, subject to in a summary.
+    length constraints. Our overall results are the best Our system improves on SumBasic in three ways. First,
+    reported on the DUC-2004 summarization task for   in contrast to SumBasic which only uses frequency informa-
+    the ROUGE-1 score, and are the best, but not sta- tion, our approach also uses position information. Second,
+    tistically signiﬁcantly different from the best sys- we introduce a discriminative, machine-learning based algo-
+    tem in MSE-2005. Our system is also substantially rithm to combine these information sources. Third, instead
+    simpler than the previous best system.            of applying the heuristic greedy search of SumBasic, we for-
+                                                      malize the content selection process as an optimization prob-
+1  Introduction                                       lem. Speciﬁcally, we use a stack-decoding algorithm to ﬁnd
+In this paper, we show that a very simple approach to generic the summary that maximize the total scores of the content-
+multi-document summarization can lead to some of the best words it has, subject to the summary length constraint. Each
+reported results on this task. Our system has two components: of these three improvements is empirically shown to lead to
+one component uses machine learning to compute scores for better summaries. This system achieves the best reported
+each word in the set of documents to be summarized (which ROUGE-1 results for the DUC-2004 summarization task as
+is called the “document cluster”); the other component uses well as for MSE-2005, although the difference is statistically
+                                                                                                    [
+a search algorithm to ﬁnd the best set of sentences from the signiﬁcant only for DUC 2004. (Another recent system Wan
+                                                                    ]
+document cluster for maximizing the scores. Despite the sim- and Yang, 2006 also reports excellent results on the DUC-
+plicity of the techniques, our results are among the best ever 2004 task, but uses a different version of the Rouge software,
+reported for multi-document summarization.            making comparisons difﬁcult.)
+  Multi-document summarization is an increasingly impor- The rest of this paper is organized as follows. In Section 2
+tant task: as document collections grow larger, there is a we describe how we determined the importance of position
+greater need to summarize these documents to help users information, and then we describe several term scoring mech-
+quickly ﬁnd either the most important information over- anisms. Next, in Section 3, we give details of our optimiza-
+all (generic summarization) or the most relevant informa- tion technique, including the stack decoder. In Section 4,
+tion to the user (topic-focused summarization). Examples we give experimental results showing that both our new scor-
+where multi-document summarization might be helpful in- ing method and our optimization technique lead to improve-
+clude news, email threads, blogs, reviews, and search results. ments, and that the combined system outperforms the best
+  The design of our system  is motivated by SumBa-    previous system on the ROUGE-1 metric. We then compare
+sic [Nenkova and Vanderwende, 2005; Nenkova et al., 2006]. our system to related work in Section 5, and ﬁnally Section 6
+SumBasic is extremely simple, but its performance is within concludes the paper.
+statistical noise of the best system of DUC-2004 and the sec-
+ond best system of MSE-2005, using the ROUGE-1 measure. 2 Scoring
+SumBasic ﬁrst computes the probability of each content- In this section, we describe our techniques for scoring words.
+word (i.e., verbs, nouns, adjectives and numbers) by simply Our starting point, SumBasic, scores words purely using fre-
+counting its frequency in the document set. Each sentence quency information. In Section 2.1, we investigate additional
+
+                                                IJCAI-07
+                                                  1776possible features by looking for mismatches between human word occurrence in a document cluster, we computed its po-
+and machine-generated summaries. We identify position in- sition relative to the beginning of its document, e.g. 0 for the
+formation as a key additional feature. Then, in Section 2.2, ﬁrst word and 1 for the last. For each word, we then com-
+we examine two different ways to combine position infor- puted the average of its occurrences throughout the document
+mation with frequency information, one of which can be de- cluster. We call this the average position of the word. A very
+scribed as generative, and the other of which as discrimina- frequent word occurring randomly throughout the documents
+tive.                                                 would have an average position of about 0.5, but words that
+                                                      occur disproportionately at the beginnings of documents have
+2.1  Position and Frequency Features                  an average position below 0.5.
+As mentioned previously, exclusively using word frequency In particular, we compute the average position in the orig-
+information, SumBasic can produce quite competitive multi- inal document cluster for the terms in the summary. For hu-
+document summaries [Nenkova et al., 2006]. They focused man summaries, the value is about 0.42. For term frequency-
+on frequency information after comparing machine to human based summaries generated by SumBasic, the value is around
+generated summaries, and ﬁnding that machine-generated 0.46. Compared to the value computed from the document
+summaries contained fewer frequent words than human gen- cluster, which is 0.5, this fact re-conﬁrms the importance of
+erated ones. We wanted to build on this work by identify- position. Of course, a difference of .04 may or may not be
+ing other information sources that could be useful for a sum- important in practice: later, in Section 4, we will give experi-
+marization system, in addition to word frequencies. In par- mental results showing that our inclusion of this information
+ticular, we examined the summaries generated by SumBasic does indeed lead to statistically signiﬁcant improvements.
+and human summaries written for the same document set, and
+checked whether these two types of summaries had different 2.2 Scoring the terms
+properties. For example, if the number of capitalized words Knowing that frequency and location are important, the next
+was substantially higher (or lower) in human summaries than question is how to incorporate them together to create a good
+in machine generated summaries, we would expect that capi- scoring function for each term. In this section, we explore
+talization information could help improve the automatic sys- two different approaches: generative and discriminative.
+tem. We looked at a number of different properties, including
+capitalization, word length, sentence length, and others. We Generative Scoring
+found that the human and machine summaries had compara- The term scoring method used in SumBasic can be thought
+ble values for all properties except one – the word positions. of as a generative model based on frequency alone. In this
+  Position information has been used quite frequently in model, we assume that summaries are generated at random
+single-document summarization. Indeed, a simple baseline from the document cluster according to the following process.
+system that takes the ﬁrst l sentences as the summary out- We select a term at random from the document cluster, with
+performs most summarization systems in the annual DUC a probability proportional to the frequency of the word in the
+evaluation [Barzilay and Lee, 2004] (and see also [Zajic et cluster. We add this term to the summary, and then delete
+al., 2002] for use of position in scoring candidate summary all occurrences of the term from the cluster. We repeat this
+sentences). For multi-document summarization in DUC,  process until we have generated a summary of the required
+position information has also been used as part of simple length. Of course, a random set of words would be a horrible
+baseline systems: two baselines were constructed for multi- summary. In practice, the output summary consists of sen-
+document summarization, both informed by position. One tences with the highest probability according to the model,
+system took the ﬁrst n words of the most recent news docu- selected from the document cluster. In Section 3, we describe
+ment in the collection as the baseline, while the other system in detail how we use these scores to create summaries.
+was constructed by appending the ﬁrst sentences of subse- In addition to the above model based only on frequency, we
+quent articles in the document cluster until the length limit also propose a generative model that favors words from the
+was reached.                                          beginnings of documents. We tried additional experiments in
+  In mutli-document summarization, various systems have which, instead of selecting words at random from the whole
+used sentence position as a feature in scoring candidate sen- document, we select terms only from the very beginning of
+tences (e.g., [Radev et al., 2001; Zajic et al., 2005]), but word the document. For our experiments with DUC-2004, we used
+position has not been explored thus far. At the level of words, the ﬁrst 100 words; for MSE-2005, where many of the articles
+some systems have used as a feature the number of words were very short, we used the ﬁrst 50 words.
+in the candidate sentence that are found to be signature to- Our ﬁnal generative model combines the above two mod-
+kens, i.e., words found to be frequent near the beginning of els, allowing a tradeoff between overall frequency, and fre-
+an article and therefore likely to be highly informative [Lin quency at the beginning of documents. This model assumes
+and Hovy, 2000; McKeown et al., 2001; Schiffman, 2002; that the ﬁrst step is to ﬂip a biased coin. Based on the bi-
+Conroy et al., 2004]. However, these signature tokens are ased coin ﬂip, we either select our terms at random from the
+computed based on a large corpus of news articles, not based whole document cluster, or only from the beginnings of the
+on the word position in a small cluster of articles.  document clusters. The effective probability value is there-
+  To check for the importance of word position information fore a linear interpolation of the values used in the two base
+in a given cluster of documents, we ﬁrst needed to deﬁne a models. After trying different bias terms, we found that set-
+position measure. Our procedure was as follows: for each ting it to 0.5 worked best empirically.
+
+                                                IJCAI-07
+                                                  1777Discriminative Scoring                                3.1  Scoring the summary
+Often, it has been found that for probabilistic approaches to We considered two different methods for combining scores of
+natural language processing, discriminative approaches work words to get an overall score: a product-based method, and
+better than generative ones. We train our discriminative a sum-based method. Consider the generative model of Sec-
+model using the data for the DUC-2003 multi-document sum- tion 2.2. For a given summary, we could multiply together the
+marization task. That is, we learn the probability that a given probabilities from this model. Finding the summary with the
+term in the document will be in the summary. For each con- highest product of probabilities would give us the summary
+tent word in a document cluster, we assign label 1 to it if it with the highest probability of being exactly correct, accord-
+appears in the given human summary; otherwise, the label is ing to the generative model.
+0. We then try to learn the probability that the term has label On the other hand, in automatic evaluation metrics such as
+1, given its features.                                the ROUGE scores, we favor summaries that have the most
+  The learning algorithm we chose is logistic regression, for words that also appear in the reference (i.e., human) sum-
+two reasons. First, logistic regression predicts probabilities maries. If the score of a content word represents the prob-
+directly (in contrast to, say, perceptron or SVMs). Second, lo- ability that the word appears in the human summary, then
+gistic regression works well even with inconsistent labels (in the summation of these scores can be thought of as the ex-
+contrast, to, say, large margin approaches like SVMs which pected number of “correct” content words. We compared the
+can ﬁnd such data difﬁcult to train on). This is important since sum and product methods, and we found that the sum method
+we have four different human summaries for each document consistently worked better.
+cluster. When a term in the document cluster only appears in, Our summary scoring principle is somewhat different from
+say, three summaries, the training data will have four identi- SumBasic in that we directly compute the score based on the
+cal feature vectors representing this term. Three of them will words, while SumBasic weights sentences ﬁrst and tries to
+be labeled 1 and the other one will be labeled 0.     select sentences which have a better total score.
+  We created 7 basic features using the frequency and po-              best
+sition information. They are: #occr (the number of the oc- 3.2 Finding the summary
+currences in the document cluster), occrRatio (#occr divided The iterative algorithm used in SumBasic can be thought of
+by the number of the content-words in the document cluster), as a simple greedy algorithm that tries to ﬁnd the best sum-
+avgOccrRatio (calculate occrRatio for each document in the mary. However, this greedy algorithm rarely ﬁnds the best
+cluster, and average them), minPos (ﬁnd the position (starting summary, even in the sense of optimizing the expected score.
+from 0) where the content-word appears ﬁrst in each docu- In addition, since it does not explicitly consider the max-
+ment in the cluster, and use the smallest), avgMinPos (sim- length cut-off threshold, which causes the end of the last sen-
+ilar to minPos, but use the average instead; if the content- tence not to be used for scoring, the score of the ﬁnal sum-
+word does not appear in a document, the position is the to- mary may be further impacted. We thus developed a more
+tal number of content-words in this document), minRelPos complex algorithm that could explicitly search for the best
+(compute the relative ﬁrst position, which is the minPos di- combination of sentences. Our algorithm is based on a stack
+vided by the number of content-words in the document, and decoder [Jelinek, 1969]. One typical problem of stack de-
+return the smallest of the cluster), and avgRelPos (similar to coders is that they have trouble comparing hypotheses of dif-
+minRelPos, but use the avearge instead).              ferent lengths. Although it is sometimes solved with an A*
+  For each of the basic features, we also create a correspond- search [Paul, 1991], this requires ﬁnding an admissible cost
+ing log feature. Suppose the basic feature is x; then the cor- function, which does not always exist. Instead of using an A*
+responding log feature is log(1 + x). We then expand the search, we chose to use multiple stacks, with each stack rep-
+feature space by introducing conjunction features. For each resenting hypotheses of different lengths [Magerman, 1994].
+pair of the above features, we use the product of the values as Our stack decoder method is shown in Algorithm 1, which
+a new feature, which has a similar effect to using a degree-2 takes as input the set of all sentences from the document clus-
+polynomial kernel.                                    ter, as well as the score array used to weight the sentences.
+                                                      The method uses maxlength stacks: one for each length, up
+3  Optimization Method                                to the maximum length of the summary. Each stack contains
+                                                      our best summaries so far, of exactly that length. (The last
+One relatively novel aspect of our system is that we have stack, stack[maxlength], may contain summaries longer than
+moved from an algorithmic description common in most sys- maxlength –butwordspastsizemaxlength are not consid-
+tems, to a scoring description: potential summaries are given ered as part of the scoring). There will be at most stacksize
+an overall score based on the scores of the included content different hypotheses on any given stack.
+words, and the goal is to ﬁnd the summary with the best over- The algorithm proceeds by examining a particular stack.
+all score. We ﬁrst explain how we decide the overall score It looks at every solution on that stack (a solution is a set of
+of a summary in Section 3.1. Then, in Section 3.2, we de- sentences). It then tries to extend that solution with every
+scribe the optimization procedure that searches for the best sentence from the document cluster. These extensions are
+summary. Finally, in Sec 3.3, we describe a variation that then placed on the stack of the appropriate length. In order
+does sentence simpliﬁcation, to allow the system to use either to avoid an exponential blowup in the number of solutions on
+full sentences, or sentences with certain less useful phrases any given stack, we use a priority queue, and only keep the
+removed.                                              top stacksize highest scoring solutions on any given stack.
+
+                                                IJCAI-07
+                                                  1778Algorithm 1 Stack Decoder for Multi-Document Summa-   entirely to the summarization component. A detailed descrip-
+rization                                              tion of our approach to sentence simpliﬁcation can be found
+ 1: INPUT: An array of Sentences[] and scores for each term in [Vanderwende et al., 2006].
+   in the Sentences[]
+ 2: INPUT: A maximum length maxlength                 4   Experiments
+ 3: INPUT: A maximum stacksize
+ 4: TYPEDEF  Solution = A variable length array of sentence In order to evaluate the performance of our systems, we use
+   IDs                                                two data sets that have been used in recent multi-document
+ 5: Let stack[0..maxlength] be a priority queue of Solutions; summarization shared tasks: multi-document summarization
+   each queue has at most stacksize Solutions.        (task 2) in DUC-2004 and the multilingual multi-document
+ 6: stack[0] =theSolution of length 0;                summarization task in MSE-2005. We ﬁrst show the results
+ 7: for i =0tomaxlength − 1 do                        of the purely extractive system on each of these tasks, and
+ 8:  for all sol ∈ Stack[i] do                        also show the effects of variations of the systems. Next, we
+ 9:    for all s ∈ Sentences do                       perform experiments using the sentence simpliﬁcation sys-
+10:       newlen = min(i+length(s),maxlength)         tem, showing additional improvements.
+11:       newsol = sol ∪{s}
+12:       score =scoreofnewsol counting each word once, DUC 2004
+          and at most maxlength words                 In the multi-document summarization task in DUC-2004,
+13:       Insert newsol, score into queue stack[newlen], participants are given 50 document clusters, where each clus-
+          pruning if necessary                        ter has 10 news articles discussing the same topic, and are
+14:    end for                                        asked to generate summaries of at most 100 words for each
+15:  end for                                          cluster. Since the same task was also held in DUC-2003, but
+16: end for                                           with different documents, we take the 2003 data for develop-
+17: Return best scoring solution in stack[maxlength]  ment, especially for training the probabilities.
+                                                        We present the results of our system and SumBasic us-
+                                                      ing different term scoring methods in Table 1. In addition,
+  Notice that if we did not penalize words that occur more we also compare them with the best system (peer65) and the
+than once, and if we did not truncate the very last sentence baseline system (greedyline) in DUC-2004. As mentioned
+as part of the scoring procedure, then this problem would be previously, greedyline simply takes the ﬁrst 100 words of the
+equivalent to the Knapsack Problem: how large a score can most recent news article in the document cluster as the sum-
+we pack into a maxlength word summary. Without the no- mary. For the evaluation, we use the ROUGE-1 metric (with
+duplication limitation and last sentence truncation, and when stemming and stop-words removed), which has been shown
+using a stack size of 1, Algorithm 1 devolves to the standard to correlate well with human judgments [Lin and Hovy, 2003;
+exact solution using dynamic programming for the Knapsack Lin, 2004] and which was found to have one of the best corre-
+Problem.                                              lations with human judgments on the DUC-2004 data [Over
+  In Section 4 we will compare the greedy algorithm in Sum- and Yen, 2004]. In addition, we also report the performance
+Basic to the stack decoder algorithm, and show that the stack on ROUGE-2 (bigram overlap) and ROUGE-SU4 (skip bi-
+decoder leads to reasonably large gains. Note that this algo- gram) metrics1.
+rithm is fast: about 11 seconds per document cluster with a In the table, the stack systems use our stack decoder algo-
+stack size of 30 on a standard PC.                    rithm, while the basic systems use SumBasic’s iterative algo-
+                                                      rithm. The sufﬁxes of the system names indicate the types of
+3.3  Summarization with simpliﬁed sentences           term scoring methods used. Discriminative training is repre-
+The goal of a summarization system is to produce summaries sented by -train; using frequencies only is denoted as -freq;
+with as much content as possible given the length limit. using frequencies in the ﬁrst 100 words is -pos; and ﬁnally,
+Therefore, if we can simplify sentences in the summary, re- -inter means the score is the average of full document fre-
+moving phrases that have little or no expected value, we can quencies and frequencies in the ﬁrst 100 words.
+make room for additional sentences that provide more value. We performed paired t-tests comparing our systems to
+  For each sentence in the document cluster, our sentence peer65 (the previous best performing system) and to Sum-
+simpliﬁcation procedure eliminates various syntactic units Basic (basic-freq in our terminology). The top three sys-
+based on predeﬁned heuristic templates, such as remov- tems (stack-train, stack-inter,andbasic-inter)wereallsig-
+ing noun appositives, gerundive clauses, nonrestrictive rel- niﬁcantly better on ROUGE-1 than peer65 (p<.05). On
+ative clauses, or intra-sentential attributions. Unlike previ- ROUGE-2 and ROUGE-SU4, these three systems were just
+ous approaches that deterministically shorten sentences be- slightly worse than peer-65, but the differences were not sig-
+fore or after sentence selection (e.g., [Conroy et al., 2005; niﬁcant. The top four systems were all signiﬁcantly better
+Siddharthan et al., 2004; Daum´e III and Marcu, 2005]), the than basic-freq (p<.01). We have thus improved on both
+simpliﬁed sentence in our approach does not replace the orig- our baseline system and on the best previous system.
+inal sentence but is instead added to the sentence pool for the
+summarizer to choose from. The choice among the sentence 1ROUGE version 1.5.5, with arguments -a -n 4 -w 1.2 -m -2 4 -u
+alternatives provided by the simpliﬁcation procedure is left -c 95 -r 1000 -f A -p 0.5 -t 0
+
+                                                IJCAI-07
+                                                  1779     SYSTEM   ROUGE-1    ROUGE-2   ROUGE-SU4               SYSTEM      ROUGE-1     ROUGE-2   ROUGE-SU4
+    stack-train 0.327      0.086      0.129            stack-train-sim 0.339 (+0.012) 0.086     0.129
+    stack-inter 0.322      0.086      0.129            basic-train-sim 0.328 (+0.008) 0.084     0.130
+    basic-inter 0.322      0.088      0.132             stack-freq-sim 0.320 (+0.009) 0.077     0.120
+    basic-train 0.320      0.084      0.128             basic-freq-sim 0.312 (+0.009) 0.075     0.121
+     stack-freq 0.311      0.076      0.119                stack-train   0.327       0.086      0.129
+     stack-pos  0.310      0.082      0.126                basic-train   0.320       0.084      0.128
+     basic-pos  0.306      0.082      0.126                stack-freq    0.311       0.076      0.119
+      peer 65   0.305      0.090      0.131                basic-freq    0.303       0.077      0.121
+     basic-freq 0.303      0.077      0.121
+    greedyline  0.202      0.061      0.099
+                                                      Table 3: DUC-04: ROUGE-1, ROUGE-2 and ROUGE-SU4
+Table 1: DUC-04: ROUGE-1 (stop-words removed and      scores, with sentence simpliﬁcation
+stemmed), ROUGE-2 and ROUGE-SU4 (stemmed) scores
+                                                      the discriminatively trained term scores does not perform the
+     SYSTEM    ROUGE-1   ROUGE-2    ROUGE-SU4         best. This may be due to the fact the model is trained on the
+    stack-inter  0.378     0.140       0.173          DUC-2003 data, which may be quite different from the data
+     stack-pos   0.375     0.134       0.166          in MSE-2005.
+    basic-train  0.374     0.136       0.173
+     stack-freq  0.374     0.129       0.166          Sentence simpliﬁcation for DUC 2004 and MSE 2005
+    stack-train  0.369     0.133       0.167          Next, we look at the effects of sentence simpliﬁcation. Ta-
+    basic-inter  0.367     0.133       0.161          ble 3 shows the performance of different conﬁgurations of
+       peer 28   0.365     0.160       0.186          our summarizer with sentence simpliﬁcation (-sim), and with-
+     basic-pos   0.362     0.131       0.163
+     basic-freq  0.352     0.103       0.161          out; the number in parentheses for the ROUGE-1 score is the
+                                                      amount of improvement. Comparing the four pairs of conﬁg-
+Table 2: MSE-05: ROUGE-1 (stop-words removed and      urations (e.g. stack-train-sim versus stack-train,etc.),wesee
+stemmed), ROUGE-2 and ROUGE-SU4 (stemmed) scores      that sentence simpliﬁcation consistently raises the ROUGE-
+                                                      1 score by about .01, while having essentially no impact on
+                                                      ROUGE-2 or ROUGE-SU4. The difference in ROUGE-1
+  We also looked at the component improvements. In every score was largest for stack-train-sim versus stack-train,and
+case, stack decoding was better than basic (greedy) decod- the difference was statistically signiﬁcant (p<.05) for both
+ing, but the differences were not statistically signiﬁcant. Dif- this pair, and stack-freq-sim versus stack-freq. There appears
+ferences between a pure frequency approach and the trained to be a synergy to using our stack decoder with sentence sim-
+approach (stack-train versus stack-freq and basic-train ver- pliﬁcation: the stack decoder allows the system to do a better
+sus basic-freq) were both highly signiﬁcant (p<.01). The job of choosing among the many candidate sentences, which
+difference between basic-inter and basic-freq was highly sig- include both all of the original sentences, and simpliﬁed ver-
+niﬁcant (p<.01), showing that using position information sions of many sentences.
+does indeed lead to improvement.
+MSE 2005                                              5   Related Work
+In 2005, a different multi-document summarization task was In this section, we compare our work to related work on a
+conducted as part of the Machine Translation and Summa- number of aspects, such as scoring method, search method,
+rization Workshop at ACL. Participating systems produced etc.
+a 100-word summary from a document cluster, which was   Both SumBasic and our system focus on scoring individual
+a mixture of English and Arabic news articles on the same words. In contrast, most existing system are sentence-based.
+topic, where the Arabic documents are translated into Eng- These sentence-based systems use a variety of features, in-
+lish by automatic machine translation systems. In addition to cluding: sentence position in the document, sentence length,
+this major difference, the news articles are generally shorter sentence similarity to previously extracted sentences (usu-
+than those used in DUC-2004. Ignoring the potential mis- ally using the maximal marginal relevance (MMR) frame-
+takes introduced by the machine translator, we ran our sys- work [Carbonell and Goldstein, 1998]), an explicit redun-
+tems without speciﬁc modiﬁcations for this unusual setting, dancy score [Daum´e III and Marcu, 2005], and sentence sim-
+except counting the frequencies of the ﬁrst 50 words instead ilarity to the document centroid. In the cases where individ-
+of 100 in our position-based generative models ( -pos and ual words are considered during sentence selection, impor-
+-inter).                                              tant words are identiﬁed through graph-based analysis where
+  As shown in Table 2, on this data set, the mean ROUGE- the nodes in the graph represent words [Mani and Bloedorn,
+1 score of our best system, stack-inter, is better than the 1997; Erkan and Radev, 2004], rather than through proba-
+best participating system (peer 28) and the original version bilistic measures such as those used in this work. In contrast
+of SumBasic. On ROUGE-2 and ROUGE-SU4, the scores of  to these complex systems, the only features we use are fre-
+our systems are slightly lower. However, in all three metrics, quency and position-based.
+all of the systems have no statistically signiﬁcant difference. We combine the position and frequency information us-
+  We notice that the our stack-decoding summarizer with ing either a simple generative or simple discriminative
+
+                                                IJCAI-07
+                                                  1780

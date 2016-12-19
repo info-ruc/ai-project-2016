@@ -1,0 +1,361 @@
+       A Privacy-Sensitive Approach to Modeling Multi-Person Conversations
+                       Danny Wyatt                              Tanzeem Choudhury
+                Dept. of Computer Science                           Intel Research
+                 University of Washington                   1100 NE 45th St., Seattle, WA
+                danny@cs.washington.edu                    tanzeem.choudhury@intel.com
+
+                        Jeff Bilmes                                 Henry Kautz
+              Dept. of Electrical Engineering                Dept. of Computer Science
+                 University of Washington                      University of Rochester
+                bilmes@ee.washington.edu                       kautz@cs.rochester.edu
+
+                    Abstract                            While that limits the analyses that can be done on the data,
+                                                      it does not render the data useless. A broad range of infer-
+    In this paper we introduce a new dynamic Bayesian ences can be made from privacy-sensitive features. There are
+    network that separates the speakers and their speak- many applications that would beneﬁt from increased access
+    ing turns in a multi-person conversation. We pro- to spontaneous speech data while not needing to know the
+    tect the speakers’ privacy by using only features content of the speech.
+    from which intelligible speech cannot be recon-     For example, research in speech and emotion often uses
+    structed. The model we present combines data      only information about pitch, volume, or duration [Schuller
+    from multiple audio streams, segments the streams et al., 2004]. But the data used in such research has been
+    into speech and silence, separates the different  either acted speech [Campbell, 2000] or datasets gathered
+    speakers, and detects when other nearby individu- in constrained situations [Greasley et al., 1995; Douglas-
+    als who are not wearing microphones are speaking. Cowie et al., 2000; Ang, 2002]. Acted speech is known to
+    No pre-trained speaker speciﬁc models are used, so poorly reﬂect natural emotion [Batliner et al., 2000]; and the
+    the system can be easily applied in new and dif-  constrained datasets are recorded in relatively unnatural set-
+    ferent environments. We show promising results in tings (television shows, interviews) that are not representative
+    two very different datasets that vary in background of ordinary human communication. There is a demand for
+    noise, microphone placement and quality, and con- more natural data sets for the study of speech and emotion
+    versational dynamics.                             [Douglas-Cowie et al., 2003a].
+                                                        A second example is the study of social networks. Tra-
+                                                      ditional social network analysis has relied on data gathered
+1  Introduction                                       either through surveys, which are vulnerable to known bi-
+Automatically modeling people’s spontaneous, face-to-face ases [Bernard et al., 1979; Marsden, 1990], or third party ob-
+conversations is a problem of increasing interest to many dif- servers, which is costly, labor intensive, and does not scale.
+ferent research areas. Yet there is very little data available Recent studies have used automatically gathered data about
+that captures truly spontaneous speech—speech recorded in on-line interactions [McCallum et al., 2005; Kossinet and
+situ as people go about their lives. Portable devices capable Watts, 2006], but there are few studies involving automat-
+of such recording have grown in storage capacity while be- ically recorded face-to-face conversations—despite the fact
+coming smaller, cheaper, and more powerful. But obstacles that face-to-face communication remains people’s dominant
+to gathering spontaneous speech still remain, and perhaps no mode of interaction [Baym et al., 2004]. To study social net-
+other obstacle is as prominent as privacy.            works, it is sufﬁcient to know only who spoke with whom,
+  Collecting truly spontaneous speech requires recording not what was said.
+people in unconstrained and unpredictable situations, both Finally, non-linguistic aspects of spoken communication
+public and private. There is little control over who or what are also useful features in medical and meeting understand-
+may be recorded. Uninvolved parties could be recorded with- ing applications. Speaking rate is an indicator of mental ac-
+out their consent—a scenario that, if raw audio is involved, tivity [Hurlburt et al., 2002] and a behavioral symptom of
+is always unethical and often illegal. Recording spontaneous mania [Young et al., 1978]. Abnormal conversation dynam-
+data in real-world situations will require protecting the pri- ics are symptoms of Asperger syndrome [Wing and Gould,
+vacy of those involved by not always storing complete audio. 1979] and autistic individuals often speak in a high-pitched
+More speciﬁcally, any data that is saved must not allow the voice or lack intonation [Tager-Flusberg, 1994]. In meetings,
+linguistic content of a person’s speech to be reconstructed. interruptions and speaking time can reveal information about
+
+                                                IJCAI-07
+                                                  1769                                                        voiced source
+status and dominance [Hawkins, 1991] and gender speciﬁc                         vocal tract filter
+differences in interruptions and the consequences of those dif-
+ferences are active topics of research [Tannen, 1993]. None
+of these features require access to linguistic content, and all
+of these applications would beneﬁt from increased access to unvoiced source
+                                                                                                 Speech
+natural speech data.                                                       gain
+
+1.1  Problem Description
+Our speciﬁc long-term goal is to model the evolution of spon- Figure 1: The source-ﬁlter model for speech production.
+taneous face-to-face interactions within groups of individu-
+als over extended periods of time. In order to protect the model’s ability to infer speaker turns can be seen as a nec-
+privacy of both research subjects and the non-subjects with essary low-level enabler for higher level conversation under-
+whom they come into contact, we must ensure that the acous- standing.
+tic information that is saved cannot be used to reconstruct Finally, as previously mentioned, there has been much
+intelligible speech. The stored features must contain enough research into recognizing emotions associated with speech
+information to serve as input to models of conversational and [Douglas-Cowie et al., 2003b]. Many of these emotion-
+social dynamics, but at the same time have insufﬁcient in- recognition applications may not need to know the words
+formation to reconstruct what is being said, or to positively that are spoken. [Shriberg, 2005] mentions the importance
+identify individuals who are not wearing microphones. of modeling natural speaking behavior and identiﬁes it as a
+  The work presented in this paper is the ﬁrst step toward fundamental challenge for spoken language applications.
+our goal. We present an unsupervised approach to separating
+speakers and their turns in a multi-person conversation, rely- 2 Speech Features and Privacy
+ing only on acoustic features that do not compromise privacy.
+The features employed are useful for modeling conversational We begin by giving a very simple description of speech pro-
+dynamics—who is speaking and how—but are not sufﬁcient duction based on the source-ﬁlter model [Quatieri, 2001]
+for speech recognition.                               (see Figure 1). Most speech sounds can be modeled with
+  Our work is novel in several ways. The key contribution is two independent components: (i) the source sound generated
+a joint probabilistic model that combines streams of acoustic in the glottis and (ii) the ﬁlter (the vocal tract) that shapes
+features from a set of individuals wearing microphones, infers the spectrum of the source sound. The source can be ei-
+when there is speech present, separates the different speak- ther voiced with fundamental frequency F0 (the pitch) or un-
+ers from each other, and also detects when other individu- voiced with no fundamental frequency. Prosodic information
+als around them—who are not equipped with microphones— about speech (intonation, stress, and duration) is described by
+are speaking. It does not require pre-trained speaker speciﬁc how the fundamental frequency and energy (volume) change
+models, and thus scales to any number of users and can be during speech. The frequency response of the vocal tract—
+used with new speakers and in new environments. Our model particularly the resonant peaks (the formants)—contains in-
+can be extended to a dynamically varying number of speak- formation about the actual phonemes that are the basis for
+ers, where new audio streams come and go whenever a new words. To reproduce speech intelligibly, information on at
+                                                                                 [             ]
+person enters or exits a group. We also introduce a novel fea- least three formants is required Donovan, 1996 . Any pro-
+ture set that is useful for segmenting speakers and for mod- cessing of the audio that removes information about the for-
+eling conversation attributes, but that cannot be used to tran- mants will ensure that intelligible speech can not be synthe-
+scribe the actual words spoken during a conversation. sized from the information that remains, and privacy will be
+                                                      preserved.
+1.2  Related Work                                       To detect speech (and speciﬁcally, voiced speech) and
+                                                      model how something is being said, we extract features that
+Most of the work in modeling spoken conversations has been contain information about the source and prosody but not
+done in the domain of meeting understanding [NIST, 2006; about the formants. Three features that have been shown to
+Dielmann and Renals, 2004]. One of the goals in meeting be useful for robustly detecting voiced speech under vary-
+understanding is speaker diarization: determining who spoke ing noise conditions are: (i) non-initial maximum autocor-
+when [Reynolds and Torres-Carrasquillo, 2005]. All of the relation peak, (ii) the total number of autocorrelation peaks
+work that we have found in this domain assumes access to the and (iii) relative spectral entropy [Basu, 2002] computed on
+full audio and that it is not necessary to remove information 16 ms chunks of audio. Because of the periodic components
+that can be used to transcribe speech.                of voiced speech (see Figure 1), the autocorrelation will have
+  Much previous work has been done in linguistic conversa- a small number of sharp peaks. Similarly, the relative spectral
+tion analysis [Ochs et al., 1996; Sacks, 1992]. Clearly, that entropy between the spectrum at time t and the local mean
+work relies almost solely on information about the words that spectrum (800 ms window) will be high for voiced speech
+are spoken, and not the basic acoustics of speech. As such, even in the presence of indoor and outdoor noise (e.g. wind,
+the model presented in this paper is complementary to tra- fan).
+ditional conversation analysis. However, inasmuch as con- Beyond detecting the spoken regions, the system needs ad-
+versations are considered turn taking between speakers, our ditional information to separate the different participants in
+
+                                                IJCAI-07
+                                                  1770                                                      the complexity of the conditional probability table (CPT) we
+            Gt-1                     Gt
+                                                      would otherwise have to model to capture dependencies be-
+                                                      tween speakers.
+                                                                                                 i
+    1    2   3      U        1    2    3
+   M t-1 M t-1 M t-1 t-1    M t  M t  M t    Ut       State of the individuals wearing microphones Mt
+                                                                                 i
+           2,3    V    e            2,3    V    e
+      1,2  E
+           t-1   A t-1 H t-1   1,2  E t   A    H
+      E t-1                    E           t    t     The binary random variable M indicates whether the i-th
+                                t                                                t
+
+
+       1,3                                            individual wearing a microphone is speaking. The condi-
+       E                        E1,3
+       t-1                       t                                        i
+                                                      tional probability P (Mt |Gt) is set to be semi-deterministic:
+                                                        (  i =1|    =  ) ≈ 1        =       ≈ 0
+    1    2   3               1    2   3               P  Mt     Gt    g      when g   i, and    otherwise.
+    V t-1 V t-1 V t-1        V   V    V
+                              t   t    t              This imposes the constraint that—most of the time—people
+
+   O1   O2   O3              1    2   3               do not talk simultaneously during a conversation. Note that
+     t-1 t-1  t-1            O t O t  O t                                                               i
+                                                      it is still possible, though highly unlikely, for multiple Mt
+                                                      variables to be true while Gt is held to a single speaker.
+      Figure 2: DBN model for multi-person conversation
+                                                      State of unmiked others Ut
+                                                                  i
+                                                      Similar to Mt , the unmiked other node Ut is a binary ran-
+the conversation. We found two features to be useful for this dom variable that indicates whether anyone not wearing a
+purpose: (i) the absolute energy, and (ii) the entropy of the en- microphone is speaking. If there are multiple unmiked per-
+ergy distribution across the different microphones (described sons present, they are all modeled by this node. Ut is condi-
+in more detail in Section 3).                         tioned on the group node Gt and the aggregate voicing node
+                                                        V
+  Summarizing, the complete list of acoustic features that At which indicates whether any microphone detected voiced
+must be saved for our model are: (i) non-initial maximum speech (and is described in more detail below). The condi-
+                                                                               v
+autocorrelation peak, (ii) the total number of autocorrelation tional probability P (Ut|Gt,At =1)is deﬁned identically to
+                                                           i                      v
+peaks, (iii) relative spectral entropy, and (iv) energy. P (Mt |Gt), and P (Ut =1|Gt,At =0)≈ 0.
+                                                                     i                     V
+                                                      Voicing states Vt and aggregate voicing At
+                                                                         i
+3  Multi-Person Conversation Model                    The voicing states Vt are binary variables that indicate
+                                                      whether microphone i has recorded sound consistent with
+Let us assume there are N individuals wearing microphones.                                i      i
+                                                      voiced human speech. The parents of Vt are Mt and the
+Given acoustic features from these N microphones, we want       i
+to detect when one of the wearers is speaking as well as when previous Vt−1. Since each microphone can pick up speech
+                                                      from its wearer as well as other speakers nearby, the condi-
+the microphones are picking up speech from others in the                      i                       i
+                                                      tional probabilities of the Vt nodes are deﬁned as P (Vt =
+area not wearing microphones. A dynamic Bayesian network  i                  i       i
+(DBN) [Dean and Kanazawa, 1988] is a ﬂexible way to com- 1|Mt =1)≈ 1 and P (Vt =1|Mt  =0)=0.5. In other
+bine all of the features into a uniﬁed model used to infer who words, if person i is speaking it is highly likely her micro-
+is speaking when. The state factorization of DBNs makes it phone will record voiced speech, and if she is not speaking
+relatively simple to express complex dependencies between there is a uniform probability that her microphone will record
+different variables in the system. Figure 2 depicts our DBN voiced speech.
+                                                                  V
+model for inferring both spoken segments as well as identify- The node At is an aggregate voicing node that is the deter-
+                                                                                 i
+ing the speaker of those segments ( =3in this example). ministic logical OR of all the Vt nodes. We describe below
+                              N                             V
+The shaded nodes are the observed variables whose values how At helps distinguish other individuals speaking from
+are inputs to the system and the hidden nodes are the vari- silent regions.
+ables whose values are to be inferred.                            Oi  Ei,j    He
+  Each time step in the DBN corresponds to a small chunk, Observations t, t , and t
+or frame, of audio data. In all of our experiments we used The observed variables obtained from the acoustic features of
+                                                      the N microphones are included at various points in the DBN
+frames with a length of 33.33 ms 16.67 ms of overlap with           i         i
+                                                      as children of Mt , Ut, and Vt .
+the previous frame.                                       i
+  Below we describe how the different variables are speciﬁed Ot is a three-dimensional variable that includes the three
+and the dependencies between them.                    features previously mentioned as having been useful for de-
+                                                      tecting voiced speech (non-initial maximum autocorrelation
+Group state Gt                                        peak, number of autocorrelation peaks, and relative spectral
+                                                                   i      i
+                t                                     entropy). P (Ot = o|Vt = v) is modeled by a 3D Gaussian
+The group node G determines who is holding the ﬂoor or                                 i  i
+                                                      with full covariance matrix. The P (Ot|Vt ) parameters are
+taking a turn to speak. It is a discrete random variable with                            i
+cardinality N +2: one state for no speaker (silent regions), learned from a set of labeled data (where Vt is given) contain-
+one state for each of the N people wearing microphones, and ing speakers who are not present in any of the data we eval-
+one state for any other speakers not wearing microphones. uated here. Learning these features in this manner has been
+The group state Gt depends on Gt−1, and the conditional shown to be speaker-independent and robust across different
+probability P (Gt|Gt−1) encodes the probability of turn tran- environmental conditions [Choudhury and Basu, 2004].
+                                                          i,j
+sitions between speakers. At time t =0all states are equally Et is a two-dimensional variable containing the log en-
+likely: P (G0)=1/(N +2). The group node allows us to  ergies of microphones i and j averaged over a 333 ms
+constrain the individual states described below, and reduces window centered at time t. The conditional distribution
+
+                                                IJCAI-07
+                                                  1771                                                  
+   3                                                  and the entropy is high then it is likely that someone else
+                                                      (i.e. someone not wearing a microphone) is speaking. It is
+                                                                                        V
+                                                      here that the aggregate voicing node At is useful. We de-
+   2                                                                     V
+                                                      ﬁne P (Ut|Gt = u, At =1)≈    1 (where u is the state of
+                                                      node Gt that indicates an unmiked person is speaking), and
+                                                                V                      V
+   1                                                  P (Ut|Gt,At ) ≈ 0 if Gt = u or if At =0. Loosely, this
+                                                      means that the model will only infer an unmiked speaker if
+ log  energy B
+   0                                      Speaker B   at least one microphone picked up voiced speech and that
+                                          Speaker A   speech cannot be assigned to any of the miked speakers.
+                                          Neither
+                                          Both
+  −1
+                                                      3.1  Parameter Learning and Inference
+        −0.5   0    0.5    1    1.5   2     2.5
+                       log energy A                   Learning is done in an entirely unsupervised manner using
+                                                      expectation maximization (EM). Unsupervised learning is
+             Figure 3: Pairwise log energies.         important for this application, given the privacy constraints
+                                                      associated with recording spontaneous speech. Raw audio
+                                                      will not be available for labeling speaker-speciﬁc data, so the
+                                                      model must be able to ﬁt itself to unlabeled data.
+   0.4                                                  However, with a large number of parameters, EM can of-
+                                                      ten converge to values that do not result in accurate infer-
+   0.2                                                ences. To prevent this, we clamp most of the above param-
+
+
+ log  entropy                                         eters to their pre-deﬁned or pre-trained values. Indeed, only
+    0                                                 the Gaussians associated with the energy-based observations
+       Speaker A Unmiked Speaker Speaker B Speaker A       i,j  i   j         e
+                                                        (    |      )       (  | t)
+  −0.2                                                (P Et  M  ,M    and P Ht  U  ) are learned during EM.
+    33.3    50.0    66.7    83.3    100.0   116.7     (As mentioned, the Gaussians associated with the voicing ob-
+                       Time (seconds)                 servations are pre-trained in a speaker-independent way.) All
+                                                      of the transition probabilities and semi-deterministic condi-
+ Figure 4: Log entropy of energy distribution across microphones. tional probabilities are ﬁxed at predeﬁned values. We did ex-
+                                                      periment with leaving more parameters free and the resulting
+    i,j  i  j                                         inferences were much less accurate.
+P (Et |M ,Mt ) is modeled with a full covariance 2D Gaus-
+        t                                               Once the free parameters are learned with EM, exact infer-
+sian. This pairwise energy feature associates voiced regions
+                                                      ence is done using the junction tree algorithm. During decod-
+with their speaker. If person i speaks at time t, then her en-
+                                                      ing, we infer the most likely state sequence for the group node
+ergy should be higher than j’s (and vice versa). When both             i                         i
+                                                      G, speaker nodes Mt and Ut, and voicing nodes Vt . We use
+i and j speak, both of their microphones have high energy
+                                                      the Graphical Models Toolkit (GMTK) for all of our learning
+and when neither speaks both of their microphones have low
+                                                      and inference [Bilmes and Zweig, 2002].
+energy. Figure 3 illustrates an example of this.
+    e
+  Ht  is the entropy of the log-energy distribution across
+all N microphones. This feature is useful for determining 4 Experiments and Results
+whether voiced regions come from a speaker not wearing a Experimental evaluations were performed on two datasets:
+microphone. When a person wearing a microphone speaks, (i) the publicly available scripted meeting corpus (M4) from
+his microphone will be signiﬁcantly louder than the others’ IDIAP [McCowan et al., 2003] and (ii) a labeled dataset
+and the entropy will be low. When a person not wearing a mi- of natural interactions that we collected. The M4 corpus
+crophone speaks, her energy will be spread more uniformly contains 27 four person meetings, each of them about ﬁve
+across all microphones and the entropy will be high. Figure 4 minutes long. The dataset has audio recordings from 12
+illustrates an example of this.                       microphones—one 8 microphone array and 4 lapel micro-
+    e
+  Ht is computed as follows. First, all microphones’ en- phones. The speakers in each recording followed a script for
+                                           ei(τ)
+ergies are normalized to a distribution: Pe(τ)=   .   certain meeting-wide activities (e.g., discussion, argument,
+                                              ej (τ)
+                                             j        monologue) but were not told what to say. In our experi-
+                                                 e
+Then Hτ is computed as the entropy of Pe(τ). Finally, Ht ments, we used data only from the lapel microphones as it
+is the average of Hτ over a 333 ms window centered at time most closely resembles our data collection setup. Overall,
+                   e
+t. We use the log of Ht and model that with a 1D Gaussian this dataset is quite clean and does not have much background
+random variable conditioned on Ut.                    noise. We evaluated the performance of our model on 13 ran-
+            e
+  Although Ht is a useful feature for distinguishing whether domly selected meetings from this corpus.
+speech comes from a person wearing a microphone or from The dataset we collected is much more challenging. It has
+one who is not, it does not help distinguish between when a signiﬁcant amount of background noise and distant speech.
+an unmiked person is speaking and when no one is speak- There are 6 conversations collected in 4 different locations: a
+ing. Entropy is high in both of those cases. However, in- meeting room, an elevator, a hallway, and a loud and noisy
+                              i
+formation about the voicing states Vt taken together with the atrium. The speakers were told where to go but not what to
+entropy can distinguish those situations. If there is voicing talk about. They are all friends and had no trouble ﬁlling
+
+                                                IJCAI-07
+                                                  1772                                                             mics   frame err. DER    prec.  recall
+                                                                4     19.48   15.94   83.27  95.57
+                                                                3     21.62   18.15   81.22  95.52
+                                                                2     22.98   19.79   79.82  95.33
+
+                                                      Table 1: Results for the M4 corpus. All meetings had 4 participants.
+
+                                                         speakers mics   frame err. DER    prec.  recall
+                                                            4431.73                24.10  68.18   95.69
+                                                                    3     31.27    23.72  70.74   95.23
+                                                                    2     30.52    23.18  70.45   96.25
+                                                            3333.07                27.60  65.49   90.17
+                                                                    2     35.47    29.99  64.09   90.66
+                                                            2228.23                17.47  72.49   93.86
+                                                                      (a) Quiet environments.
+Figure 5: Two people wearing our portable recording equipment. speakers mics frame err. DER prec. recall
+       The sensing unit is at their right shoulders.        4442.80                39.70  56.27   95.35
+                                                                    3     44.77    40.79  54.55   94.60
+the time with spontaneous conversation. For recording, we           2     46.28    41.87  53.82   96.02
+used an inexpensive condenser microphone, which is part of  3323.96                13.56  76.77   98.52
+a multi-modal sensing unit (dimensions: 60 mm x 30 mm x             2     25.23    14.91  75.52   98.90
+25 mm) [Welbourne et al., 2005]. The sensing unit is clipped 2240.87               29.59  60.92   95.98
+to the strap of a small over the shoulder bag. The unit sits near     (b) Noisy environments
+the upper right shoulder, but can move so the microphone is
+not always at a ﬁxed location from the mouth. A PDA in the           Table 2: Results on our data.
+bag records the audio data. Figure 5 shows two people wear-
+ing the equipment. Unlike the M4 data, where all lapel mi-
+crophones are tethered to the same recording computer, each
+person in our data carries with her all the equipment needed cases with fewer microphones than speakers are the averages
+for recording. Thus, our participants can move about inde- of results for all permutations of that number of microphones
+pendently and interact in a more natural manner.      across that number of speakers.
+  To evaluate the speaker segmentation performance, we  The ﬁrst thing to note is that the DER scores on the M4
+learned the unclamped parameters of the model in an unsu- data are comparable with current speaker diarization results.
+pervised manner for each meeting independently. Once the 18.6 is currently the best DER (achieved with features that
+learning was done, we inferred the most likely state sequence
+                                         i            do not preserve privacy) for meeting data [NIST, 2006]. (Un-
+for the group state node Gt and speaker nodes Mt and Ut. fortunately the dataset used in that evaluation is not generally
+  We compute four evaluation metrics that compare the in- available, so we cannot compare our results directly.) To the
+ferred value of Gt to ground truth. (i) The per frame er- best of our knowledge, there is only one other published di-
+ror rate is the fraction of frames in which the value of Gt arization result for the M4 corpus [Ajmera et al., 2004]. That
+does not match the ground truth speaker. We do not consider technique has better frame error rates (7.4%) but lower pre-
+frames that have more than one ground truth speaker. (ii) cision and recall (their reported average of the two is 80.8,
+The diarization error rate (DER) is a standard metric used by our average of the two is 88.5)—thus making for an incon-
+     [          ]
+NIST  NIST, 2006 to measure the performance of speaker clusive comparison. That technique also used features (low
+segmentation systems. It is a relaxed version of frame er- order cepstral coefﬁcients) that contain information about the
+ror rate that merges pauses shorter than 0.3 s long and ig- words spoken, so it does not protect privacy.
+nores 0.25 s of data around a change in speaker. These relax-
+ations account for perceptual difﬁculties in labeling speech at Our error rates are signiﬁcantly better on the M4 dataset
+such a ﬁne time granularity. (iii) Precision is the fraction of than on the dataset we collected. Our dataset, however, has
+the total number of inferred speaker frames that are correct. substantially more difﬁcult characteristics than M4. Our data
+(iv) Recall is the fraction of truly spoken frames for which includes signiﬁcantly more background noise, and the con-
+any speaker is inferred (in other words, the accuracy of basic versations are more ﬂuent and fast paced with much more
+speech-detection).                                    speaker overlap. For example, the M4 data’s mean turn dura-
+  The results for the M4 corpus are in Table 1 and the results tion is 6.5 s (median: 2.5 s). For our dataset the mean turn du-
+for our dataset are in Tables 2(a) and 2(b). In both datasets, ration is 1.52 s (median: 1.1 s). Clearly, more work remains
+all participants wear microphones. To test the performance of to be done in handling noisy environments and conversations
+our model with unmiked speakers, we selectively ignored the with faster (or even variable) pacing, but the results are still
+data from some participants’ microphones. Results shown for quite promising.
+
+                                                IJCAI-07
+                                                  1773

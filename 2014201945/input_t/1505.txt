@@ -1,0 +1,369 @@
+           Learning Partially Observable Deterministic Action Models
+
+                                            Eyal Amir
+                                  Computer Science Department
+                            University of Illinois, Urbana-Champaign
+                                     Urbana, IL 61801, USA
+                                        eyal@cs.uiuc.edu
+
+                   Abstract                          This paper presents an approach called SLAF (Simul-
+                                                   taneous Learning and Filtering) for exact learning of ac-
+     We present the ﬁrst tractable, exact solution for tion’s effects and preconditions in partially observable
+     the problem of identifying actions’ effects in deterministic domains. This approach determines a set of
+     partially observable STRIPS domains. Our al-  possible transition relations, given a sequence of actions
+     gorithms resemble Version Spaces and Logical  and partial observations. It is online, and updates a log-
+     Filtering, and they identify all the models that ical formula that models the possible transition relations
+     are consistent with observations. They apply in and world states with every time step. It ﬁnds exactly
+     other deterministic domains (e.g., with condi- those transition relations when actions are STRIPS (i.e.,
+     tional effects), but are inexact (may return false no conditional effects) or they map states 1:1.
+     positives) or inefﬁcient (we could not bound
+                                                     Our algorithms take polynomial time in the number of
+     the representation size). Our experiments ver-
+                                                   features, n, and the number of time steps, T , for many
+     ify the theoretical guarantees, and show that
+                                                   cases. Their exact complexity varies with properties of
+     we learn STRIPS actions efﬁciently, with time
+                                                   the domain. For example, the overall time for learning
+     that is signiﬁcantly better than approaches for
+                                                   STRIPS actions’ effects is O(T · n). For other cases the
+     HMMs and Reinforcement Learning (which
+                                                   update per time step takes linear time in the representa-
+     are inexact). Our results are especially surpris-
+                                                   tion size. We can bound this size by O(nk) if we approx-
+     ing because of the inherent intractability of the
+                                                   imate the representation with a k-CNF formula, yielding
+     general deterministic case. These results have
+                                                   an overall time of O(T · nk) for the entire algorithm.
+     been applied to an autonomous agent in a vir-
+     tual world, facilitating decision making, diag- Our experiments verify these theoretical results and
+     nosis, and exploration.                       show that our algorithms are faster and better qualita-
+                                                   tively than related approaches. For example, we can
+                                                   learn STRIPS actions’ effects in domains of > 100 fea-
+1   Introduction                                   tures exactly. In contrast, work on learning in Dynamic
+Autonomous agents have limited prior knowledge of  Bayesian Networks (e.g., [Boyen et al., 1999]), rein-
+their actions’ preconditions and effects when they ex- forcement learning in POMDPs (e.g., [Littman, 1996]),
+plore new domains. They can act intelligently if they and Inductive Logic Programming (ILP) (e.g., [Wang,
+                                                   1995]) either approximate the solution with unbounded
+learn how actions affect the world and use this knowl-                                         2n
+edge to respond to their goals. This is important when error for deterministic domains, or take time Ω(2 )
+their goals change because then they can reason about (thus, are inapplicable in domains larger than 10 fea-
+their actions instead of trying them in the world. tures). Section 7 provides a comparison with these and
+   Learning actions’ effects and preconditions is difﬁcult other works.
+in partially observable domains. The world state is not Our technical advance for deterministic domains is im-
+known completely, actions’ effects mix with each other, portant for many applications such as automatic software
+and it is hard to associate change in one feature with interfaces, internet agents, virtual worlds, and games.
+a speciﬁc action or situation. Thus, it is not surprising Other applications, such as robotics, human-computer
+that work so far has been limited to fully observable do- interfaces, and program and machine diagnosis can use
+mains (e.g., [Wang, 1995; Pasula et al., 2004]) and to deterministic models as approximations. Finally, under-
+hill-climbing (EM) approaches that have unbounded er- standing the deterministic case better can help us develop
+ror in deterministic domains (e.g., [Ghahramani, 2001; better results for stochastic domains.
+Boyen et al., 1999]).                                In the following, Section 2 deﬁnes SLAF precisely, Section 3 provides a deduction-based exact SLAF al-    West    East               West    East
+ gorithm, Section 4 presents tractable model-update al-
+ gorithms, Section 5 gives sufﬁcient conditions and al-    off     off                 on     on
+ gorithms for keeping the model representation compact                   =⇒
+ (thus, overall polynomial time), and Section 6 presents s2 = ¬sw ∧ ¬lit ∧ E sw-on s2′ = sw ∧ lit ∧ E
+
+ experimental results.                                 <s1,R1>                           <s1’’,R1>
+                                                                                  <s1’,R1>
+                                                                <s3,R3>
+                                                   ρ1                                    <s3’,R3> ρ2
+ 2  SLAF Semantics                                      <s2,R2>                   <s2’,R2>
+ We deﬁne our SLAF problem with the following formal
+ tools, borrowing intuitions from work on Bayesian learn- Figure 1: Top: Two rooms and ﬂipping the light switch.
+ ing of Hidden Markov Models (HMMs) [Ghahramani,   Bottom: SLAF semantics; progressing an action (the ar-
+ 2001] and Logical Filtering [Amir and Russell, 2003]. rows map state-transition pairs) and then ﬁltering with an
+   A transition system is a tuple hP, S, A, Ri, where observation (crossing out some pairs).
+   • P is a ﬁnite set of propositional ﬂuents;
+   • S ⊆ P ow(P) is the set of world states;
+   • A is a ﬁnite set of actions;                  Step 1 is progression with a, and Step 2 ﬁltering with o.
+   • R ⊆ S × A × S is the transition relation.
+Thus, a world state, s ∈ S, is a subset of P that contains We assume that observations (and observation model
+propositions true in this state, and R(s, a, s′) means that relating observations to state ﬂuents) are given to us as
+state s′ is a possible result of action a in state s. Our logical sentences over ﬂuents after performing an action.
+goal in this paper is to ﬁnd R, given known P, S, A, and They are denoted with o. When actions can be inexe-
+a sequence of actions and partial observations (logical cutable or may fail, it is useful to assume that P contains
+sentences on any subset of P).                     a special boolean ﬂuent, OK, whose value is the success
+   A transition belief state is a set of tuples hs, Ri where of the last action attempted.
+s is a state and R a transition relation. Let R = P ow(S× Transition belief state ρ generalizes version spaces
+A × S)  be the set of all possible transition relations on (e.g., [Wang, 1995]) as follows: If the current state, s,
+S, A. Let S = S × R. When we hold a transition belief is known, then the version space’s lattice contains the
+                                                                          s
+state ρ ⊆ S we consider every tuple hs, Ri ∈ ρ possible. set of transition relations ρ = {R | hs, Ri ∈ ρ}. It
+   For example, consider the situation presented in Fig- also generalizes belief states: If the transition relation,
+ure 1. There, we have two rooms, a light bulb, a switch, R, is known, then the belief state (set of possible states)
+                                                      R
+an action of ﬂipping the switch, and an observation, E is ρ = {s | hs, Ri ∈ ρ} (read ρ restricted to R), and
+(we are in the east room). The real states of the world, Logical Filtering [Amir and Russell, 2003] of belief state
+s2, s2′ (shown in the top part), are unknown to us. σ and action a is equal to (thus, we deﬁne it as)
+   The bottom part of Figure 1 demonstrates how our
+                                                      F ilter a σ    SLAF  a    s, R s   σ   R.
+knowledge evolves after performing the action sw-on.        [ ]( ) = (     [ ]({h  i | ∈  }))
+ρ1, ρ2 are our respective transition belief states. In ρ1
+we know that the possible world states are s2, s1, or 3 SLAF via Logical Inference
+s3 (s1, s3 are arbitrary world states), with R2, R1, and Learning transition models using Deﬁnition 2.1 directly
+R3, their respective transition relations. ρ2 is the re-                              2|P|
+sulting transition belief state after action sw-on. Action is intractable because it takes space Ω(2 ) in many
+                                                   cases. Instead, in this section we represent transition be-
+sw-on takes state s2 to s2′ according to transition rela-
+                                                   lief states more compactly (sometimes) using logic, and
+tion R2, so hs2′, R2i is a pair ρ . Similarly, it takes
+                             2                     compute SLAF using general purpose logical inference.
+state s1 to one of s1′, s1′′ according to transition rela-
+                          ′                          We represent every deterministic transition relation,
+tion R1, and it takes s3 to s3 according to R3. Thus,                                F
+   ′        ′′       ′                             R, with a language, L, of propositions a whose mean-
+hs1 , R1i, hs1 , R1i, hs3 , R3i are in pair ρ2. Finally,                             G
+                              ′                    ing is “If G holds, then F will hold after executing a”.
+observing E eliminates the pair hs3 , R3i from ρ2, if E     F
+is false in s3′.                                   We have aG  ∈ L for every action a ∈ A, F a literal
+                                                   (possibly negated proposition) from P, and G a complete
+Deﬁnition 2.1 (SLAF Semantics) Let ρ ⊆ S be a tran- term over P (a conjunction of literals from P such that
+sition belief state. The SLAF of ρ with actions and ob- every ﬂuent appears exactly once). We call F, G the sets
+servations haj, oj i1≤j≤t is deﬁned by             of effects, F , and preconditions, G, respectively. Thus,
+  1. SLAF  [a](ρ) =                                we have 2|P| · 2|P| · |A| new propositional variables (in
+        {hs′, Ri | hs, a, s′i ∈ R, hs, Ri ∈ ρ};    Section 5 we decrease this number).
+  2. SLAF  [o](ρ) = {hs, Ri ∈ ρ | o is true in s};   Deﬁne  ϕR, the logical theory that represents R, by
+                                                    0      F             ′                 ′
+  3. SLAF  [haj, oj ii≤j≤t](ρ) =                   ϕR  = {aG ∈ L | ∀hs, a, s i ∈ R, s |= G ⇒ s |= F }
+                                                             0       F   F       0
+     SLAF  [haj, oj ii<j≤t](SLAF [oi](SLAF [ai](ρ))). and ϕR = ϕR ∪ {¬aG | aG ∈ L \ ϕR}.
+
+                                                 2   Some intuitive properties hold for this representation. 4 Efﬁcient Model Update
+ ϕR is a complete theory for every R (a sentence or its Learning world models is easier when SLAF distributes
+negation is always implied from ϕR). Also, ϕR |=   over logical connectives. The computation becomes
+   F     ¬F
+¬aG  ⇔  aG , for every F ∈ F, G ∈ G.               tractable, with the bottleneck being the time to compute
+   Thus, for every transition belief state ρ we can de- SLAF for each part separately. In this section we ex-
+ﬁne a theory in L(L ∪ P) that corresponds to it: ϕρ = amine when such distribution is possible, and present a
+  hs,Ri∈ρ(s ∧ ϕR). Similarly, for every theory ϕ in linear-time algorithm that gives an exact solution in those
+ WL(L ∪ P) we deﬁne a transition belief state ρϕ = cases (and a weaker transition belief formula otherwise).
+ {hs, Ri | s ∈ S, s∧ϕR |= ϕ}, i.e., all the state-transition Distribution properties that always hold for SLAF fol-
+ pairs that satisfy ϕ. We say that theory ϕ is a transition low from set theoretical considerations and Theorem 3.1:
+ belief formula, if ϕρϕ ≡ ϕ (note: ρϕρ = ρ always holds). Corollary 4.1 For ϕ, ψ transition belief formulae, a ac-
+   For a deterministic (possibly conditional) action, a, tion,
+ deﬁne the effect model of a for time t to be
+                                                    SLAF   a ϕ   ψ    SLAF  a  ϕ   SLAF   a ψ
+                            l                             [ ]( ∨  ) ≡       [ ]( ) ∨     [ ]( )
+  Teff(a, t) = l∈F,G∈G((at ∧ aG ∧ Gt) ⇒ lt+1) ∧     |= SLAF  [a](ϕ ∧ ψ) ⇒ SLAF [a](ϕ) ∧ SLAF [a](ψ)
+                                   l
+            Vl∈F (lt+1 ∧ at ⇒ ( G∈G(aG ∧ Gt)))       Stronger distribution properties hold for SLAF when-
+           V                W                (1)   ever they hold for Logical Filtering.
+ where at asserts that action a occurred at time t, and we
+                                                   Theorem 4.2 Let ρ1, ρ2 be transition belief states.
+ use the convention that ϕt is the result of adding sub-
+                                                   SLAF  [a](ρ1 ∩ ρ2) = SLAF [a](ρ1 ∩ ρ2) iff for every R
+ script t to every ﬂuent symbol of ϕ. The ﬁrst part of (1)   R    R             R              R
+ says that if a executes at time t, and it causes l when G F ilter[a](ρ1 ∩ ρ2 ) = F ilter[a](ρ1 ) ∩ F ilter[a](ρ2 ).
+ holds, and G holds at time t, then l holds at time t + 1. We conclude the following corollary from Theorems
+ The second part says that if l holds after a’s execution, 3.1, 4.2 and theorems in [Amir and Russell, 2003].
+                   l
+ then it must be that aG holds, with G corresponding to Corollary 4.3 For ϕ, ψ transition belief formulae, a ac-
+ the current state. These two parts correspond to effect tion, SLAF [a](ϕ∧ψ) ≡ SLAF [a](ϕ)∧SLAF [a](ψ) if
+ axioms and explanation closure axioms used in Situation for every relation R in ρϕ,ρψ one of the following holds:
+ Calculus.                                           1. a in R maps states 1:1
+   Now, we are ready to describe our zeroth-level algo- 2. a has no conditional effects (and we know if it fails),
+ rithm (SLAF0) for SLAF of a transition belief formula. and ϕ ∧ ψ includes all its prime implicates.
+ Denote by CnV (ϕ) the set of consequences of ϕ that are 3. The state is known for R: for at most one s, hs, Ri ∈
+ in vocabulary V , and let Lt+1 = Pt+1 ∪ L the vocab-  ρϕ ∪ ρψ.
+ ulary that includes only ﬂuents of time t + 1 and effect Figure 2 presents Procedure Factored-SLAF, which
+ propositions from L. At time t we apply progression for computes SLAF exactly when the conditions of Corol-
+ the given action a and current transition belief formula, lary 4.3 hold. Consequently, Factored-SLAF returns an
+ ϕt, and then apply ﬁltering with the current observations: exact solution whenever our actions are known to be 1:1.
+                       Lt+1
+  1. SLAF0[a](ϕt) = Cn     (ϕt ∧ at ∧ Teff(a, t))  If our actions have no conditional effects and their suc-
+  2. SLAF0[o](ϕt) = ϕt ∧ ot
+                      V                            cess/failure is observed, then a modiﬁed Factored-SLAF
+   We can implement Cn (ϕ) using consequence ﬁnd-  can solve this problem exactly too (see Section 5).
+ ing algorithms, such as resolution and some of its vari- If we pre-compute (and cache) the 2n possible re-
+ ants (e.g., [Simon and del Val, 2001]). The following sponses of Literal-SLAF, then every time step t in this
+ theorem shows that this formula-SLAF algorithm is cor- procedure requires linear time in the representation size
+ rect and exact.
+                                                   of ϕt, our transition belief formula. This is a signiﬁcant
+ Theorem 3.1 For ϕ transition belief formula, a action, improvement over the (super exponential) time taken by
+  SLAF  [a]({hs, Ri ∈ S | hs, Ri satisﬁes ϕ}) =    a straightforward algorithm, and over the (potentially ex-
+         {hs, Ri ∈ S | hs, Ri satisﬁes SLAF0[a](ϕ)} ponential) time taken by general-purpose consequence
+                                                   ﬁnding used in our zeroth-level SLAF procedure above.
+   Our zeroth-level algorithm may enable more compact
+                                                                                                 ′
+ representation, but it does not guarantee it, nor does it Theorem 4.4 Step-SLAF(a, o, ϕ) returns a formula ϕ
+                                                                             ′
+ guarantee tractable computation. In fact, no algorithm such that SLAF [a, o](ϕ) |= ϕ . If every run of Literal-
+ can maintain compact representation or tractable com- SLAF takes time c, then Step-SLAF takes time O(|ϕ|c).
+ putation in general. SLAF is NP-hard because Logi- Finally, if we assume one of the assumptions of Corollary
+                                                            ′
+ cal Filtering is NP-hard [Eiter and Gottlob, 1992] even 4.3, then ϕ ≡ SLAF [a, o](ϕ).
+ for deterministic actions. Also, any representation of We can give a closed-form solution for the SLAF of
+ transition belief states that uses poly(|P|) propositions a belief-state formula (a transition belief formulae that
+                                                                           F
+ grows exponentially (in the number of time steps and has no effect propositions aG). This makes procedure
+ |P|) for some starting transition belief states and action Literal-SLAF tractable, and also allows us to examine
+ sequences.                                        the structure of belief state formulae in more detail.
+
+                                                 3 PROCEDURE Factored-SLAF(hai, oii0<i≤t,ϕ)          resulting clauses for a chosen set of G1, ..., Gm and a
+ ∀i, ai action, oi observation, ϕ transition belief formula. chosen set of literals l1, ..., lm. The reason for including
+   1. For i from 1 to t do,                        (a¬li ∧ ¬ali ) is that we can always choose a clause with
+                                                     Gi     Gi
+      (a) Set ϕ ← Step-SLAF(oi,ai,ϕ).                                                         l
+      (b) Eliminate subsumed clauses in ϕ.         Gi, li of a speciﬁc type (either one that includes ¬aG or
+                                                                   ¬l
+   2. Return ϕ.                                    one that produces aG .
+                                                     Finally, we get the formula in our theorem because
+ PROCEDURE Step-SLAF(o,a,ϕ)                         F       ¬F
+                                                   aG  ≡ ¬aG   (G characterizes exactly one state in S),
+ o an observation formula in L(P), a an action, ϕ a transition and the fact that there is one set of G , ..., G that is
+ belief formula.                                                                    1     m
+   1. If ϕ is a literal, then return o∧Literal-SLAF(a,ϕ). stronger than all the rest (it entails all the rest) because
+   2. If ϕ = ϕ1 ∧ ϕ2, return Step-SLAF(o,a,ϕ1)∧Step- G1, ..., Gm are complete terms. This set is the complete
+     SLAF(o,a,ϕ2).                                 ﬂuent assignments Gi that satisfy ϕ.
+   3. If ϕ = ϕ1 ∨ ϕ2, return Step-SLAF(o,a,ϕ1)∨Step-
+                                                     A consequence of Theorem 4.5 is that we can imple-
+     SLAF(o,a,ϕ2).
+                                                   ment Procedure Literal-SLAF using the equivalence
+ PROCEDURE Literal-SLAF(a,ϕ)
+                                                                   Theorem 4.5         L(l) ⊆ P
+ a an action, ϕ a proposition in Lt or its negation. SLAF [a](l) ≡
+              Lt+1
+   1. Return Cn  (ϕt ∧ at ∧ Teff(a, t)).                          l ∧ SLAF [a](TRUE)  otherwise 
+                                                   Notice that the computation in Theorem 4.5 for ϕ = l a
+      Figure 2: SLAF using distribution over ∧, ∨  literal is simple because G1, ..., Gm are all the complete
+                                                   terms in L(P) that include l.
+ Theorem 4.5 For belief-state formula ϕ ∈ L(P), time t,
+                        l    ¬l                    5   Compact Model Representation
+action a, Ca = G∈G,l∈F (aG ∨ aG ), and G1, ..., Gm ∈
+                                                                                       |P|
+G all the terms inVG such that Gi |= ϕ,            In Theorem 4.5, m could be as high as 2 , the num-
+                                                   ber of complete terms in G. Consequently, clauses may
+                          m
+                              t+1   ¬li            have exponential length (in n = |P|) and there may be a
+    SLAF  [a](ϕt) ≡         (l   ∨ a  ) ∧ Ca
+                              i     Gi             super-exponential number of clauses in this result.
+                 l1,...,l^m∈F i_=1                   In this section we restrict our attention to STRIPS ac-
+   PROOF SKETCH      We follow the characterization tions [Fikes et al., 1972], and provide an overall polyno-
+offered by Theorem 3.1 and Formula (1). We take    mial bound on the growth of our representation, its size
+                                                   after many steps, and the time taken to compute the re-
+ϕt ∧ at ∧ Teff(a, t) and resolve out the literals of time t.
+This resolution is guaranteed to generate a set of conse- sulting model. STRIPS is a class of actions that has been
+                           Lt+1                    at the focus of interest for the area of AI planning and
+quences that is equivalent to Cn (ϕt ∧at ∧Teff(a, t)).
+                                                   execution for many years. It includes deterministic, un-
+   Assuming ϕt ∧ at, Teff(a, t) is logically equivalent to
+                             l                     conditional (but sometimes not executable) actions.
+Teff(a, t)|ϕ = l∈F,G∈G,G|=ϕ((aG ∧ Gt) ⇒  lt+1) ∧
+                               l
+  l∈F,G∈G,G|=ϕV(lt+1 ⇒ (Gt ⇒  aG)). This follows   5.1  Actions of Limited Effect
+fromV two observations. First, notice that ϕt implies that In many domains we can assume that every action a af-
+                                              l
+ for any G ∈ G such that G 6|= ϕ we get Gt ⇒ aG    fects at most k ﬂuents, for some small k > 0. It is
+      l
+ and (aG ∧ Gt) ⇒ lt+1 (the antecedent does not hold, so also common to assume that our actions are STRIPS,
+ the formula is true). Second, notice that, in the second and that they may fail without us knowing, leaving the
+                                      l
+ part of the original Teff(a, t), ( G∈G,G|=ϕ(aG ∧ Gt)) is world unchanged. Those assumptions together allow
+                                         l
+ equivalent (assuming ϕ) to ( W   (Gt ⇒ a  )).     us to progress SLAF with a limited (polynomial factor)
+                          G∈G,G|=ϕ       G         growth in the formula size.
+   Now, resolving out the literalsV of time t from ϕt ∧at ∧
+                                                     We use a language that is similar to the one in Section
+Teff(a, t)|ϕ should consider all the resolutions of clauses                            l
+                        l                          3, but which uses only action propositions aG with G be-
+(Gt is a term) of the form aG ∧ Gt ⇒ lt+1 and all the
+                               l                   ing a ﬂuent term of size k (instead of a ﬂuent term of size
+clauses of the form lt+1 ⇒ (Gt ⇒ aG) with each other. n in G). Semantically, al ≡         al     .
+This yields the equivalent to                                          l1∧...∧lk  lk+1,...,ln l1∧...∧ln
+                                                                                V
+                   m        m                      Theorem 5.1 Let ϕ ∈ L(P) be a belief-state formula, t
+                     t+1       ¬li     li          time, and a a STRIPS action with ≤ k ﬂuents affected or
+                 [   l   ∨   (a   ∧ ¬a   )]                                  k
+                     i         Gi      Gi          in the precondition term. Let G be the set of all terms of
+          ^       i_=1     i_=1
+     G1, ..., Gm ∈ G                               k ﬂuents in L(P) that are consistent with ϕ. Then,
+      ϕ |= i≤m Gi
+      l1, ...,W lm ∈ F                                                           k
+                                                                                    t+1   ¬li
+                                                   SLAF  [a](ϕt) ≡                (l   ∨ a  ) ∧ Ca
+because to eliminate all the literals of time t we have to                          i     Gi
+                                                                            k
+                                                                 G1, ..., G^∈ G i_=1
+resolve together sets of clauses with matching Gi’s such                k
+                                                                 G1 ∧ ... ∧ Gk |= ϕ
+ that ϕ |= i≤n Gi. The formula above encodes all the             l1, ..., lk ∈ F
+         W
+                                                 4  The proof (omitted) uses two insights. First, if a has PROCEDURE AE-STRIPS-SLAF(hai, oii0<i≤T ,ϕ)
+only one case in which change occurs, then every clause ai actions, oi observations, ϕ = f∈P ϕf ﬂuent-factored
+in Theorem 4.5 is subsumed by a clause that is entailed with ϕf = (¬f ∨ explf ) ∧ (f ∨ explV¬f ) ∧ Af .
+                              li
+by SLAF [a](ϕt), has at most one a per literal li (i.e., 1. For every f ∈ P do: For i from 1 to T do,
+                              Gi                                           f    f◦
+li 6= lj for i 6= j) and Gi is a ﬂuent term (has no disjunc- (a) Set ϕf ← (¬f ∨ (a ∨ (a ∧ explf ))) ∧ (f ∨
+                   l                                       (a¬f ∨ (af◦ ∧ expl ))) ∧ A .
+tions). Second, every aG with G term is equivalent to a                  ¬f      f
+formula on al with G terms of length k, if a affects    (b) If oi |= f (we observed f), then set ϕf ← (¬f ∨
+           Gi       i
+only k ﬂuents.                                             T RUE) ∧ (f ∨ F ALSE) ∧ Af ∧ explf .
+  Thus, we can encode all of the clauses in the con-    (c) If oi |= ¬f (we observed ¬f), then set ϕf ←
+                                                             f  F ALSE     f  T RUE   A    expl .
+junction using a subset of the (extended) action effect    (¬  ∨       ) ∧ ( ∨      ) ∧ f ∧   ¬f
+            l                                        2. Eliminate subsumed clauses in ϕ = f∈P ϕf .
+propositions, aG, with G being a term of size k. There
+                                                     3. Return ϕT = ϕ.
+are O(nk) such terms, and O(nk+1) such propositions.                              V
+Every clause is of length 2k, with the identity of the
+clause determined by the ﬁrst half (the set of action ef- Figure 3: SLAF with always-executable STRIPS.
+fect propositions). Consequently, SLAF [a](ϕt) takes
+   k2+k  2                         k2+k
+O(n    ·k ) space to represent using O(n ) clauses Then, Procedure AE-STRIPS-SLAF(hai, oii0<i≤t,ϕ) re-
+of length ≤ 2k.                                          T
+                                                  turns ϕ  ≡  SLAF  [hai, oii0<i≤t](ϕ0) in time O(T ·
+                                                            T
+5.2  Always-Executable Actions                    |P|), and |ϕ | ≤ O(T · |P|).
+Many times we can assume that our actions are always The reason for the space bound on the end formula
+executable. For example, our sequence of actions does |ϕT | is that at every time step we increase the size of the
+not include action failures when this sequence is chosen formula by adding to it at most 4 new elements per ﬂuent.
+by a knowledgeable agent (e.g., a human) that has better We can further improve the implementation to take
+observations than we do.                          time O(T · |o|), for |o| the largest number of ﬂuents ob-
+  We use a language that is similar to the one in Sec- served at once. Also, the bound on the space taken by ϕT
+tion 3, but which uses only action propositions al (l can be improved in two ways. First, O(|P| · 2|A| log |A|),
+always holds after executing a) and al◦ (l is not af- for A our set of actions, is a bound on the CNF repre-
+fected by a). Semantically, al ≡   al     , and   sentation of ϕT because every part ϕT of it is similar
+                             l1,...,ln l1∧...∧ln                                  f
+                                                            f     f◦     f    f◦
+ali◦ ≡                ali  V   .                  to (f ⇒  (a ∨ (a   ∧ (a ∨ (a   ∧ ...))))). Thus, if
+       l1,...,li−1,li+1,...,ln l∧l1∧...∧ln                  1     1      2    2
+  We assumeV that transition-belief formula ϕ is ﬂuent- |A| is small, then this bound is manageable. Second, if
+factored, i.e., it is the conjunction of ϕf such that each every ﬂuent f is observed at least once every k actions
+ϕf concerns only one ﬂuent, f, and actions’ effects on it. (or an action which affects f occurs, and we know its
+                                                  effect), then the CNF representation of ϕ takes space
+Also, for every f, ϕf ≡ (¬f ∨explf )∧(f ∨expl¬f )∧Af ,                               T
+                                                  O(|P| · |A|k). Again, if k is small, this bound is useful.
+with explf , expl¬f , Af formulae over action propositions
+ f  ¬f       f◦
+a , a , and a  (possibly multiple different actions). 5.3 Action Preconditions
+We call this format ﬂuent-factored. The intuition here
+                                                  Unfortunately, a simple procedure such as AE-STRIPS-
+is that explf and expl¬f are all the possible explanations
+for f being true and false, respectively. Also, Af holds SLAF (Figure 3) does not provide an exact solution in
+knowledge about actions’ effects on f, knowledge that general. The reason is that action failure makes ﬂu-
+does not depend on f’s current value. For example, if we ents co-dependent (each of them could have caused this
+know nothing about actions that affect f (e.g., when we failure). For instance, consider Figure 1, and assume
+start our exploration), then ϕf = (¬f ∨ T RUE) ∧ (f ∨ that we add the ﬂuent OK which indicates that the
+T RUE) ∧ T RUE.                                   last action succeeds. If we know only ¬on (the light
+  With this representation, SLAF [a](ϕf ) is      is off), then SLAF[sw-on](¬on) ∧ ¬OK (i.e., sw-on
+                                                  failed, e.g., because we are in the West room) implies
+      f    f◦              ¬f   f◦                         ¬OK           ¬sw          ¬E
+(¬f∨(a ∨(a  ∧explf )))∧(f∨(a ∨(a  ∧expl¬f )))∧Af  sw ∨ E ∨ a¬E∧¬sw∧¬lit ∨ a¬E∧sw∧¬lit ∨ aE∧¬sw∧¬lit ∨
+                                                  a¬OK      , by Theorem 4.5.
+A similar formula holds for observations.          E∧sw∧¬lit
+                                                    Instead, we compute the effect for every literal using
+  This contributes to a much simpler algorithm, AE-
+                                                  Theorem 5.1, (assuming exactly k ﬂuents are changed by
+STRIPS-SLAF, that we present in Figure 3. It computes
+                                                  action a) and then approximate by dropping all clauses
+SLAF of a ﬂuent-factored transition belief state in this
+                                                  with more than one ﬂuent (other than OK). Thus, we can
+form with a sequence of actions and observations.
+                                                  augment step 1(a) in AE-STRIPS-SLAF with a condition
+Theorem 5.2 Let ϕ be a ﬂuent-factored transition belief that a succeeded (oi |= OK), and add that if a fails, then
+formula, and assume a1, ..., aT are always-executable we use the following formula instead: Set ϕf ← (¬f ∨
+STRIPS actions, and o1, ..., oT are observation terms. (explf ∧expl¬OK,f ))∧(f ∨(expl¬f ∧expl¬OK,¬f ))∧Af ,
+
+                                                5

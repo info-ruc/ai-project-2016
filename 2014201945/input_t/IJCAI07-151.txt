@@ -1,0 +1,358 @@
+     Protein Quaternary Fold Recognition Using Conditional Graphical Models
+
+   Yan Liu      Jaime Carbonell        Vanathi Gopalakrishnan                  Peter Weigele
+    School of Computer Science      Dept of Biomedical Informatics          Biology Department
+     Carnegie Mellon University         University of Pittsburgh   Massachusetts Institute of Technology
+        Pittsburgh, PA 15213              Pittsburgh, PA 15260            Cambridge, MA 02139
+     {yanliu, jgc}@cs.cmu.edu            vanathi@cbmi.pitt.edu               pweigele@mit.edu
+
+                    Abstract                          the side chains of sequence-distant residues to reach a struc-
+                                                      turally stable domain. These folds commonly exist in many
+    Protein fold recognition is a crucial step in infer- proteins and contribute signiﬁcantly to evolutionary stability.
+    ring biological structure and function. This paper Some examples include enzymes, hemoglobin, ion channels
+    focuses on machine learning methods for predict-  as well as viral adhesive and viral capsids.
+    ing quaternary structural folds, which consist of   To date, there has been signiﬁcant progress in protein ter-
+    multiple protein chains that form chemical bonds  tiary fold (single chain topology) recognition, ranging from
+    among side chains to reach a structurally stable  sequence similarity matching [Altschul et al., 1997; Durbin
+    domain. The complexity associated with model-     et al., 1998], to threading algorithms based on physical forces
+    ing the quaternary fold poses major theoretical and [Jones et al., 1992] and to machine learning methods [Cheng
+    computational challenges to current machine learn- and Baldi, 2006; Ding and Dubchak, 2001].However,there
+    ing methods. We propose methods to address these  are three major challenges in protein sequence-to-structure
+    challenges and show how (1) domain knowledge      mapping that hinder previous work from being applied to
+    is encoded and utilized to characterize structural the quaternary fold recognition: (1) many proteins adopt the
+    properties using segmentation conditional graph-  same structural fold without apparent sequence similarities.
+    ical models; and (2) model complexity is han-     This property violates the basic assumption of many machine
+    dled through efﬁcient inference algorithms. Our   learning algorithms that similar observations tend to share
+    model follows a discriminative approach so that   the same labels; (2) amino acids distant in sequence-order
+    any informative features, such as those representa- (the distance is not known a priori) or on different chains
+    tive of overlapping or long-range interactions, can may form chemical bonds in the three-dimensional structures.
+    be used conveniently. The model is applied to pre- Most of these bonds are essential in the stability of the struc-
+    dict two important quaternary folds, the triple β- tures and have to be considered for accurate prediction; (3)
+    spirals and double-barrel trimers. Cross-family val- furthermore, previous methods for predicting folds with sin-
+    idation shows that our method outperforms other   gle chains are not directly applicable because the complex-
+    state-of-the art algorithms.                      ity is greatly increased both biologically and computationally,
+                                                      when moving to quaternary multi-chain structures.
+1  Introduction                                         From a machine learning perspective, protein fold recog-
+                                                      nition falls in the general problem of predicting structured
+Proteins, as chains of amino acids, tend to adopt unique three- outputs, which learns a mapping between input variables
+dimensional structures in their native environments. These and structured, interdependent output variables. Conditional
+structures play key roles in determining the activities and graphical models, such as conditional random ﬁelds (CRF)
+functions of the proteins. An important issue in computation- [Lafferty et al., 2001], max-margin Markov networks [Taskar
+ally inferring the three-dimensional structures from amino- et al., 2003], and semi-Markov CRF [Sarawagi and Cohen,
+acid sequences is protein fold recognition and alignment. 2004], have demonstrated successes in multiple applications.
+Given a target protein fold 1 , the task seeks to predict whether To address the challenges in protein fold recognition, we de-
+a test protein sequence adopts the fold and if so, provides its velop a new segmentation conditional graphical model. As
+sequence-to-topology alignment against the fold.      an extension of the CRF model, it deﬁnes the hidden nodes
+  There are different kinds of protein folds based on their as labels assigned to segments (subsequences corresponding
+structural properties. In this paper, we focus on the most com- to one secondary structure element) rather than to individ-
+plex ones, namely quaternary structural folds, which consist ual amino acid, then connects two nodes with edges to hy-
+of multiple protein chains that form chemical bonds among pothesize chemical bonds. The conditional probability of the
+                                                      hidden variables (i.e. the segmentation of each structure ele-
+  1Protein folds are typical spatial arrangements of well-deﬁned ment) given the observed sequence is deﬁned as an exponen-
+secondary structures which appear repeatedly in different proteins tial form of the features. In addition, efﬁcient approximation
+
+                                                IJCAI-07
+                                                   937algorithms are examined to ﬁnd optimal or near-optimal so- The example above motivates the task of accurate protein
+lutions. Compared with previous work in CRF, our model is fold recognition and alignment prediction. The problem set-
+novel in capturing the long-range dependencies of different ting is as follows: given a target protein fold, as well as
+subunits within one chain and between chains.         asetofN   training sequences x(1), x(2),...,x(N) including
+  The major advantages of our approach for protein fold both positive and negative examples with structural annota-
+recognition include: (1) the ability to encode the output struc- tion, i.e. 3-D coordinates of each atom in the proteins, predict
+tures (both inter-chain and intra-chain chemical bonding) us- whether a new test sequence xtest (without structural annota-
+ing the graph; (2) dependencies between segments can be tion) adopts the fold or not, and if yes, identify its speciﬁc
+non-Markovian so that the chemical-bonding between distant location in the sequence.
+amino acids can be captured; (3) it permits the convenient
+use of any features that measure the property of segments the 3 Representation of Domain Knowledge
+biologists have identiﬁed.
+  The remainder of the paper is organized as follows. Sec- It can be seen that the fold recognition task is a typical seg-
+tion 2 introduces the basic concepts of protein structures and mentation and labeling problem except that we need to ad-
+fold recognition; section 3 describes the details of our model, dress the following questions to represent the domain knowl-
+followed by a discussion of efﬁcient inference algorithms for edge: how to (1) represent the states and (2) capture the struc-
+training and testing. In section 5, we give two examples of tural information within the observed sequences?
+the quaternary folds and show our successful experimental re- The chemical bonding physically exists at the atomic level
+sults. The paper concludes with suggestions for future work. on the side-chains of amino acids, however, the structural
+                                                      topology and interaction maps are conserved only at the sec-
+                                                      ondary structure level due to the many possible insertions or
+2  Protein Structure Basics and Fold                  deletions in the protein sequence. Therefore it is natural for
+   Recognition                                        the state labels to be assigned to segments (subsequences cor-
+To study protein structures, biologists have deﬁned four con- responding to one secondary structure element) rather than
+ceptual hierarchies based on current understanding: the pri- to individual amino acids, and then connect nodes with edges
+mary structure simply refers to the linear chain of amino indicating their dependencies in three-dimensional structures.
+acids; the secondary structure can be thought of as the lo- Next, we deﬁne the formal representation of the structure in-
+cal conformation of protein chains, or intuitively as building formation in the protein fold and discuss how to incorporate
+blocks for its global 3D structures. There are three types of domain-knowledge features to help the prediction.
+standard secondary structures in nature, i.e. α-helix, a rod-
+shape peptide chain coiled to form a helix structure, β-sheets, 3.1 Protein Structure Graph (PSG)
+two or more peptide strands aligned in the same direction An undirected graph G =< V, E >, called protein struc-
+(parallel β-sheet) or opposite direction (antiparallel β-sheet) ture graph (PSG), can be deﬁned for the target protein fold,
+and stabilized by hydrogen bonds. These two types of sec- where V = U {I}, U is the set of nodes corresponding
+ondary structures are connected by the remaining irregular to the secondary structure elements within the fold and I is
+regions, referred to as coil.Thetertiary structure is the global the node to represent the elements outside the fold. E is the
+three-dimensional structures of a single protein chain. Some- set of edges between neighboring elements in sequence or-
+times multiple chains are associated with each other and form der (i.e. the polypeptide bonding) or edges indicating long-
+a uniﬁed structure, i.e. the quaternary structures.   range dependencies between elements in three-dimensional
+  Protein folds are identiﬁable spatial arrangements of sec- structures (i.e. chemical bonding, such as hydrogen bonds or
+ondary structures. It is observed that there exist only a lim- disulﬁde bonds). Figure 1 shows an example of the simple β-
+ited number of topologically distinct folds in nature (around α-β motif. Notice that there is a clear distinction between the
+1,000) although we have discovered millions of protein se- edges colored in red and those in black in terms of probabilis-
+quences. As a result, proteins with the same fold often do tic semantics: similar to a chain-structured CRF, the black
+not demonstrate sequence similarities, which might reveal edges indicate state transitions between adjacent nodes; the
+important information about structural or functional conser- red edges are used to model long-range interactions, which
+vation due to common ancestors. An example is the triple β- are unique to the protein structure graph. The PSG for a qua-
+spiral fold, a processive homotrimer which serves as a ﬁbrous ternary fold can be derived similarly: ﬁrst construct a PSG
+connector from the main virus capsid to a C-terminal knob for each component protein or a component monomeric PSG
+that binds to host cell-surface receptor proteins. The fold for homo-multimers, and then add edges between the nodes
+has been identiﬁed to commonly exist in adenovirus (a DNA from different chains if there are chemical bonds, forming a
+virus which infects both humans and animals), reovirus (an more complex but similarly-structured quaternary PSG.
+RNA virus which infects human) and bacteriophage PRD1   Given the deﬁnition of the protein structure graph, our next
+(a DNA virus infecting bacteria), however, the similarity be- question is how to automatically build the graph for a partic-
+tween these protein sequences are very low (below 25% sim- ular fold. The answer depends on the type of protein folds
+ilarity). Identifying more examples of the triple β-spiral fold of concern and how much knowledge we can bring to bear.
+will not only help the biologists to establish that it is a com- For folds that biologists have studied over the years and ac-
+mon fold in nature, but also reveal important evolutionary re- cumulated some basic knowledge of their properties (for ex-
+lationships between the viral proteins.               ample β-α-β motif or β-helix), the topology of this graph
+
+                                                IJCAI-07
+                                                   938  (A)                                         (B)     structure graph, where Mi is the number of segments in the
+                                                       th
+                                                                    i,j    i,j i,j i,j  i,j i,j     i,j
+                  W   W    W    W   W    W    W       i  chain, and w  =(s   ,p  ,q  ), s , p  and q  are
+                   1   2    3    4   5    6    7
+                                                      the state, starting position and ending position of the jth seg-
+                                                      ment. Following the same deﬁnition as above, we decompose
+                                                      the potential function over the cliques as a product of unary
+                X   X    X   X    X   X   …... X
+                 1   2    3   4    5   6        n     and pairwise potentials:
+                                                                                          K1
+                                                                               1
+Figure 1: Graph structure of β-α-β motif (A) 3-D struc- P (y1,...,yC |x1,...,xC)= exp{        θ1,kfk(xi, wi,j )
+                                                                               Z
+ture (B) Protein structure graph: node: Green=beta-strand,                          wi,j ∈VG k=1
+yellow=alpha-helix, cyan=coil, white=non-β-α-β (I-node).                         K2
+                                                                   +                 θ2,kgk(xa, xb, wa,u, wb,v)},
+can be constructed easily by communicating with the experts.         wa,u,wb,v ∈EG k=1
+If it is a fold whose structure is totally unknown to biolo-
+                                                      where fk and gk are node-features and pair features respec-
+gists, we can follow a general procedure with the following
+                                                      tively, θ1,k and θ2,k are the corresponding weights, and Z is
+steps: ﬁrst, construct a multiple structure alignment of all the
+                                                      the normalizer over possible segmentation conﬁgurations of
+positive proteins (among themselves); second, segment the
+                                                      all the sequences jointly (see Figure 2 for its graphical model
+alignment into disjoint parts based on the secondary struc-
+                                                      representation). Notice that joint inference is required since
+tures of the majority proteins; third, draw a graph with nodes
+                                                      the quaternary fold is stabilized by the chemical bonding be-
+denoting the resulting secondary structure elements and then
+                                                      tween all component proteins and that is the key computa-
+add edges between neighboring nodes. Finally, add the long-
+                                                      tional challenge.
+range interaction edge between two nodes if the average dis-
+tance between all the involved residues is below the threshold 3.3 Feature Extraction
+required for side-chain hydrogen-bonding. We skip the de- The SCGM model provides an expressive framework to han-
+tails of the latter case as it is a separate line of research and dle the structural properties for protein fold recognition.
+assume that we are given a reasonably good graph over which
+                                                      However, the choice of feature functions fk and gk play
+we perform our learning, since this is the focus of the paper. a key role in accurate predictions. Following the feature
+                                                      deﬁnition in the CRF model, we factor the features as fol-
+3.2  Segmentation Conditional Graphical Models                                                        −
+     (SCGM)                                           lows: fk(xi, wi,j )=fk(xi,pi,j ,qi,j ) if si,j = s and qi,j
+                                                      pi,j ∈ length range(s), 0 otherwise. gk(xa, xb, wa,u, wb,v)=
+Given a structure graph G deﬁned on one chain and a protein                                      
+                                                      gk(xa, xb,pa,u,qa,u,pb,v,qb,v) if sa,u = s, sb,v = s , qa,u −
+             1 2     N                                                                                 
+sequence x = x x ...x , we can have a possible segmen- a,v ∈ length range ,and b,v − b,v ∈ length range ,
+                            y   {   w}                p                (s)    q     p                (s )
+tation label of the sequence, i.e. = M, ,whereM  is   0otherwise.
+                        w     {       }
+the number of segments and j = sj,pj,qj ,inwhichsj,     Next we discuss how to deﬁne the segment-based features
+pj,anddj are the state, starting position and ending position                  
+      th                                              fk and gk. The node feature fk covers the properties of an
+of the j segment. Following the idea of CRF, the condi- individual segment, for example, “whether a speciﬁc motif
+tional probability of a segmentation y given the observation appears in the subsequence”, “averaged hydrophobicity”, or
+x is deﬁned as follows:                               “the length of the segment”. The pairwise feature g cap-
+                                                                                                 k
+          y|     1                     y              tures the dependencies between segments whose correspond-
+       P ( x)=          exp(   λkfk(xc, c)),          ing subsequences form chemical bonds in the 3-D structures.
+                Z0    G
+                   c∈C       k                        For example, previous work in structural biology suggests
+where Z0 is the normalization constant.               different propensities to form the bonds between the amino
+  More generally, given a quaternary structure graph G with acids pairs. Therefore the pairwise features could be the
+C chains, i.e. {xi|i =1...C}, we have a segmentation ini- propensity scores of the two subsequences to form hydrogen
+tiation of each chain yi =(Mi, wi) deﬁned by the protein bonds. Notice that the feature deﬁnitions can be quite gen-
+                                                      eral, not limited to the examples above. The discriminative
+                                                      setting of the model enables us to use any kinds of informa-
+             W     W     W     W  …...   W
+              2,1   2,2   2,3   2,4       2,Mj        tive features without additional costs.
+
+
+         W     W     W      W  …...   W
+          1,1   1,2    1,3   1,4      1,Mi            4   Efﬁcient Inference
+                                                      To ﬁnd the best conformation of test sequences, we need to
+
+        X   X    X   X   X   X         X              consider the labels of all the protein chains jointly since every
+         1,1 1,2 1,3  1,4 1,5 1,6 …...  1,ni
+
+        X   X    X   X   X    X   …...  X             chain contributes to the stability of the structures. Given the
+         2,1 2,2 2,3  2,4 2,5 2,6       2,nj          enormous search spaces in quaternary folds, we need to ﬁnd
+                                                      efﬁcient inference and learning algorithms.
+Figure 2: Graphical model representation of SCGM model
+with multiple chains. Notice that there are long-range inter- 4.1 Training Phase
+actions (represented by red edges) within one chain and be- The feature weights {θ1,k} and {θ2,k} are the model parame-
+tween chains                                          ters. In the training phase, we estimate their values by maxi-
+
+                                                IJCAI-07
+                                                   939 mizing the regularized conditional probability of the training (1) State Transition: given a segmentation yi =(Mi, wi),
+ data, i.e                                             select a segment j uniformly from [1,M], and a state value s
+                                                                           S     y∗   y            ∗     
+ {ˆ  ˆ }                                               uniformly from state set .Set i = i except that si,j = s .
+  θ1, θ2 =                                                                                   y        w
+                                            2     2   (2) Position Switching: given a segmentation i =(Mi, i),
+          N        (n)    (n)| (n)   (n)  θ1  θ2
+arg max   n=1 log P(y1 , ..., yC x1 , .., xC )+ 2σ2 + 2σ2 . select the segment j uniformly from [1,M] and a position as-
+                                            1      2                                         ∗
+                                                       signment d ∼ U[di,j−1 +1,di,j+1 − 1].Setyi = yi except
+                                                            ∗     
+ There is no closed form solution to the equation above, there- that di,j = d .
+ fore we use the iterative searching algorithm L-BFGS (a (3) Segment Split: given a segmentation yi =(Mi, wi),
+ limited-memory quasi-Newton code for large-scale uncon-        ∗       ∗   ∗        ∗
+                                                       propose yi =(Mi   , wi ) with Mi = Mi  +1segments
+ strained optimization). Taking the ﬁrst derivative of the log by splitting the jth segment, where j is randomly sampled
+ likelihood L(θ1,θ2),wehave                                              ∗
+                                                       from U[1,M].Setwi,k  =  wi,k for k =1,...,j − 1,and
+                                                         ∗                                        ∗
+  ∂L                                                   wi,k+1 = wi,k for k = j +1,...,Mi.Sampledj+1   from
+      =                                            (1)                                 1
+ ∂θ1,k                                                 U[dj +1,dj+1 − 1]. With probability 2 ,wesetsj∗ = sj and
+                                                                new      new
+N                                                    sj+1∗ = s    with s  sampled from S and with probabil-
+              (n)  (n) −             (n)  (n)    θ1,k     1
+         (fk(xi  , wi,j ) E ( (n))[fk(xi , Wi,j ]) + 2 , ity 2 do the reverse.
+                          P Y                    σ1                                         y         w
+n=1  (n)∈V                                             (4) Segment Merge: given a segmentation i =(Mi,  i),
+    wi,j  G                                                                            th              th
+                                                       propose Mi = Mi−1  by merging the j segment and j+1
+                                                       segment, where j is sampled uniformly from [1,M − 1].Set
+            N                                          ∗                                 ∗
+  ∂L                                                   wi,k = wi,k for k =1,...,j − 1,andwi,k−1 =  wi,k for
+        =               (gk(xa, xb, wa,u, wb,v) − (2)
+                                                       k = j +1,...,Mi..
+ ∂θ2,k      n=1
+               wa,u,wb,v ∈EG                           In general, many protein folds have regular arrangements
+                                                θ2,k   of the secondary structure elements so that the state tran-
+                E  ( (n))[gk(xa, xb, Wa,u, Wb,v)]) + 2 .
+                  P Y                           σ2     sitions are deterministic or almost deterministic. Therefore
+                                                       the operator for state transition can be removed and seg-
+ Since PSGs may be complex graphs with loops and multi- ment split or merge can be greatly simpliﬁed. There might
+ ple chains (with an average degree of 3-4 for each node), we be cases where the inter-chain or intra-chain interactions are
+ explored efﬁcient approximation methods to estimate the fea- also stochastic. Then two additional operators are necessary,
+ ture expectation. There are three major approximation ap- including segment join (adding an interaction edge in the pro-
+ proaches in graphical models: sampling, variational methods tein structure graph) and segment separate (deleting an in-
+ and loopy belief propagation. Sampling techniques have been teraction edge in the graph). The details are similar to state
+ widely used in the statistics community, however, there is transition, and we omit the discussion due to limited space.
+ a problem if we use the naive Gibbs sampling. Notice that
+ in each sampling iteration the dimension of hidden variables 4.2 Testing Phase
+ yi varies in cases where the number of segments of Mi is
+                                                                                           {x      x }
+ also a variable (e.g. unknown number of structural repeats Given a test example with multiple chains 1,..., C ,we
+ in the folds). Reversible jump Markov chain Monte Carlo need to search the segmentation that yields the highest con-
+ (reversible jump MCMC) algorithms have been proposed to ditional likelihood. Similar to the training phase, it is an
+ solve the problem and demonstrated success in various ap- optimization problem involving search in multi-dimensional
+ plications, such as mixture models [Green, 1995] and hidden space. Since it is computationally prohibitive to search over
+ Markov model for DNA sequence segmentation [Boys and  all possible solutions using traditional optimization meth-
+ Henderson, 2001].                                     ods, simulated annealing with reversible jump MCMC is
+                                                       used. It has been shown theoretically and empirically to
+ Reversible Jump Markov chain Monte Carlo              converge onto the global optimum [Andrieu et al., 2000].
+ Given a segmentation yi =(Mi, wi), our goal is propose ALGORITHM-1 shows the detailed description of reversible
+             ∗
+ a new move yi . To satisfy the detailed balance deﬁned by jump MCMC simulated annealing. is a parameter to con-
+                                                  ∗                                  β
+ the MCMC algorithm, auxiliary random variables v and v trol the temperature reduction rate, which is set to 0.5 in our
+                                            ∗
+ have to be introduced. The deﬁnitions for v and v should experiments for rapid convergence.
+ guarantee the dimension-matching requirement,i.e. D(yi)+
+          ∗      
+ D(v)=D(yi )+D(v  ) and there is a one-to-one mapping from
+           ∗                                          5   Experiments
+ (yi,v) to (yi ,v ), namely a function Ψ so that Ψ(yi,v)=
+   ∗        −1  ∗  
+ (yi ,v ) and Ψ (yi ,v )=(yi,v). The acceptance rate for To demonstrate the effectiveness of different recognition
+                              ∗
+ the proposed transition from yi to yi is              models, we choose two protein folds as examples, includ-
+                                                       ing the triple β-spiral [van Raaij et al., 1999], a virus ﬁber,
+     min{1, posterior ratio × proposal ratio × Jacobian}
+                                                     and the double-barrel trimer [Benson et al., 2004],whichisa
+                      ∗                ∗ 
+               P (y1,..,yi ,..,yC |{xi}) P (v )  ∂(yi ,v ) 
+      =min{1,  P (y ,..,y ,..,y |{x }) P (v)  ∂(y ,v) }, building block for the virus capsid hexons. We choose these
+                  1   i  C   i          i              two folds speciﬁcally because they are both involved in im-
+ where the last term is the determinant of the Jacobian matrix. portant biological functions and shared by viruses from dif-
+   To construct a Markov chain on the sequence of segmenta- ferent species, which might reveal important evolution rela-
+ tions, we deﬁne four types of Metropolis operators:   tionships in the viral proteins. Moreover, TBS should ﬁt our
+
+                                                 IJCAI-07
+                                                    940  Algorithm-1: Reversible Jump MCMC Simulated Annealing                    Van Raaij etal.inNature(1999)
+ Input: initial value of y0, Output: optimized assignment of y
+ 1. Set yˆ = y0.
+ 2. For t ← 1 to ∞ do :
+   2.1   T ← βt.IfT =0return  yˆ
+   2.2   Sample a value from ynew using the reversible
+         jump MCMC algorithm as
+         described in Section 4.1. ∇E = P (ynew) − P (yˆ)
+   2.3   if ∇E>0,thensetyˆ  = ynew; otherwise set yˆ =
+         ynew with probability exp(∇E/T)
+ 3. Return yˆ
+
+predictive framework well because of the structure repeats         (l, d) (n,b)      (l, d) (n,b)
+while DBT could be extremely challenging due to the lack  C   B1   T1    B2   T2   B1   T1   B2   T2
+                                                                (i, e)
+of structural regularity. Both folds have complex structures              (j, a) (f-h, c)
+with few positive examples in structurally-resolved proteins. A B1 T1    B2   T2   B1   T1   B2   T2
+Notice that our model may be used for any protein folds,        (i, e)    (j, a) (f-h, c)
+
+however their advantages are most evident in predicting these B B1 T1    B2   T2   B1   T1   B2   T2
+                                                               (i, e)
+complex and challenging protein folds.                                   (j, a) (f-h, c)
+
+                                                          C’  B1   T1    B2   T2   B1   T1   B2   T2
+5.1  Protein Structure Graph of Target Fold                                   (B)
+
+Triple β-spiral fold (TBS) is a processive homotrimer con- Figure 3: (Top-left) Demonstration graph of triple β-spirals:
+sisting of three identical interacting protein chains (see Figure 3-D structures view. Red block: shaft region (target fold),
+3). It provides the structural stability for the adhesion protein black block: knob region. (Top-right) top view and maps of
+to initiate a viral attack upon the target cell wall. Up to now hydrogen bonds within a chain and between chains. (Bottom)
+there are three proteins of this fold with resolved structures. PSG of the Triple β-spirals with 2 structural repeats. Chain
+                                                        
+However, its common existence in viruses of different species C is a mirror of chain C for better visual effects. Dotted line:
+reveals important evolutionary relationships. It also indicates inter-chain interactions; solid line: intra-chain interactions.
+that TBS might be a common fold in nature although very The pairs of characters on the edges indicate the hydrogen
+few examples have been identiﬁed so far.              bonding between the residues denoted by the characters.
+  To provide a better prediction model, we notice the follow-
+ing structural characteristics in TBS: it consists of three iden-
+tical protein chains with a varied number of repeated struc- Double-barrel trimer (DBT) is a protein fold found in the
+tural subunits. Each subunit is composed of: (1) a β-strand coat proteins from several kinds of viruses. It has been sug-
+that runs parallel to the ﬁber axis; (2) a long solvent-exposed gested that the occurrence of DBT is common to all icosa-
+loop of variable lengths; (3) a second β-strand that forms an- hedral dsDNA viruses with large facets, irrespective of its
+tiparallel β-sheets with the ﬁrst one, and slightly skewed to host [Benson et al., 2004]. However, it is not straightforward
+the ﬁber axis; (4) successive structural elements along the to uncover the structural conservation through sequences ho-
+same chain are connected together by tight β-turns [Weigele mology since there are only four positive proteins and the se-
+et al., 2003]. Among these four components, the two β- quence similarity is low.
+strands are quite conserved in sequences and van Raaij et al. The DBT fold consists of two eight-stranded jelly rolls, or
+characterize them by labeling each position using character β-barrels (see Figure 4). The eight component β-strands are
+‘a’ to ‘o’ [van Raaij et al., 1999]. Speciﬁcally, i-o for the labeledasB,C,D,E,F,G,HandIrespectively.Somegeneral
+ﬁrst strand and a-h for the second strand (see Figure 3-(Top- descriptive observations include: (1) the lengths of the eight
+right)). Based on the discussion above, we deﬁne the PSG β-strands vary, ranging from 4 to 16 residues, although the
+for the TBS fold in Figure 3. There are 5 states altogether, layout of the strands is ﬁxed. The loops (insertions) between
+i.e. B1, T1, B2 and T2, which correspond to the four com- the strands are in general short (4 - 10 residues), however,
+ponents of each repeated structural subunits respectively, and there are some exceptions, for example the long insertions
+the null state I, which refers to the non-triple β-spiral region. between the F and G strand (20 - 202 residues); further long
+We ﬁx the length of B1 and B2 as 7 and 8 respectively due loops between D-E strand (9 - 250 residues); and the short β-
+to their sequence conservation; in addition, we set the length turn between E and F. (2) The chemical bonds that stabilize
+ofT1andT2in[0,   15] and [0, 8] individually since longer the trimers are located between the FG loops. Unfortunately,
+insertions will bring instability to the structures (this is an ex- the speciﬁc location and bonding type remain unclear. We de-
+ample of prior biological knowledge constraining the model note the FG loop in the ﬁrst double-barrel trimer as FG1, and
+space). The pairs of interacting residues are marked on the that in the second one as FG2. Based on the discussion above,
+edges, which are used to deﬁne the pairwise features. we deﬁne the PSG of the double-barrel trimer as shown in
+
+                                                IJCAI-07
+                                                   941

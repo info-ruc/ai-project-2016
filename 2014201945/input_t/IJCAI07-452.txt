@@ -1,0 +1,313 @@
+      Improving Activity Discovery with Automatic Neighborhood Estimation
+
+                    David Minnen, Thad Starner, Irfan Essa, and Charles Isbell
+                                    Georgia Institute of Technology
+                                     GVU / College of Computing
+                                {dminn,thad,irfan,isbell}@cc.gatech.edu
+
+
+                    Abstract                          “most of the intellectual work in AI is done not by programs
+                                                      but by their creators, and virtually all the work involved in
+    A fundamental problem for artiﬁcial intelligence  specifying the meanings of representations is done by people,
+    is identifying perceptual primitives from raw sen- not programs.” They adopt Fred Dretske’s theory of mean-
+    sory signals that are useful for higher-level rea- ingful representation, positing that an internal state must both
+    soning. We equate these primitives with initially indicate a condition and have the function of indicating that
+    unknown recurring patterns called motifs. Au-     condition. Applying this theory to robotics, Cohen et al. con-
+    tonomously learning the motifs is difﬁcult because clude that learning meaningful representations requires the
+    their number, location, length, and shape are all un- robot to analyze its sensor readings to learn abstractions that
+    known. Furthermore, nonlinear temporal warping    inform action. Similarly, we seek to design an activity discov-
+    may be required to ensure the similarity of motif ery system that learns endogenously meaningful representa-
+    occurrences. In this paper, we extend a leading   tions via unsupervised analysis of sensor data.
+    motif discovery algorithm by allowing it to oper-   Our contributions are: (1) to extend the applicability of cur-
+    ate on multidimensional sensor data, incorporating rent discovery algorithms, (2) to reduce the domain knowl-
+    automatic parameter estimation, and providing for edge required of users, and (3) to improve performance of
+    motif-speciﬁc similarity adaptation. We evaluate  both discovery accuracy and real-world execution time. Ap-
+    our algorithm on several data sets and show how   plicability is extended by allowing discovery to work directly
+    our approach leads to faster real world discovery with multidimensional data (see Section 4). Our approach
+    and more accurate motifs compared to other lead-  achieves two additional improvements by automatically esti-
+    ing methods.                                      mating the size of the neighborhood for each motif. First, the
+                                                      user is no longer required to specify a parameter that is vi-
+1  Introduction                                       tal to locating correct motif occurrences but which is highly
+This paper addresses the problem of unsupervised discovery dependent on the domain and the distance metric used to mea-
+of perceptual primitives from time-varying sensor data. Such sure subsequence similarity. Second, automatic estimation al-
+data includes sensor readings collected by mobile robots, on- lows a different neighborhood size for each motif, something
+body sensors, surveillance video, econometric data, and in- that is extremely difﬁcult to specify manually but which leads
+dustrial diagnostic readings.                         to higher quality motifs in empirical tests (see Sections 4.1
+  Perceptual primitives can be thought of as recurring pat- and 6). We also present several evaluation methods for motif
+terns or motifs of the data; that is, they are sets of subse- discovery and discuss many of the semantic and application-
+quences with high similarity. The goal of this work is to dis- speciﬁc issues involved in comparing different approaches
+cover the motifs and the corresponding occurrences in real- (see Section 5).
+valued, multivariate data. The problem is complicated be-
+cause little is known about the motifs apriori. The number 2 Related Work
+of motifs, number of occurrences, their length, shape, scale, Activity recognition is a supervised learning problem related
+and the location of each occurrence are all unknown. Further- to activity discovery. Approaches often use complex mod-
+more, motifs may only appear similar after nonlinear warp- els, including hidden Markov models (HMMs), switching lin-
+ing, and the data may be corrupted by noise. Finally, any dis- ear dynamic systems, and stochastic grammars [Starner et al.,
+covery algorithm must be efﬁcient, since even small data sets 1998; Pavlovic et al., 2000; Minnen et al., 2003]. Bao and In-
+may have anywhere from a few thousand to several hundred tille [2004] provide a broad survey, comparing several meth-
+thousand sensor readings. Thus, algorithms with quadratic ods for recognizing activities captured by on-body sensors.
+space or time complexity are unacceptable for real applica- In the bioinformatics community, researchers have devel-
+tions.                                                oped many approaches for discovering recurring patterns that
+  We are inﬂuenced by the philosophical position articulated correspond to binding sites in nucleotide sequences. MEME
+by Cohen et al. [2002]. In that work, the authors argue that uses expectation maximization (EM) to estimate the parame-
+
+                                                IJCAI-07
+                                                  2814ters of a probabilistic model for each motif [Bailey and Elkan,
+1994]. GEMODA uniﬁes several previous discovery meth-
+ods, but the algorithm has an expected run time quadratic in
+the size of the data [Jensen et al., 2006]. Finally, the greedy
+EM method developed by Blekas et al. [2003] uses incremen-
+tal mixture learning to discover motifs represented by proba-
+bilistic models similar to MEME.
+  The data mining and artiﬁcial intelligence communities
+have developed methods that work with real-valued se-
+quences. PERUSE ﬁnds recurring patterns in multidimen-
+                                                      Figure 1: A real-valued, 1D signal is converted into a SAX string
+sional data by estimating the parameters of an HMM-like
+                                                      (edacb) using ﬁve PAA segments (bounded by the vertical dotted
+model [Oates, 2002]. Tanaka et al. [2005] apply princi-
+                                                      lines) and ﬁve SAX symbols.
+pal component analysis (PCA) to multidimensional data, us-
+ing a minimum description length criterion to select motifs
+found in the principal component. Lin et al. [2002] use and then concatenating the resulting strings. This leads to
+hashing and lower-bounding to efﬁciently search for motifs. a constant number of symbols and linear increase in string
+Chiu et al. [2003] extend Lin et al.’s approach by using ran- length [Keogh, 2006].
+dom projections to quickly ﬁnd candidate motifs in noisier
+data.                                                 Building the Collision Matrix: Once each subsequence has
+                                                      been converted to a string, the similarity between each pair
+                                                      is efﬁciently estimated using random projection. The key in-
+3  Motif Discovery via Random Projection              sight is that while direct comparison is infeasible since there
+In this section, we focus on Chiu et al.’s probabilistic dis- are O(T 2) pairs given T strings, similar sequences can be
+covery method [2003], discussing extensions to improve its identiﬁed in O(I·T ) time using I iterations of random projec-
+applicability, effectiveness, and real-world run time. The al- tion (see Figure 2). Each iteration involves selecting a random
+gorithm operates in ﬁve steps (see Table 1 for a summary of subset of the string positions and building a hash table with
+the user-speciﬁed parameters):                        the corresponding characters. After all strings are hashed,
+ 1. Extract all subsequences of a given length (n)fromthe collisions (equivalent projections from different strings) are
+    time series using a sliding window.               taken as evidence of similarity and the corresponding posi-
+ 2. Convert each subsequence to a string using SAX with tions in a collision matrix are incremented.
+    length w and a unique symbols.                      Using random projection to estimate similarity has several
+ 3. Build a collision matrix by comparing the strings via sev- important properties. First, it is effective in the presence of
+    eral iterations of random projection.             shot noise. Even if some of the symbols are drastically differ-
+                                                      ent, when random projection does not select these positions,
+ 4. Select motif seeds as the two subsequences correspond-
+                                                      the string will still appear similar. Second, although the colli-
+    ing to the largest entry in the collision matrix.
+                                                      sion matrix could require O(T 2) time and space in the worst
+ 5. Extract motifs by detecting other windows in the neigh- case, realistic data sets produce a linear number of non-zero
+    borhood of each seed. The neighborhood is deﬁned as
+                                   R                  entries leading to linear time and space requirements with a
+    all sequences within a ﬁxed distance ( ) of either seed. sparse matrix implementation.. Furthermore, the complexity
+Subsequence Extraction: Subsequences are extracted using can be controlled online by dynamically changing the num-
+a sliding window of user-speciﬁed length. Each window lo- ber of string positions included in each iteration of random
+cation corresponds to one subsequence of the time series. projection [Keogh, 2006]. In a pathological data set, as when
+Subsequence Discretization: Each subsequence is dis-  the distance between all subsequences is effectively zero, the
+cretized using the symbolic aggregate approximation (SAX) matrix will still grow prohibitively large despite dynamic pro-
+method developed by Lin et al. [2003]. SAX is a local quan- jection adaptation. When such a condition is detected, the al-
+tization method that ﬁrst computes a piecewise aggregate ap- gorithm can switch to storing row sums rather than the full
+proximation (PAA) [Keogh et al., 2000] of the normalized matrix. Our experiments show that this simpliﬁcation does
+window data and then replaces each PAA segment with a reduce accuracy, but the penalty may be tolerable to achieve
+symbol. Normalization ensures that the subsequence has zero strict linear time and space complexity.
+mean and unit variance. PAA represents a sequence by divid- Selecting Seed Motif Occurrences: Once the collision ma-
+ing it into equal length segments and then storing the mean trix is built, seed motif occurrences are extracted by locating
+within each segment. The ﬁnal SAX quantization is based maximal entries. Each entry in the matrix corresponds to a
+on precomputed breakpoints that divide the data range into pair of subsequences that can be used to ﬁnd the other oc-
+equiprobable regions assuming an underlying standard nor- currences of the motif. The distance between the seeds must
+mal distribution. Each PAA segment is represented by the be less than R, they must not temporally overlap previously
+symbol of the corresponding bin (see Figure 1).       identiﬁed occurrences, and they must not overlap each other
+  As presented, SAX appears applicable only to univari- (called a trivial match). Search for additional motif seeds
+ate data; however, one can use the algorithm with multi- terminates when the largest entry in the collision matrix is
+variate data by applying it to each dimension independently smaller than the expected score, which can be estimated by
+
+                                                IJCAI-07
+                                                  2815                                                        Table 1: User-Speciﬁed Parameters for Chiu’s Algorithm
+                                                          Symbol   Description
+                                                             n     window length
+                                                             w     number of PAA segments (string length)
+                                                             a     SAX alphabet size
+                                                             R     radius of motif neighborhood
+
+                                                      that all dimensions agree for a particular string position. This
+                                                      drastically reduces the effective size of the collision matrix
+                                                      and requires motifs to span all of the dimensions. To our
+                                                      knowledge, no existing algorithm addresses the more general
+                                                      problem of discovering motifs that exist in only a subset of
+                                                      the dimensions.
+                                                      4.1  Automatic Estimation of Motif-Speciﬁc
+                                                           Neighborhoods
+Figure 2: (a) For each iteration of random projection, a subset of In order to address the theoretical and practical issues sur-
+string positions are selected (here, positions one and three). (b,c) rounding a user-speciﬁed neighborhood radius, we have de-
+The remaining symbols are hashed, and (d) equivalent projections veloped a method for automatically estimating an appropriate
+are tallied in a collision matrix.                    value from data. Because the radius is not used during the
+                                                      random projection phase, that part of the algorithm proceeds
+Equation 9 in [Chiu et al., 2003].                    as usual. Once a pair of motif seeds has been selected, the dis-
+                                                      tance from each subsequence to the closer of the two seeds
+Locating Additional Motif Occurrences: The ﬁnal step  is computed using the original, real-valued data. Next, the
+of the discovery algorithm is to locate all other occur- smallest portion of the distances are selected for further anal-
+rences of the motif identiﬁed by the seed locations. This ysis1. In the experiments presented below, the smallest 10%
+is achieved by scanning the original subsequences and se- are used based on the assumption that 10% is a very loose
+lecting those within the neighborhood of the seeds (i.e., upper bound on the number of motif occurrences. Our empir-
+min(d(w , seed ),d(w , seed ) ≤ R    w  : i ∈{1..T }
+        i    1     i     2     ,where  i              ical results show that this precise size of the portion only has
+represents each of the original subsequences).        a minor impact on the ﬁnal estimate (see Figure 6).
+Discussion: In our experiments (see Section 6), Chiu’s ap- Finally, to determine the appropriate neighborhood radius,
+proach works very well despite the erroneous assumption that we sort the distances and seek a “knee in the curve.” The
+all motifs and all motif occurrences have the same length. It knee corresponds to the change from distances within the mo-
+is, however, quite sensitive to the various user-speciﬁed pa- tif to those outside. This change is an inﬂection point of the
+rameters summarized in Table 1. In particular, the neighbor- curve. Inﬂection points can only occur at a zero of the second
+hood radius, R, is vital for accurate motif discovery, yet it is derivative, which corresponds to an optima of the ﬁrst deriva-
+very difﬁcult to specify since it depends on the domain, the tive. Thus, estimating the radius is equivalent to ﬁnding the
+distance metric, the motif length, and the features selected for maxima of the derivative (see Figure 3), and because we can
+processing.                                           directly compute the discrete ﬁrst derivative, no assumptions
+                                                      about the parametric form of the distance curve are necessary.
+4  Motif Discovery using Automatic                      The inherent undersampling of the true distribution of mo-
+                                                      tif occurrences causes the observed distances to be quite
+   Neighborhood Estimation                            noisy. Therefore, the mode is estimated as the weighted mean
+Before discussing our approach for automatically estimating of the derivative. This procedure is summarized below:
+a per-motif neighborhood radius, we address the issue of ap- 1. Calculate the minimum distance from each subse-
+plying the discovery algorithm to multidimensional data.  quence, wi : i ∈{1..T }, to a motif seed:
+  As discussed previously, we can apply a univariate dis- di = min(d(wi, seed1),d(wi, seed2))
+                                                                   v     kth              k = T
+cretization algorithm to each dimension of a multidimen- 2. Compute, k,the  order statistic for 10
+sional subsequence and concatenate the result. If this com- 3. Select the k smallest distances: di : di ≤ vk
+bined string is used directly for random projection, however, 4. Sort the distances in ascending order
+                                                                                          
+the space requirements will likely be quadratic in the length 5. Calculate the discrete ﬁrst derivative: di = di+1 − di
+of the input data. This increase is understandable because 6. Treat the derivative as weighted votes for the best radius
+projecting columns of the concatenated string is equivalent to
+                                                          and compute the expected value:
+deﬁning multidimensional similarity as a logical OR between               1        
+                                                          E(i)=(    di · (i + ))/( di)
+dimensions. Thus, two strings are deemed equivalent for a          i       2      i
+particular iteration if they match in any dimension. Instead 1See [Cormen et al., 1997] for a linear time algorithm for ﬁnding
+we implement similarity using a logical AND by requiring arbitrary order statistics.
+
+                                                IJCAI-07
+                                                  2816                                                      stead, they are only scored according to their ability to accu-
+                                                      rately detect higher-level structures such as words, phrases,
+                                                      or sentences. The accuracy of phoneme-level motifs is not
+                                                      important per se: they only matter insofar as the motifs rep-
+                                                      resent useful features for improving word recognition rates.
+                                                      5.3  Interpretability
+                                                      Discovered motifs can also be qualitatively evaluated by pre-
+Figure 3: The radius of each motif neighborhood is estimated from senting them to a domain expert. The expert can score the
+the distance between each potential member and the motif seeds results by inspecting either the original data or some other
+(left). It is equated with the inﬂection point, which is estimated by time-synchronized recording such as video or audio. Evalu-
+the weighted mean of the derivative of the distances (center). The ation may consist of manually checking that all occurrences
+result is automatic motif-speciﬁc neighborhood sizes (right). of a motif are semantically similar and that similar events are
+                                                      not split across multiple motifs. The key difference between
+                                                      this approach and a comparison to ground truth is that in-
+5  Evaluation Methods                                 terpretability is evaluated by inspecting the motifs that were
+Before evaluating the performance of our approach, we must actually discovered, whereas ground truth labels encode an
+discuss what it means for one set of discovered motifs to be expert’s aprioriexpectations.
+“better” than another set. As with activity recognition, the 5.4 Further Issues for Evaluation
+efﬁcacy of a discovery system depends on how the results
+will be used. We have identiﬁed three broad approaches for The quality of the discovered motifs is not the only factor that
+evaluating the quality of discovered motifs: comparison to contributes to the value of a discovery algorithm. Other fac-
+ground truth, primary utility, and interpretability.  tors matter, such as run time characteristics (including asymp-
+                                                      totic performance and expected real world run time), online
+5.1  Comparison to Ground Truth                       versus batch processing, and memory requirements. In addi-
+                                                      tion, the overall usability of the system is a major component
+When operating on well-understood data, domain experts
+                                                      of its value and is a fundamental source of motivation for our
+may be able to manually identify motifs. Thus, they can cre-
+                                                      approach. Although we will show that motif-speciﬁc neigh-
+ate a set of ground truth labels that identify which motifs ex-
+                                                      borhood size estimation improves results, even if the differ-
+ist and where they occur in the data. A discovery system can
+                                                      ence was negligible, automatic estimation would still be a
+then be evaluated by comparing the discovered motifs to the
+                                                      contribution. The beneﬁt arises because automatic estimation
+“correct” motifs identiﬁed by the experts in the same way that
+                                                      eases the demands on the user to understand the domain be-
+supervised recognition systems are evaluated. This approach
+                                                      fore using the discovery system and reduces the need to man-
+is often used in the bioinformatic literature where algorithms
+                                                      ually explore the space. A similar idea is discussed in more
+are tested against nucleotide data for which binding sites area
+                                                      detail in [Keogh et al., 2004]; however, the compression-
+already known.
+                                                      based distance metric proposed in that work proved insufﬁ-
+  Although ground truth labels allow for a quantitative, ob-
+                                                      cient for detecting motifs in the test data.
+jective measure of performance, evaluation is still compli-
+cated by issues such as different kinds of errors, “bounded”
+versus “ﬂuent” activities, and different levels of error anal- 6 Empirical Results
+ysis (see [Minnen et al., 2006b] for a detailed discussion). In this section, we evaluate our approach to motif discovery
+Furthermore, the number of discovered motifs may not be the and compare it to existing methods. We compare the discov-
+same as what was identiﬁed by a domain expert. Different er- ered motifs to known motifs (for the manually labeled exer-
+ror metrics may prefer methods that discover fewer but more cise data set), and we also visually present the motifs discov-
+accurate motifs (high precision) or those that identify all of ered in public data sets that have been used for empirical eval-
+the expected motifs but also ﬁnd unlabeled motifs (high re- uation by other researchers (the shuttle and fetal ECG data).
+call). Note that these additional motifs are neither correct nor
+incorrect in general. They may be errors, or they may corre- 6.1 Exercise data
+spond to real patterns in the data that were simply unexpected. The exercise data set was captured from an exercise regime
+                                                      composed of six different dumbbell exercises. An Xsens
+5.2  Primary Utility                                  MT9 inertial motion sensor was attached to the subject’s wrist
+The best measure of performance is the utility of the discov- by ﬁtting it into a pouch sewn to the back of a thin glove. The
+ered motifs in accomplishing a primary task. The assumption MT9 was sampled at 100Hz and three-axis accelerometer and
+here is that motifs are not discovered for their own sake but gyroscope readings were recorded. In total, approximately
+rather in the service of a primary goal. For example, when 27.5 minutes of data was captured over 32 sequences. For
+analyzing speech data, a discovery algorithm may identify the experiment, the data was resampled at 12.5Hz leading to
+phonemes as motifs if a short temporal scale parameter is 20,711 frames. The data contains six different exercises and
+speciﬁed. Speech recognition systems, however, are not typi- 864 total repetitions (roughly 144 occurrences of each exer-
+cally evaluated based on their phoneme recognition rates. In- cise). Each frame is composed of the raw accelerometer and
+
+                                                IJCAI-07
+                                                  2817gyroscope readings leading to a six-dimensional feature vec-
+tor.
+  Evaluation was performed by comparing the discovered
+motifs to the hand labeled occurrences of each exercise. Both
+discovery methods located extra motifs in addition to the six
+exercises. We do not consider this to be an error, however,
+as the extra motifs are legitimate clusters of similar subse-
+quences. To quantify performance, we performed analysis
+over events (individual occurrences) and frames (each of the
+20,711 sensor readings). Accuracy, precision, and recall were
+calculated in both cases considering only the six motifs that Figure 5: Comparison of the proposed approach to Chiu’s algo-
+most closely correspond to the exercises. For all experiments, rithm for the exercise data showing superior performance of the pro-
+the dynamic time warping (DTW) distance was used with a posed approach across all six evaluation metrics.
+Sakoe-Chiba band of 10%, which follows standard practice
+in the ﬁeld [Ratanamahatana and Keogh, 2005].
+                                                      values. The graph shows that the proposed approach outper-
+  Figure 4 shows the result of running Chiu’s algorithm over forms the previous method according to all of the metrics. For
+a range of values for the neighborhood radius. The chart event accuracy, the proposed approach achieves 78.2% com-
+shows performance for each of the six evaluation metrics pared to 61.1%,whichisa44% reduction in error. For com-
+along the horizontal axis. For each metric, performance is
+                                             8.0      parison, another discovery method, which relies on global
+measured for 18 different radius values ranging from to discretization and a minimum description length criterion to
+14.0. Note that event-level accuracy, which we consider to be                                 86.7%
+                                             61.1%    ﬁnd motif seeds, achieves an event accuracy of [Min-
+the most important overall summary statistic, peaks at nen et al., 2006a]. This approach, however, requires consid-
+with a radius of 9.5, but it is very unstable as accuracy drops
+  39.1%               9.75                            erably more time to locate the motifs, and it includes a step
+to      with a radius of . This instability is due to the that is quadratic in the number of motif occurrences.
+use of a single neighborhood size across motifs when the mo-
+tifs actually have different scales (see Figure 3).   6.2  Shuttle and Fetal ECG Data
+  The performance of our approach is shown in Figure 6. For
+each of the six evaluation metrics, performance is presented In order to demonstrate the generality of our approach, we
+across a range of estimation portion sizes. Each portion size tested on two public data sets commonly used in the motif
+                                                                       [                     ]
+corresponds to the percentage of the smallest distances used discovery literature Keogh and Folias, 2002 . In the case
+to estimate the neighborhood size as explained in Section 4.1. of the shuttle telemetry data (see Figure 7), the algorithm dis-
+Although the portion size does impact overall performance, covers a single motif with two occurrences. For the fetal ECG
+the results are very stable between the relatively wide range data, the algorithm ﬁnds thirteen occurrences of the heartbeat
+from 5.0% to 15.0%. For all of the experiments performed (see Figure 8). In both cases, the motif neighborhood size
+in this section, the generic value of 10.0% was selected since was automatically estimated, and the results are qualitatively
+it is in the center of this stable range. Note that a value of equivalent to those presented in the literature (see, for exam-
+                                                          [               ]
+7.5% leads to superior results on this data set but will likely ple, Tanaka et al., 2005 ).
+fail to generalize as well since it is closer to the boundary of
+the stable region.                                    7   Future Work
+  Figure 5 shows a direct comparison of our proposed ap- We are currently investigating several ways of extending our
+proach to Chiu’s algorithm on the exercise data. For Chiu’s approach. We are particularly interested in generalizing the
+algorithm, a radius of 9.5 was used since it was found to motif length parameter by incorporating automatic estima-
+be the optimal choice after manually comparing a range of tion, allowing variable length occurrences within a motif, and
+
+
+Figure 4: Performance of Chiu’s algorithm on the exercise data set Figure 6: Performance of the proposed approach on the exercise
+over a range of radii. Note the instability (for example, between the data set showing stability over a relatively wide range of portion
+radius values of 9.5 and 9.75 for event and frame-based accuracy). sizes used to estimate the neighborhood (5%-15%).
+
+
+                                                IJCAI-07
+                                                  2818
