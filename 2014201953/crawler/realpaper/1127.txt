@@ -1,0 +1,1230 @@
+A Factor Graph Model for Software Bug Finding
+
+Ted Kremenek
+
+Andrew Y. Ng
+
+Dawson Engler
+
+Computer Science Department
+
+Stanford University
+
+Stanford, CA 94305 USA
+
+Abstract
+
+Automatic tools for ﬁnding software errors require
+knowledge of the rules a program must obey, or
+“speciﬁcations,” before they can identify bugs. We
+present a method that combines factor graphs and
+static program analysis to automatically infer spec-
+iﬁcations directly from programs. We illustrate the
+approach on inferring functions in C programs that
+allocate and release resources, and evaluate the ap-
+proach on three codebases: SDL, OpenSSH, and
+the OS kernel for Mac OS X (XNU). The inferred
+speciﬁcations are highly accurate and with them we
+have discovered numerous bugs.
+
+1 Introduction
+
+Software bugs are as pervasive as software itself, with the
+rising cost of software errors recently estimated to cost the
+United States economy $59.5 billion/year [RTI, 2002]. For-
+tunately, there has been a recent surge of research into de-
+veloping automated and practical bug-ﬁnding tools. While
+tools differ in many respects, they are identical in one:
+if
+they do not know what properties to check, they cannot ﬁnd
+bugs. Fundamentally, all tools essentially employ speciﬁca-
+tions that encode what a program should do in order to distin-
+guish good program behavior from bad.
+
+A speciﬁcation is a set of rules that outlines the acceptable
+behavior of a program. A “bug” is a violation of the rules. For
+example, one universal speciﬁcation is that a program “should
+not crash.” Because crashes are fail-stop errors (i.e., the pro-
+gram halts) they are easy to detect, but because many fac-
+tors can lead to a crash they are equally difﬁcult to diagnose.1
+Moreover, while software crashes are colorful symptoms of a
+program behaving badly, many bugs are not fail-stop. Mem-
+ory leaks (or more generally leaks of application and system
+resources) lead through attrition to the gradual death of a pro-
+gram and often induce erratic behavior along the way. Data
+corruption errors can lead to unpleasant results such as loss
+of sensitive data. Further, most security-related bugs, such as
+those allowing a system to be compromised, are not fail-stop.
+
+Properly locating and ﬁxing such bugs requires knowledge of
+the violated program invariants.
+
+Traditionally, discovering such bugs was the responsibility
+of software developers and testers. Fortunately, automated
+bug-ﬁnding tools, such as those based on static program anal-
+ysis, have become adroit at ﬁnding many such errors. Op-
+erationally, a static analysis tool analyzes a program without
+running it (similar to a compiler) and reasons about the pos-
+sible paths of execution through the program. Conceptually,
+the tool checks that every analyzed path obeys the program
+invariants in a speciﬁcation. When a rule can be violated,
+the tool ﬂags a warning. Static tools have achieved signiﬁ-
+cant success in recent years, with research tools ﬁnding thou-
+sands of bugs in widely used open-source software such as
+the Linux kernel [Engler et al., 2000]. Unfortunately there is
+no free lunch. Like human testers, these tools require knowl-
+edge of a program’s speciﬁcation in order to ﬁnd bugs.
+
+The key issue is possessing adequate speciﬁcations. Un-
+fortunately, many important program properties that we could
+check with automated tools are domain-speciﬁc and tied to a
+particular API or program. To make matters worse, the man-
+ual labor needed to specify high-level invariant properties can
+be overwhelming even for small programs [Flanagan et al.,
+2002]. Further, in large evolving codebases the interfaces
+may quickly change, which further complicates the problem
+of keeping a speciﬁcation current. Consequently, many bugs
+that could have been found with current tools are rendered
+invisible by ignorance of the necessary speciﬁcations.
+
+This paper describes a technique that combines factor
+graphs with static program analysis to automatically infer
+speciﬁcations directly from programs. We illustrate the kind
+of speciﬁcations that can be inferred with an example speciﬁ-
+cation inference task. This paper formalizes and extends the
+model informally introduced in our earlier work [Kremenek
+et al., 2006]; we also describe algorithms for inference and
+parameter learning. These changes result in signiﬁcantly
+improved performance of the model. We also apply these
+ideas to ﬁnding a number of bugs, many serious, in SDL,
+OpenSSH, PostgreSQL, Wine and Mac OS X (XNU).
+
+1.1 Speciﬁcations of Resource Ownership
+
+1This has led to signiﬁcant work on post-mortem analysis of software
+crashes, including applying machine learning methods, to identify
+potential causes of a crash [Zheng et al., 2003].
+
+Almost all programs make use of dynamically allocated re-
+sources. Examples include memory allocated by functions
+like malloc, ﬁle handles opened by calls to fopen, sockets,
+
+IJCAI-07
+
+2510
+
+1. FILE * fp1 = fopen( "myfile.txt", "r" );
+2. FILE * fp2 = fdopen( fd, "w" );
+3.
+4.
+5.
+6.
+
+fread( buffer, n, 1, fp1 );
+fwrite( buffer, n, 1, fp2 );
+fclose( fp1 );
+fclose( fp2 );
+
+Figure 1: Example use of standard C I/O functions.
+
+ro
+
+¬ro
+
+Uninit
+
+¬co
+
+Owned
+
+co
+
+end-of-
+
+path
+
+Bug:
+Leak
+
+¬co
+
+co
+
+¬Owned
+
+end-of-
+
+path
+
+Claimed
+
+Deallocator
+
+co
+
+Bug: 
+
+Invalid Use
+
+end-of-path
+
+¬co
+
+end-of-path,¬co
+
+co
+
+Ownership
+
+Contra-
+
+Ownership
+
+Figure 2: DFA for a static analysis checker to ﬁnd resource errors.
+Shaded ﬁnal states represent error states (bugs).
+
+database connections, and so on. Functions that “allocate”
+resources, or allocators, typically have a matching dealloca-
+tor function, such as free and fclose, that releases the re-
+source. Even if a language supports garbage collection, pro-
+grammers usually must enforce manual discipline in manag-
+ing arbitrary allocated resources in order to avoid resource-
+related bugs such as leaks or “use-after-release” errors.
+
+Numerous tools have been developed to ﬁnd resource bugs,
+with the majority focusing on ﬁnding bugs for uses of well-
+known allocators such as malloc [Heine and Lam, 2003].
+Many systems, however, deﬁne a host of allocators and deal-
+locators to manage domain-speciﬁc resources. Because the
+program analysis required to ﬁnd resource bugs is gener-
+ally the same for all allocators and deallocators, current tools
+could readily be extended to ﬁnd resource bugs for domain-
+speciﬁc allocators if they were made aware of such functions.
+A more general concept, however, that subsumes knowing
+allocators and deallocators is knowing what functions return
+or claim ownership of resources. To manage resources, many
+programs employ the ownership idiom: a resource has at any
+time exactly one owning pointer (or handle) which must even-
+tually release the resource. Ownership can be transferred
+from a pointer by storing it into a data structure or by passing
+it to a function that claims it (e.g., a deallocator). Although
+allocators and deallocators respectively return and claim own-
+ership, many functions that return ownership have a contract
+similar to an allocator but do not directly allocate resources;
+e.g., a function that dequeues an object from a linked list and
+returns it to the caller. Once the object is removed from the
+list, the caller must ensure that the object is fully processed.
+A similar narrative applies to functions that claim ownership.
+By knowing all functions that return and claim ownership, we
+can detect a wider range of resource bugs.
+
+This paper explores the problem of inferring domain-
+speciﬁc functions in C programs that return and claim own-
+ership. Our formulation uses an encoding of this set of func-
+tions that is easily consumed by a simple static analysis tool,
+
+or checker, which we brieﬂy describe. Figure 1 depicts a
+contrived code fragment illustrating the use of several stan-
+dard I/O functions in C. For the return values of fopen and
+fdopen, we can associate the label ro (returns ownership)
+or ¬ro. For the input arguments (with a pointer type) of
+fwrite, fread, and fclose we can associate labels co
+(claims ownership) or ¬co. These labels can be used by a sim-
+ple checker that operates by tracing the possible paths within
+the function where fp1 and fp2 are used, and, along those
+paths, simulate for each pointer the property DFA in Figure 2.
+Every time a pointer is passed as an argument to a function
+call or returned from a function the corresponding label is
+consulted and the appropriate transition is taken. An “end-
+of-path” indicates that the end of the function was reached.
+There are ﬁve ﬁnal states. The states Leak and Invalid Use
+are error states (shaded) and indicate buggy behavior (Invalid
+Use captures both “use-after-release” errors as well as claim-
+ing a non-owned pointer). The other ﬁnal states indicate a
+pointer was used correctly, and are discussed later in further
+detail. Further details regarding the implementation of the
+checker can be found in Kremenek et al. [2006].
+
+1.2 Our Approach
+
+While speciﬁcations conceivably come in arbitrary forms, we
+focus on inferring speciﬁcations where (1) the entire set of
+speciﬁcations is discrete and ﬁnite and (2) a given speciﬁca-
+tion for a program can be decomposed into elements that de-
+scribe the behavior of one aspect of the program. For exam-
+ple, in the ownership problem if there are m functions whose
+return value can be labeled ro and n function arguments that
+can be labeled co then there are 2m2n possible combined la-
+bellings. In practice, there are many reasonable bug-ﬁnding
+problems whose speciﬁcations map to similar domains.
+
+Our primary lever for inferring speciﬁcations is that pro-
+grams contain latent information, often in the form of “behav-
+ioral signatures,” that indirectly documents their high-level
+properties. Recall that the role of speciﬁcations is to outline
+acceptable program behavior.
+If we assume that programs
+for the most part do what their creators intended (or at least
+in a relative sense “bugs are rare”) then a likely speciﬁcation
+is one that closely matches the program’s behavior. Thus, if
+such a speciﬁcation was fed to a static analysis checker, the
+checker should ﬂag only a few cases of errant behavior in the
+program. Finally, latent information may come in a myriad of
+other forms, such as naming conventions for functions (e.g.
+“alloc”) that provide hints about the program’s speciﬁcation.
+
+This motivates an approach based on probabilistic reason-
+ing, which is capable of handling this myriad of information
+that is coupled with uncertainty. Our solution employs factor
+graphs [Yedidia et al., 2003], where a set of random vari-
+ables in a factor graph represent the speciﬁcations we desire
+to infer, and factors represent constraints implied by behav-
+ioral signatures. The factor graph is constructed by analyzing
+a program’s source code, and represents a joint probability
+distribution over the space of possible speciﬁcations. Once
+the factor graph is constructed, we employ Gibbs sampling to
+infer the most likely speciﬁcations.
+
+IJCAI-07
+
+2511
+
+2 Factor Graph Model
+
+We now present our factor graph model for inferring speciﬁ-
+cations. We illustrate it in terms of the ownership problem,
+and make general statements as key concepts are introduced.
+We begin by mapping the space of possible speciﬁcations
+to random variables. For each element of the speciﬁcation
+with discrete possible values we have a random variable Ai
+with the same domain. For example, in the ownership prob-
+lem for each return value of a function “foo” in the codebase
+we have a random variable Afoo:ret with domain {ro, ¬ro}.
+Further, for the ith argument of a function “baz” we have a
+random variable Abaz:i with domain {co, ¬co}. We denote
+this collection of variables as A, and a compound assignment
+A = a represents one complete speciﬁcation from the set of
+possible speciﬁcations.
+
+2.1 Preliminaries
+
+Our goal is to deﬁne a joint distribution for A with a factor
+graph. We now review key deﬁnitions pertaining to factor
+graphs [Yedidia et al., 2003].
+Deﬁnition 1 (Factor) A factor f for a set of random vari-
+ables C is a mapping from val(C) to R
+
++
+
+.
+
+Deﬁnition 2 (Gibbs Distribution) A Gibbs distribution P
+over a set of random variables X = {X1, . . . , Xn} is deﬁned
+in terms of a set of factors {fj}J
+j=1 (with associated random
+variables {Cj}J
+
+j=1, Cj ⊆ X) such that:
+J(cid:2)
+
+P(X1, . . . , Xn) =
+
+1
+Z
+
+fj(Cj ).
+
+(1)
+
+j=1
+
+The normalizing constant Z is the partition function.
+
+Deﬁnition 3 (Factor Graph) A factor graph is a bipartite
+graph that represents a Gibbs distribution. Nodes correspond
+to variables in X and to the factors {fj}J
+j=1. Edges connect
+variables and factors, with an undirected edge between Xi
+and fj if Xi ∈ Cj .
+
+2.2 Overview of Model Components
+
+We now deﬁne the factors in our model. Maintaining termi-
+nology consistent with our previous work, we call the fac-
+tor graphs constructed for speciﬁcation inference Annotation
+Factor Graphs (AFGs). The name follows from that the spec-
+iﬁcations we infer (e.g. ro and co) serve to “annotate” the be-
+havior of program components. While often the only random
+variables in an AFG will be A (i.e., X = A), other variables,
+such as hidden variables, can be introduced as needed.
+
+There are two categories of factors in an AFG that are used
+to capture different forms of information for speciﬁcation in-
+ference. The ﬁrst set of factors, called check factors, are used
+to extract information from observed program behavior. A
+given speciﬁcation A = a that we assign to the functions in a
+program will determine, for each tracked pointer, the outcome
+of the checker described in Section 1.1. These outcomes re-
+ﬂect behaviors the checker observed in the program given the
+provided speciﬁcation (e.g., resource leaks, a pointer being
+properly claimed, and so on). Our insight is that (1) some be-
+haviors are more likely than others (e.g., errors should occur
+rarely) and that (2) some behaviors are harder for a program
+
+to “coincidentally” exhibit; thus when we observe such be-
+haviors in a program they may provide strong evidence that a
+given speciﬁcation is likely to be true. Check factors incorpo-
+rate into the AFG both our beliefs about such behaviors and
+the mechanism (the checker) used to determine what behav-
+iors a program exhibits.
+
+The second set of factors are used to model arbitrary
+domain-speciﬁc knowledge. This includes prior beliefs about
+the relative frequency of certain speciﬁcations, knowledge
+about suggestive naming conventions (e.g, the presence of
+“alloc” in a function’s name implies it is an ro), and so on.
+
+We now discuss both classes of factors in turn.
+
+2.3 Check Factors
+
+We now describe check factors, which incorporate our beliefs
+about the possible behaviors a program may exhibit and the
+speciﬁcations they imply.
+
+Each ﬁnal state in our checker corresponds to a separate
+behavioral signature observed in the program given a speci-
+ﬁcation A = a. The checker observes ﬁve behavioral signa-
+tures, two of which indicate different kinds of bugs (leaks and
+everything else), and three which identify different kinds of
+“good” behavior. By distinguishing between different behav-
+iors, we can elevate the probability of values of A that induce
+behaviors that are more consistent with our beliefs.
+
+First, we observe that (in general) bugs occur rarely in pro-
+grams. Although not a perfect oracle, the checker can be em-
+ployed to deﬁne an error as a case where the DFA in Figure 2
+ends in an error state. Thus an assignment to A that causes
+the checker to ﬂag many errors is less likely than an assign-
+ment that leads to few ﬂagged errors. Note that we should
+not treat errors as being impossible (i.e., only consider speci-
+ﬁcations that cause the checker to ﬂag no errors) because (1)
+real programs contain bugs and (2) the checker may ﬂag some
+false errors even for a bug-free program.
+
+Further, not all kinds of errors occur with equal frequency.
+In practice Invalid Use errors occur far less frequently than
+Leaks. Thus, for two different speciﬁcations that induce the
+same number of errors, the one that induces more Leaks than
+InvalidUse errors is the more likely speciﬁcation.
+
+Finally, errors aside, we should not equally weight obser-
+vations of different kinds of good program behavior. For
+example, the Deallocator signature recognizes the pattern
+that once an owned pointer is claimed it is never subse-
+quently used, while Ownership matches behavior that allows
+a claimed pointer to be used after it is claimed. The for-
+mer is a behavioral signature that is much harder for a set
+of functions to ﬁt by chance. Consequently when we ob-
+serve the Deallocator pattern we could potentially weight it
+as stronger evidence for a given speciﬁcation than if a code
+fragment could only obey the Ownership pattern. Finally, the
+Contra-Ownership pattern, which recognizes all correct use
+of a non-owned pointer, is the easiest pattern to ﬁt: all func-
+tions can be labeled ¬ro and ¬co and the checker will never
+ﬂag an error. Such a speciﬁcation is useless, however, be-
+cause we wish to infer ro and co functions! Thus we should
+potentially “reward” observations of the Ownership or Deal-
+locator signatures more than the Contra-Ownership pattern.
+In other words, we are willing to tolerate some errors if a set
+
+IJCAI-07
+
+2512
+
+Afopen:ret
+
+Afread:3
+
+Afclose:0
+
+Afdopen:ret
+
+Afwrite:3
+
+Figure 3: Factor graph model for the code in Figure 1. Circular
+nodes correspond to variables and square nodes to factors. The
+shaded factors indicate check factors, while the top row depicts
+factors modeling prior beliefs.
+
+of functions appear to consistently ﬁt either the Deallocator
+or Ownership signatures.
+
+We now discuss how these ideas are modeled using fac-
+tors. We ﬁrst atomize the output of the checker into checks.
+A check is a distinct instance in the program where the spec-
+iﬁcation could be obeyed or disobeyed. For the ownership
+problem, we have a check for every statement of the form
+“p = foo()” where a pointer value is returned from a called
+function. For the code in Figure 1 we have one check for
+fp1 and another for fp2. In general, the actual deﬁnition of a
+check will depend on the speciﬁcations we are trying to infer,
+but essentially each check represents a distinct observation
+point of a program’s behavior.
+
+Once we deﬁne the set of checks for a codebase, for
+each check we create a corresponding check factor, denoted
+fcheck(i) , in the AFG. Check factors represent (1) the analysis
+result of the checker at each check when running the checker
+using a provided set of values for A and (2) our preferences
+over the possible outcomes of each check. The variables in
+A associated with a given fcheck(i) , denoted Acheck(i) , are
+those whose values could be consulted by the checker to de-
+termine the check’s outcome. For example, Figure 3 depicts
+the factor graph for the code example in Figure 1. We have
+two check factors (shaded), one for fp1 and fp2 respectively.
+Because for fp1 the checker needs only consult the speci-
+ﬁcations represented by the variables Afopen:ret, Afread:4 and
+Afclose:1, these variables are those associated with fcheck(fp1) .
+If
+Ci(acheck(i) ) represents the output of the checker for check i
+when Acheck(i) = acheck(i) , then fcheck(i) is deﬁned as:
+if Ci(acheck(i) ) = c
+
+Check factors have a simple mathematical deﬁnition.
+
+fcheck(i) (acheck(i) ) =
+
+(cid:3)
+
+eθc
+
+:
+
+Thus a check factor is encoded with a set of real-valued pa-
+rameters (θc ∈ R), one for each distinct behavior observed by
+the checker. These parameters are shared between all check
+factors that observe the same set of behaviors,2 and are used
+to encode our intuitions about program behavior and the spec-
+iﬁcations they imply. For example, we expect that the pa-
+rameters for error states, θ
+InvalidUse, will have lower
+values than the remaining parameters (i.e., errors are rare).
+While parameters can be speciﬁed by hand [Kremenek et al.,
+2006], in this paper we focus on learning them from partially
+known speciﬁcations and observing if the learned parameters
+both (1) match with our intuitions and (2) compare in quality
+to the speciﬁcations inferred using hand-tuned parameters.
+
+Leak and θ
+
+Multiple execution paths. Note that the value of the check
+is a summary of all the analyzed paths within the function for
+that pointer. Each analyzed path may end in a different state
+in the DFA. Instead of reporting results for all analyzed paths,
+we summarize them by reporting the ﬁnal state from the ana-
+lyzed paths that appears earliest in the following partial order:
+
+InvalidUse ≺ Leak ≺ Contra-Ownership
+≺ Ownership ≺ Deallocator
+
+For example, if on any path the analysis encounters an Invalid
+Use state, it reports Invalid Use for that check regardless of
+the ﬁnal states on the other paths. The idea is to report bad
+behavior over good behavior.
+
+2.4 Further Modeling: Domain Knowledge
+
+Beyond exploiting the information provided by a checker, the
+factor graph allows us to incorporate useful domain knowl-
+edge. We discuss two examples for the ownership problem.
+
+Prior beliefs. Often we have prior knowledge about the
+relative frequency of different speciﬁcations. For example,
+most functions do not claim ownership of their arguments and
+should be labeled ¬co. Such hints are easily modeled as a
+single factor attached to each Ai variable. We attach to each
+Afoo:i a factor f (Afoo:i = x) = eθx . The two parameters,
+θco and θ¬co, are shared between all factors created by this
+construction. Analogously we deﬁne similar factors for each
+Afoo:ret. These factors are depicted at the top of Figure 3.
+
+Suggestive naming. Naming conventions for functions
+(e.g., a function name containing “alloc” implies the return
+value is ro) can be exploited in a similar fashion. We se-
+lected a small set of well-known keywords K (|K| = 10)
+containing words such as “alloc”, “free” and “new.” To model
+keyword correlation with ro speciﬁcations, for each Afoo:ret
+whose functions contains the keyword kw we construct a sin-
+gle factor associated with Afoo:ret:
+
+f (Afoo:ret = x) = eθkw:x
+
+(2)
+Since x ∈ {ro, ¬ro} this factor is represented by two param-
+eters (per keyword). These parameters are shared between all
+factors created by this construction. Note that the factor is
+present only if the function has the keyword as a substring of
+it’s name; while the presence of a keyword may be sugges-
+tive of a function’s role, we have observed the absence of a
+keyword is usually uninformative.
+
+Keyword correlation for co speciﬁcations is similarly mod-
+eled, except since a function may contain multiple arguments,
+each of which may be labeled co, we construct one “keyword
+factor” over all the Afoo:i variables, denoted A(cid:2)foo:parms(cid:3), for
+a function foo:
+f (a(cid:2)foo:parms(cid:3)) = eθkw:coI{∃i|Afoo:i=co}+θkw:¬coI{∀i|Afoo:i=¬co}
+(3)
+Thus, if any of foo’s arguments has the speciﬁcation co then
+the factor has value eθkw:co (and eθkw:¬co otherwise). For clar-
+ity, keyword factors have been omitted in Figure 3.
+
+3 Inference
+
+2Multiple checkers with different check factors can conceptually be
+used to analyze the program for different behavioral proﬁles.
+
+Once the factor graph is constructed, we employ Gibbs sam-
+pling to sample from the joint distribution. For each Ai
+
+IJCAI-07
+
+2513
+
+we estimate the probability it has a given speciﬁcation (e.g.,
+P(Ai = ro)) and rank inferred speciﬁcations by their prob-
+abilities. Analogously, we estimate for each check factor
+fcheck(i) the probability that the values of Acheck(i) cause the
+checker to ﬂag an error. This allows us to also rank possible
+errors by their probabilities.
+
+When updating a value for a given Aj ∈ A, we must
+recompute the value of each check factor fcheck(i) where
+Aj ∈ Acheck(i) . This requires actually running the checker.
+Because at any one time Gibbs sampling has a complete as-
+signment to all random variables, the checker simply con-
+sults the current values of A to determine the outcome of the
+check. This clean interface with the checker is the primary
+reason we employed Gibbs sampling.
+
+While our checker is relatively simple, the analysis is still
+very expensive when run repeatedly. To compensate, we
+cache analysis results by monitoring which values of A are
+consulted by the checker to determine the outcome of a check.
+This results in a speedup of two orders of magnitude.
+
+We experienced serious issues with mixing. This is a by-
+product of the check factors, since values of several Ai vari-
+ables may need to be ﬂipped before the outcome of a check
+changes. We explored various strategies to improve mixing,
+and converged to a simple solution that provided consistently
+acceptable results. We run 100 chains for N = 1000 iter-
+ations and at the end of each chain record a single sample.
+Moreover, for each chain, we apply the following annealing
+schedule so that each factor fi has the following deﬁnition on
+the kth Gibbs iteration:
+
+f (k)
+i
+
+(Ai) = fi(Ai)min(
+
+k
+
+0.75N
+
+,1)
+
+(4)
+
+This simple strategy signiﬁcantly improved the quality of our
+samples. While satisﬁed by the empirical results of this pro-
+cedure, we continue to explore faster alternatives.
+
+4 Learning
+
+We now discuss our procedure for parameter learning. The
+factors we have discussed take the exponential form of
+f (Cj = cj) = eθcj (with θcj
+∈ R). The set of parameters
+θ for these factors can be learned from (partially) observed
+data, denoted D = d, by using gradient ascent to maximize
+the log-likelihood of d. Generally D ⊂ A, representing par-
+tially known speciﬁcations. We omit the derivation of the
+gradient, as it is fairly standard. For the case where a single
+parameter θcj appears in a single factor fj, the corresponding
+term of the gradient is:
+∂ log p(d|θ)
+
+PUnclamped
+
+[I{Cj =cj }]
+
+∂θcj
+
+= E
+
+PClamped
+
+[I{Cj =cj }] − E
+
+(5)
+Here PClamped represents the conditional distribution over all
+variables in the factor graph when D is observed, while
+PUnclamped represents the distribution with no observed data.
+If a parameter appears in multiple factors, the gradient term
+for θcj is summed over all factors in which it appears.
+
+4.1
+
+Implementation: Heuristics and Optimizations
+
+We now brieﬂy describe a few key features of our implemen-
+tation of gradient ascent for our domain.
+
+AFG Size
+
+Manually Classiﬁed Speciﬁcations
+
+Codebase Lines (103
+
+)
+
+|A| # Checks ro ¬ro ro
+¬ro
+
+co ¬co co
+
+¬co Total
+
+SDL
+OpenSSH
+XNU
+
+51.5 843
+80.12 717
+1381.1 1936
+
+577 35
+3416 45
+9169 35
+
+25
+28
+49 0.71 17
+
+1.4 16
+31 0.51
+1.6 10 108 0.09
+99 0.17
+
+107
+191
+200
+
+Table 1: Breakdown by project of codebase size, number of manu-
+ally classiﬁed speciﬁcations, and AFG size.
+
+Seeding parameters. All parameters, excluding θ
+Leak and
+θ
+InvalidUse, were initialized to a value of 0 (i.e., no initial bias).
+InvalidUse were initialized to −1 to provide a slight
+Leak and θ
+θ
+bias against speciﬁcations that induce buggy behavior.
+
+Estimating the gradient. For each step of gradient ascent,
+the expectations in Equation 5 are estimated using Gibbs sam-
+pling, but each with only two chains (thus relying on prop-
+erties of stochastic optimization for convergence). Conse-
+quently, our estimate of the gradient may be highly noisy. To
+help mitigate such noise, samples are drawn from PClamped and
+PUnclamped in a manner similar to contrastive divergence [Hin-
+ton, 2000]. First, each sample from PClamped is sampled as
+described in Section 3. To generate a sample from PUnclamped,
+we continue running the Markov chain that was used to sam-
+ple from PClamped by (1) unclamping the observed variables D
+and then (2) running the chain for 400 more iterations. This
+noticeably reduces much of the variation between the samples
+generated from PClamped and PUnclamped.
+
+Because the term for θcj in the gradient is additive in the
+number of factors that share θcj , its value is in the range
+[−NumFactors(θcj ), NumFactors(θcj )]. This causes the magnitude
+of the gradient to grow with the size of the analyzed code-
+base. To compensate, we scale each θcj term of the gradient
+by NumFactors(θcj ), leaving each term of the modiﬁed gradient
+in the range [−1, 1]. This transformation, along with a modest
+learning rate, worked extremely well. We experimented with
+alternate means to specify learning rates for gradient ascent,
+and none met with the same empirical success.
+
+Finally, since an AFG typically consists of multiple con-
+nected components, if a connected component contains no
+observed variables, then Equation 5 is trivially 0 for all fac-
+tors in the component. We thus prune such components from
+the factor graph prior to learning.
+
+5 Evaluation
+
+We evaluate our model by inferring ro and co functions in
+three codebases: SDL, OpenSSH, and the OS kernel for Mac
+OS X (XNU). SDL is a cross-platform graphics library for
+game programming. OpenSSH consists of a network client
+and server for encrypted remote logins. Both manage many
+custom resources, and SDL uses infrequently called memory
+management routines from XLib. Like all OS kernels, XNU
+deﬁnes a host of domain-speciﬁc routines for managing re-
+sources. For each project we randomly selected and manually
+classiﬁed 100-200 speciﬁcations for the return values (ro or
+¬ro) and arguments (co or ¬co) of functions. Table 1 shows
+the size of each codebase, the number of manual classiﬁca-
+tions, and AFG sizes.
+
+IJCAI-07
+
+2514
+
+5.1 Speciﬁcation Accuracy
+
+Our hypothesis is that many codebases will exhibit similari-
+ties in code structure and style, allowing a model trained on
+one codebase to be applied to another. We evaluate this hy-
+pothesis with two experiments.
+
+First, for each project we randomly divide our known spec-
+iﬁcations (Table 1) into training and test sets (60/40%). We
+train the model on the training set and then use the trained
+model to infer the speciﬁcations in the test set. Because the
+strictest test of our model is to apply it to a codebase with
+no known speciﬁcations, when inferring speciﬁcations for the
+test set, none of the variables in A are observed (including
+those in the training set). This simulates applying a model to
+a codebase that has practically identical code characteristics
+to the codebase on which the model was trained. We repeat
+this experiment 10 times.
+
+Figure 4 depicts averaged ROC curves for each project.
+Each ﬁgure depicts ﬁve lines. The base model, AFG, is an
+AFG that includes check factors and factors to model prior
+beliefs over ro/co labels. The second line, AFG-Keywords,
+is AFG augmented with keyword factors. Hand-Tuned is the
+AFG model using parameters that were tuned by hand over
+time by inspecting inference results on all codebases.
+
+The remaining two lines represent an ablative analysis,
+where we test simpler systems that use only a subset of the
+features of the full system. One strength of the model is that
+it captures the inter-correlation between speciﬁcations across
+the codebase. AFG-Rename is constructed from AFG by
+weakening the correlation between variables: each variable
+Ai ∈ A is replicated for each associated check factor (this
+is equivalent to renaming each function call in the codebase
+to refer to a distinct function). For example, for the AFG
+in Figure 3, we split Afopen:ret into two random variables,
+one for each of the two check factors for which Afopen:ret
+shares an edge. These two variables then serve as substitutes
+to Afopen:ret for the respective check factors. Speciﬁcation
+probabilities are then estimated by averaging the probabilities
+of the replicated variables. The remaining model, Keywords
+Only, is an AFG that includes only keyword and prior belief
+factors. All models, with the exception of Hand-Tuned, had
+their parameters separately learned on the same data.
+
+The ROC curves illustrate that our model generally per-
+forms very well. For SDL, AFG, AFG-Keywords, and Hand-
+Tuned achieve between 90-100% true positive rate (TPR) for
+both ro and co speciﬁcations with a 10% (or less) false pos-
+itive rate. It is encouraging our trained models perform as
+well or better as Hand-Tuned (which essentially had access to
+both training and test set data for all codebases), with AFG-
+Keywords slightly edging out all other models. We observe
+similar results on OpenSSH and XNU. On XNU, both AFG
+and AFG-Keywords signiﬁcantly outperforms Hand-Tuned
+for ro accuracy, with Hand-Tuned achieving higher co ac-
+curacy with the trade-off of lower ro accuracy.
+
+Our ablated models perform signiﬁcantly worse. For SDL
+and OpenSSH, AFG-Rename has noticeably degraded ro ac-
+curacy compared to AFG, but maintains decent co accuracy
+(the reverse being the case on XNU). We believe this is due
+to the richer models capturing relationships such as several
+
+1.
+
+.
+
+.6
+
+.4
+
+.2
+
+.
+
+1.
+
+.
+
+.6
+
+.4
+
+.2
+
+.
+
+1.
+
+.
+
+.6
+
+.4
+
+.2
+
+.
+
+.
+
+.2
+
+.4
+
+.6
+
+.
+
+1.
+
+.
+
+.2
+
+.4
+
+.6
+
+.
+
+1.
+
+(a) SDL: ro accuracy
+
+(b) SDL: co accuracy
+
+1.
+
+.
+
+.6
+
+.4
+
+.2
+
+.
+
+.
+
+.2
+
+.4
+
+.6
+
+.
+
+1.
+
+.
+
+.2
+
+.4
+
+.6
+
+.
+
+1.
+
+(c) OpenSSH: ro accuracy
+
+(d) OpenSSH: co accuracy
+
+1.
+
+.
+
+.6
+
+.4
+
+.2
+
+.
+
+1.
+
+.
+
+.6
+
+.4
+
+.2
+
+.
+
+.
+
+.2
+
+.4
+
+.6
+
+.
+
+1.
+
+.
+
+.2
+
+.4
+
+.6
+
+.
+
+1.
+
+(e) XNU: ro accuracy
+
+(f) XNU: co accuracy
+
+Figure 4: ROC curves depicting inferred speciﬁcation accuracy.
+
+allocators being paired with a common dealloactor function
+(thus information about one propagates to the others). Note
+that its performance is still signiﬁcantly better than random
+guessing. This suggests that when the ownership idiom ﬁts at
+a “local” level in the code it is still strongly suggestive of a
+program’s speciﬁcation. For Keywords-Only, we observe ex-
+cellent co accuracy on OpenSSH because of the small number
+of co functions with very suggestive names, while for similar
+reasons it has decent co accuracy on SDL (up to the 50% TPR
+level, at which point accuracy falls off). On XNU, co accu-
+racy is worse than random. On all codebases its ro accuracy
+is modest to poor; a more careful analysis suggests that some
+naming conventions are used inconsistently and that many ro
+functions do not have suggestive names.
+
+Our second experiment directly evaluates training the
+model parameters on one codebase and applying them to in-
+ferring speciﬁcations on another. Figure 5 depicts speciﬁca-
+tion inference results for XNU. The SDL and OpenSSH pa-
+rameters are trained using our full set of known speciﬁcations
+for those projects and then are tested on our full set of known
+
+IJCAI-07
+
+2515
+
+1.
+
+.
+
+.6
+
+.4
+
+.2
+
+.
+
+()
+
+1.
+
+.
+
+.6
+
+.4
+
+.2
+
+.
+
+.
+
+.2
+
+.4
+
+.6
+
+.
+
+1.
+
+.
+
+.2
+
+.4
+
+.6
+
+.
+
+1.
+
+(a) XNU: ro accuracy
+
+(b) XNU: co accuracy
+
+Figure 5: Speciﬁcation accuracy on XNU when using model pa-
+rameters trained on SDL and OpenSSH.
+
+speciﬁcations for XNU, while XNU (Avg) is the AFG line
+from the previous experiment. All models are AFG (without
+keywords). Graphs for the other codebases are similar. We
+observe in this ﬁgure that all the lines are very close to each
+other. We believe this strongly supports the generality of the
+model and its applicability across codebases.
+
+Interpreting parameters. Upon inspection, in most case
+learned parameters matched well with our intuitions (Sec-
+tion 2.3). For all codebases, the parameters for error states,
+Leak and θ
+θ
+InvalidUse, were less than the remaining parameters
+for check factors (non-errors). On some codebases, however,
+their relative values were higher to (we believe) compensate
+for increased codebase-speciﬁc noise from the checker. Con-
+sequently, our AFG model can compensate for some deﬁcien-
+cies in the checker as long as the checker can identify infor-
+mative behavioral patterns. We also observed that θ
+Deallocator
+was always greater than θ
+Contra-Ownership, which
+matches with our intuition that observations of the Dealloca-
+tor pattern should be “rewarded” higher than other behaviors.
+
+Ownership and θ
+
+5.2 Software Bugs
+
+As discussed in Section 3, we can use the results from Gibbs
+sampling to rank possible bugs by their probabilities before
+examining any inferred speciﬁcations. This enabled us to
+quickly ﬁnd errors in each codebase that are based on the
+speciﬁcations inferred with the highest conﬁdence. We ob-
+served about a 30-40% false positive rate for ﬂagged errors (a
+rate consistent with current static checking tools). Most false
+positives were due to static analysis imprecision (a source of
+noise that our model appears to handle well when inferring
+speciﬁcations), with a few due to misclassiﬁed speciﬁcations.
+In practice, we may feed the inferred speciﬁcations into
+a more precise (and expensive) static analysis (e.g., Xie et
+al. [2005]) when actually diagnosing bugs. Nevertheless,
+even with our simple checker we discovered 3 bugs in SDL
+and 10 bugs in OpenSSH. For XNU, many bugs were still
+pending conﬁrmation, but 4 bugs were conﬁrmed by devel-
+opers, including one serious error (discussed below). We also
+casually applied our model to other projects including Post-
+greSQL (a relational database engine) and Wine (an imple-
+mentation of the Win32 API for Linux) and quickly found
+several bugs in all of them. Most errors are leaks, and in-
+volve custom allocators and deallocators not checked by cur-
+rent tools.
+
+int coredump(struct proc *p) {
+. . .
+name = proc core name(. . .); /* allocates a string */
+. . .
+/* “name” is ALWAYS leaked after calling vnode open */
+if ((error = vnode open(name, . . . )))
+
+Figure 6: BUG. Function coredump in XNU always leaks a
+string allocated by proc core name.
+
+Figure 6 illustrates an example bug found in the XNU. The
+function coredump is invoked within the kernel to process a
+core dump of a user process. The function proc core name
+is called to construct a freshly allocated string that indicates
+the location of the core dump ﬁle. This string is always leaked
+after the call to vnode open, which leads to the kernel leak-
+ing a small amount of memory every time a process core
+dumps. This is a serious error, as a renegade process can
+cause the kernel to leak an arbitrary amount of memory and
+eventually cripple the OS (this bug has been ﬁxed for the next
+release of Mac OS X). The bug was found by inferring that
+proc core name is an ro because it calls a commonly in-
+voked allocator function that was also inferred to be an ro.
+
+6 Conclusion
+
+We presented a general method that combines factor graphs
+and static program analysis to infer speciﬁcations directly
+from programs. We believe the technique shows signiﬁcant
+promise for inferring a wide range of speciﬁcations using
+probabilistic analysis. This includes applications in computer
+security, where many security exploits could be ﬁxed by cor-
+rectly identifying “tainted” input data (such as from a web
+form) that is exploitable by an attacker, or by inferring pos-
+sible bounds for arrays to detect buffer overruns when con-
+ventional analysis fails. These and other problems represent
+promising and exciting future directions for this work.
+
+References
+
+[Engler et al., 2000] D.R. Engler, B. Chelf, A. Chou, and S. Hallem. Checking sys-
+tem rules using system-speciﬁc, programmer-written compiler extensions. In OSDI
+2000, October 2000.
+
+[Flanagan et al., 2002] C. Flanagan, K.R.M. Leino, M. Lillibridge, G. Nelson, J.B.
+Saxe, and R. Stata. Extended static checking for Java. In PLDI 2002, pages 234–
+245. ACM Press, 2002.
+
+[Heine and Lam, 2003] D. L. Heine and M. S. Lam. A practical ﬂow-sensitive and
+
+context-sensitive C and C++ memory leak detector. In PLDI 2003, 2003.
+
+[Hinton, 2000] Geoffrey E. Hinton. Training products of experts by minimizing con-
+trastive divergence. Technical Report 2000-004, Gatsby Computational Neuro-
+science Unit, University College London, 2000.
+
+[Kremenek et al., 2006] Ted Kremenek, Paul Twohey, Godmar Back, Andrew Y. Ng,
+and Dawson Engler. From uncertainty to belief: Inferring the speciﬁcation within.
+In ”Proceedings of the Seventh Symposium on Operating Systems Design and Im-
+plemetation”, 2006.
+
+[RTI, 2002] RTI. The economic impacts of inadequate infrastructure for software test-
+ing. Technical report, National Institution of Standards and Technology (NIST),
+United States Department of Commerce, May 2002.
+
+[Xie and Aiken, 2005] Y. Xie and A. Aiken. Context- and path-sensitive memory leak
+
+detection. In FSE 2005, New York, NY, USA, 2005. ACM Press.
+
+[Yedidia et al., 2003] Jonathan S. Yedidia, William T. Freeman, and Yair Weiss. Un-
+derstanding belief propagation and its generalizations. In Exploring Artiﬁcial Intel-
+ligence in the New Millennium. Morgan Kaufmann Publishers Inc., 2003.
+
+[Zheng et al., 2003] A. X. Zheng, M. I. Jordan, B. Liblit, and A. Aiken. Statistical
+debugging of sampled programs. In Seventeenth Annual Conference on Neural In-
+formation Processing Systems, 2003.
+
+IJCAI-07
+
+2516
+
+

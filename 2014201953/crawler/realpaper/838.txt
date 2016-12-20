@@ -1,0 +1,1046 @@
+Case-based Multilabel Ranking
+
+Klaus Brinker and Eyke H¨ullermeier
+
+Data and Knowledge Engineering,
+
+Otto-von-Guericke-Universit¨at Magdeburg, Germany
+
+{brinker,huellerm}@iti.cs.uni-magdeburg.de
+
+Abstract
+
+We present a case-based approach to multilabel
+ranking, a recent extension of the well-known prob-
+lem of multilabel classiﬁcation. Roughly speak-
+ing, a multilabel ranking reﬁnes a multilabel clas-
+siﬁcation in the sense that, while the latter only
+splits a predeﬁned label set into relevant and ir-
+relevant labels, the former furthermore puts the la-
+bels within both parts of this bipartition in a total
+order. We introduce a conceptually novel frame-
+work, essentially viewing multilabel ranking as a
+special case of aggregating rankings which are sup-
+plemented with an additional virtual label and in
+which ties are permitted. Even though this frame-
+work is amenable to a variety of aggregation pro-
+cedures, we focus on a particular technique which
+is computationally efﬁcient and prove that it com-
+putes optimal aggregations with respect to the (gen-
+eralized) Spearman rank correlation as an underly-
+ing loss (utility) function. Moreover, we propose
+an elegant generalization of this loss function and
+empirically show that it increases accuracy for the
+subtask of multilabel classiﬁcation.
+
+Introduction
+
+1
+Multilabel ranking (MLR) is a recent combination of two
+supervised learning tasks, namely multilabel classiﬁcation
+(MLC) and label ranking (LR). The former studies the prob-
+lem of learning a model that associates with an instance x
+a bipartition of a predeﬁned set of class labels into relevant
+(positive) and irrelevant (negative) labels, while the latter
+considers the problem to predict rankings (total orders) of
+all class labels. A MLR is a consistent combination of these
+two types of prediction. Thus, it can either be viewed as an
+extended ranking (containing additional information about a
+kind of “zero point”), or as an extended MLC (containing ad-
+ditional information about the order of labels in both parts of
+the bipartition) [Brinker et al., 2006]. For example, in a docu-
+ment classiﬁcation context, the intended meaning of the MLR
+[pol (cid:2)x eco][edu (cid:2)x spo] is that, for the instance (= doc-
+ument) x, the classes (= topics) politics and economics are
+relevant, the former even more than the latter, whereas edu-
+
+cation and sports are irrelevant, the former perhaps somewhat
+less than the latter.
+
+From an MLC point of view, the additional order informa-
+tion is not only useful by itself but also facilitates the postpro-
+cessing of predictions (e.g., considering only the at most top-
+k relevant labels). Regarding the relation between MLC and
+MLR, we furthermore like to emphasize two points: Firstly,
+as will be seen in the technical part below, MLR is not more
+demanding than MLC with respect to the training informa-
+tion, i.e., a multilabel ranker can well be trained on multilabel
+classiﬁcation data. Secondly, inducing such a ranker can be
+useful even if one is eventually only interested in an MLC.
+Roughly speaking, an MLR model consists of two compo-
+nents, a classiﬁer and a ranker. The interdependencies be-
+tween the labels which are learned by the ranker can be help-
+ful in discovering and perhaps compensating errors of the
+classiﬁer. Just to illustrate, suppose that the classiﬁer esti-
+mates one label to be relevant and a second one not. The
+additional (conﬂicting) information that the latter is typically
+ranked above the former might call this estimation into ques-
+tion and thus repair the misclassiﬁcation.
+
+Hitherto existing approaches operating in ranking scenar-
+ios are typically model-based extensions of binary classiﬁca-
+tion techniques which induce a global prediction model for
+the entire instance space from the training data [Har-Peled
+et al., 2002; F¨urnkranz and H¨ullermeier, 2003]. These ap-
+proaches, brieﬂy reviewed in Section 3, suffer substantially
+from the increased complexity of the target space in multi-
+label ranking (in comparison to binary classiﬁcation), thus
+having a high level of computational complexity already for
+a moderate number of class labels.
+
+In Sections 4 and 5, we present an alternative framework
+for MLR using a case-based methodology which is concep-
+tually simpler and computationally less complex. One of the
+main contributions of this paper is casting multilabel rank-
+ing as a special case of rank aggregation (with ties) within a
+case-based framework. While our approach is not limited to
+any particular aggregation technique, we focus on a compu-
+tationally efﬁcient technique and prove that it computes op-
+timal aggregations with respect to the well-known (general-
+ized) Spearman rank correlation as an accuracy measure. In
+Section 6, we show that our case-based approach compares
+favorably with model-based alternatives, not only with re-
+spect to complexity, but also in terms of predictive accuracy.
+
+IJCAI-07
+
+702
+
+2 Problem Setting
+In so-called label ranking, the problem is to learn a mapping
+from an instance space X to rankings over a ﬁnite set of labels
+L = {λ1 . . . λc}, i.e., a function that maps every instance
+x ∈ X to a total strict order (cid:2)x, where λi (cid:2)x λj means that,
+for this instance, label λi is preferred to (ranked higher than)
+λj. A ranking over L can conveniently be represented by a
+permutation τ of {1 . . . c}, where τ(i) denotes the position
+of label λi in the ranking. The set of all permutations over c
+labels, subsequently referred to as Sc, can hence be taken as
+the target space in label ranking.
+
+Multilabel ranking (MLR) is understood as learning a
+model that associates with a query input x both a ranking
+(cid:2)x and a bipartition (multilabel classiﬁcation, MLC) of the
+label set L into relevant (positive) and irrelevant (negative)
+labels, i.e., subsets Px, Nx ⊆ L such that Px ∩ Nx = ∅ and
+Px ∪ Nx = L [Brinker et al., 2006]. Furthermore, the rank-
+ing and the bipartition have to be consistent in the sense that
+λi ∈ Px and λj ∈ Nx implies λi (cid:2)x λj.
+
+As an aside, we note that, according to the above con-
+sistency requirement, a bipartition (Px, Nx) implicitly also
+contains ranking information (relevant labels must be ranked
+above irrelevant ones). This is why an MLR model can be
+trained on standard MLC data, even though it considers an
+extended prediction task.
+
+3 Model-based Multilabel Ranking
+A common model-based approach to MLC is binary rele-
+vance learning (BR). BR trains a separate binary model Mi
+for each label λi, using all examples x with λi ∈ Px as posi-
+tive examples and all those with λj ∈ Nx as negative ones. To
+classify a new instance x, the latter is submitted to all models,
+and Px is deﬁned by the set of all λi for which Mi predicts
+relevance.
+
+BR can be extended to the MLR problem in a straightfor-
+ward way if the binary models provide real-valued conﬁdence
+scores as outputs. A ranking is then simply obtained by order-
+ing the labels according to these scores [Schapire and Singer,
+2000]. On the one hand, this approach is both simple and efﬁ-
+cient. On the other hand, it is also ad-hoc and has some disad-
+vantages. For example, good estimations of calibrated scores
+(e.g., probabilities) are often hard to obtain. Besides, this ap-
+proach cannot be extended to more general types of prefer-
+ence relations such as, e.g, partial orders. For a detailed sur-
+vey about MLC and MLR approaches, including case-based
+methods, we refer the reader to [Tsoumakas et al., 2006].
+
+Brinker et al. [2006] presented a uniﬁed approach to cal-
+ibrated label ranking which subsumes MLR as a special
+case. Their framework enables general label ranking tech-
+niques, such as the model-based ranking by pairwise compar-
+ison (RPC) [F¨urnkranz and H¨ullermeier, 2003] and constraint
+classiﬁcation (CC) [Har-Peled et al., 2002], to incorporate
+and exploit partition-related information and to generalize to
+settings where predicting a separation between relevant and
+irrelevant labels is required. This approach does not assume
+the underlying binary classiﬁers to provide conﬁdence scores.
+Instead, the key idea in calibrated ranking is to add a virtual
+label λ0 as a split point between relevant and irrelevant labels,
+
+i.e., a calibrated ranking is simply a ranking of the extended
+label set L ∪ {λ0}. Such a ranking induces both a ranking
+among the (real) labels L and a bipartite partition (Px, Nx)
+in a straightforward way: Px is given by those labels which
+are ranked higher than λ0, Nx by those which are ranked
+lower. The semantics of the virtual label becomes clear from
+the construction of training examples for the binary learners:
+Every label λi known to be relevant is preferred to the virtual
+label (λi (cid:2)x λ0); likewise, λ0 is preferred to all irrelevant la-
+bels. Adding these preference constraints to the preferences
+that can be extracted for the regular labels, a calibrated rank-
+ing model can be learned by solving a conventional ranking
+problem with c + 1 labels. We have discussed this approach
+in more detail as we will advocate a similar idea in extending
+case-based learning to the multilabel ranking scenario.
+
+4 Case-based Multilabel Ranking
+Case-based learning algorithms have been applied success-
+fully in various ﬁelds such as machine learning and pattern
+recognition [Dasarathy, 1991].
+In previous work, we pro-
+posed a case-based approach which is tailored to label rank-
+ing, hence, it cannot exploit bipartite data and does not sup-
+port predicting the zero point for the multilabel ranking sce-
+nario [Brinker and H¨ullermeier, 2005]. These algorithms de-
+fer processing the training data until an estimation for a new
+instance is requested, a property distinguishing them from
+model-based approaches. As a particular advantage of de-
+layed processing, these learning methods may estimate the
+target function locally instead of inducing a global prediction
+model for the entire input domain from the data.
+
+A typically small subset of the entire training data, namely
+those examples most similar to the query, is retrieved and
+combined in order to make a prediction. The latter exam-
+ples provide an obvious means for “explaining” a prediction,
+thus supporting a human-accessible estimation process which
+is critical to certain applications where black-box predictions
+are not acceptable. For label ranking problems, this appeal-
+ing property is difﬁcult to realize in algorithms using com-
+plex global models of the target function as the more com-
+plex structure of the underlying target space typically entails
+solving multiple binary classiﬁcation problems (RPC yields
+c(c + 1)/2 subproblems) or requires embedding the training
+data in a higher dimensional feature space to encode prefer-
+ence constraints (such as for CC).
+
+In contrast to the model-based methodology which suf-
+fers substantially from the increased complexity of the target
+space in MLR, we will present a case-based approach where
+the complexity of the target space solely affects the aggrega-
+tion step which can be carried out in a highly efﬁcient manner.
+The k-nearest neighbor algorithm (k-NN) is arguably the
+most basic case-based learning method [Dasarathy, 1991]. In
+its simplest version, it assumes all instances to be represented
+by feature vectors x = ([x]1 . . . [x]N )(cid:2) in the N-dimensional
+space X = R
+N endowed with the standard Euclidian metric
+as a distance measure, though an extension to other instance
+spaces and more general distance measures d(·,·) is straight-
+forward. When a query feature vector x is submitted to the
+k-NN algorithm, it retrieves the k training instances closest to
+
+IJCAI-07
+
+703
+
+this point in terms of d(·,·). In the case of classiﬁcation learn-
+ing, the k-NN algorithm estimates the query’s class label by
+the most frequent label among these k neighbors. It can be
+adapted to the regression learning scenario by replacing the
+majority voting step with computing the (weighted) mean of
+the target values.
+
+In order to extend the basic k-NN algorithm to multilabel
+learning, the aggregation step needs to be adapted in a suit-
+able manner. To simplify our presentation, we will focus on
+the standard MLC case where the training data provides only
+a bipartition into relevant and non-relevant labels for each in-
+stance. Later on, we will discuss how to incorporate more
+complex preference (ranking) data for training.
+
+Let us consider an example (x, Px, Nx) from a standard
+MLC training dataset. As stated above, the key idea in cali-
+brated ranking is to introduce a virtual label λ0 as a split point
+to separate labels from Px and Nx, respectively, and to asso-
+ciate a set of binary preferences with x. We will adopt the
+idea of a virtual label but, instead of associating preferences,
+use a more direct approach of viewing the sequence of the
+label sets (Px,{λ0}, Nx) as a ranking with ties, also referred
+to as a bucket order [Fagin et al., 2004]. More precisely, a
+bucket order is a transitive binary relation (cid:2) for which there
+exist sets B1 . . . Bm that form a partition of the domain D
+(which is given by D = L ∪ {λ0} in our case) such that
+λ (cid:2) λ(cid:3) if and only if there are i, j with i < j such that
+λ ∈ Bi and λ(cid:3) ∈ Bj. Using this notation, the MLR sce-
+nario corresponds to a generalized ranking setting with three
+buckets, where B1 = Px, B2 = {λ0} and B3 = Nx.
+
+If the training data provides not only a bipartition (Px, Nx)
+but also a ranking (with ties) of labels within both parts,
+this additional information can naturally be incorporated: As-
+sume that Px and Nx form bucket orders (B1 . . . Bi−1) and
+(Bi+1 . . . Bj), respectively. Then, we can combine this addi-
+tional information into a single ranking with ties in a straight-
+forward way as (B1 . . . Bi−1, Bi, Bi+1 . . . Bj), where Bi =
+{λ0} represents the split point. Note that the following anal-
+ysis only assumes that the training data can be converted into
+rankings with ties, with the virtual label specifying the rel-
+evance split point. It will hence cover both training data of
+the standard MLC case as well as the more complex MLR
+scenario.
+
+l<j |Bl| + 1
+
+A bucket order induces binary preferences among labels
+but moreover forms a natural representation for general-
+izing various metrics on strict rankings to rankings with
+ties. To this end, we deﬁne a generalized rank σ(i) for
+each label λi ∈ D as the average overall position σ(i) =
+(cid:2)
+2(|Bj| + 1) within the bucket Bj which con-
+tains λi. Fagin et al. [2004] proposed several generalizations
+of well-known metrics such as Kendall’s tau and the Spear-
+man footrule distance, where the latter can be written as the
+l1 distance of the generalized ranks σ, σ(cid:3) associated with the
+bucket orders, l1(σ, σ(cid:3)) =
+
+(cid:2)
+λi∈D |σ(i) − σ(cid:3)(i)|.
+
+Given a metric l, a natural way to measure the quality
+of a single ranking σ as an aggregation of the set of rank-
+ings σ1 . . . σk is to compute the sum of pairwise distances:
+L(σ) =
+j=1 l(σ, σj). Then, aggregation of rankings leads
+to the optimization problem of computing a consensus rank-
+
+(cid:2)k
+
+ing σ (not necessarily unique) such that L(σ) = minτ L(τ).
+The remaining step to actually solve multilabel ranking us-
+ing the case-based methodology is to incorporate methods
+which compute (approximately) optimal solutions for the lat-
+ter optimization problem. As we do not exploit any particu-
+lar property of the metric l, this approach provides a general
+framework which allows us to plug in any optimization tech-
+nique suitable for a metric on rankings with ties in order to
+aggregate the k nearest neighbors for a query instance x.
+
+The complexity of computing an optimal aggregation de-
+pends on the underlying metric and may form a bottleneck
+as this optimization problem is NP-hard for Kendall’s tau
+[Bartholdi et al., 1989] and Spearman’s footrule metric on
+bucket orders [Dwork et al., 2001].1 Hence, computing an
+optimal aggregation is feasible only for relatively small la-
+bel sets {λ1 . . . λc}. There exist, however, approximate algo-
+rithms with quadratic complexity in c which achieve a con-
+stant factor approximation to the minimal sum of distances L
+for Kendall’s tau and the footrule metric [Fagin et al., 2004].
+While approximate techniques in fact provide a viable op-
+tion, we will present a computationally efﬁcient and exact
+method for a generalization of the sum of squared rank differ-
+ences metric in the following section to implement a version
+of our case-based multilabel ranking framework.
+
+5 Aggregation Analysis
+The Spearman rank correlation coefﬁcient, a linear transfor-
+mation of the sum of squared rank differences metric, is a
+natural and well-known similarity measure on strict rankings
+[Spearman, 1904]. It can be generalized to the case of rank-
+ings with ties in the same way as the Spearman footrule met-
+ric, where (integer) rank values for strict rankings are sub-
+stituted with average bucket locations. Hence, for any two
+bucket orders σ, σ(cid:3), the generalized squared rank difference
+metric is deﬁned as
+l2(σ, σ(cid:3)
+
+(σ(i) − σ(cid:3)
+
+(i))2.
+
+(cid:3)
+
+) =
+
+(1)
+
+λi∈D
+
+The following theorem shows that an optimal aggregation
+with respect to the l2 metric can be computed by ordering
+the labels according to their (generalized) mean ranks.
+Theorem 1. Let σ1 . . . σk be rankings with ties on D =
+{λ1 . . . λc}. Suppose σ is a permutation such that the labels
+λi are ordered according to 1
+j=1 σj(i) (ties are broken
+k
+arbitrarily). Then,
+k(cid:3)
+
+(cid:2)k
+
+k(cid:3)
+
+l2(σ, σj) ≤ min
+τ∈Sc
+
+j=1
+
+j=1
+
+l2(τ, σj)
+
+(2)
+
+Before we proceed to the formal proof, note that the key
+point in Theorem 1 is that the minimum is taken over Sc while
+c would be the mean
+it is well-known that the minimizer in R
+rank vector. For strict rankings with unique mean rank values,
+the optimal-aggregation property was proved in [Dwork et
+
+1In the case of strict complete rankings, solving the aggregation
+problem requires polynomial time for Spearman’s footrule metric
+[Dwork et al., 2001].
+
+IJCAI-07
+
+704
+
+al., 2001]. A proof for the more general case of non-unique
+rank values can be derived from [H¨ullermeier and F¨urnkranz,
+2004].
+
+The following proof is an adaptation of [H¨ullermeier and
+F¨urnkranz, 2004] where the ranking by pairwise comparison
+voting procedure for complete strict rankings was analyzed
+in a probabilistic risk minimization scenario. An essential
+building block of our proof is the subsequent observation on
+permutations:
+Lemma 2 ([H¨ullermeier and F¨urnkranz, 2004]). Let mi, i =
+1 . . . c, be real numbers ordered such that 0 ≤ m1 ≤ m2 ≤
+··· ≤ mc. Then, for all permutations τ ∈ Sc,
+(i − mτ (i))2.
+(cid:2)k
+
+(i − mi)2 ≤ c(cid:3)
+
+c(cid:3)
+
+(3)
+
+i=1
+
+i=1
+
+def= 1
+
+k
+
+j=1 σj(i), i =
+
+Proof [Theorem 1]. Let us deﬁne mi
+1 . . . c. Then,
+
+k(cid:3)
+
+j=1
+
+l2(τ, σj) =
+
+=
+
+=
+
+=
+
+k(cid:3)
+
+c(cid:3)
+
+(τ(i) − σj(i)2
+
+j=1
+
+c(cid:3)
+
+i=1
+
+k(cid:3)
+
+(τ(i) − mi + mi − σj(i))2
+
+i=1
+
+c(cid:3)
+
+i=1
+
+c(cid:3)
+
+i=1
+
+j=1
+
+k(cid:3)
+
+j=1
+
+(τ(i) − mi)2 − 2(τ(i) − mi) ·
+(mi − σj(i)) + (mi − σj(i))2
+(τ(i) − mi)2
+k(cid:3)
+
+(cid:4) k(cid:3)
+
+j=1
+
+− 2(τ(i) − mi)
+
+(mi − σj(i))
+(cid:5)
+
+j=1
+
+(mi − σj(i))2
+
+.
+
+k(cid:3)
+
+j=1
+
++
+
+hence, providing a very efﬁcient aggregation technique. Note
+that this method aggregates rankings with ties into a single
+strict ranking. The related problem of aggregating into a
+ranking where ties are allowed forms an interesting area of
+research in itself and for the case of the l2-metric the required
+complexity is an open question. Moreover, multilabel rank-
+ing requires predicting strict rankings such that an intermedi-
+ate aggregation into a ranking with ties would entail an ad-
+ditional postprocessing step and hence forms a less intuitive
+approach to this problem.
+As stated above, the virtual label λ0 is associated with
+the second bucket B2 = {λ0} in order to provide a rele-
+vance split point. In an initial empirical investigation, we ob-
+served that l2-optimal rankings in k-NN multilabel ranking
+yield good performance with respect to standard evaluation
+measures on the ranking performance, while the accuracy in
+terms of multilabel classiﬁcation measures reached a reason-
+able, yet not entirely satisfactory level. This observation may
+be attributed to the fact that the l2-metric penalizes misplaced
+labels equally for all labels including λ0. However, particu-
+larly in the context of multilabel classiﬁcation, λ0 carries a
+special degree of importance and therefore misclassiﬁcations
+in the aggregation step should be penalized more strongly. In
+other words, reversing the preference between two labels is
+especially bad if one of these labels is λ0, as it means mis-
+classifying the second label in an MLC sense.
+
+To remedy this problem, our approach can be extended in
+a consistent and elegant manner: Instead of a single virtual
+label λ0, we consider a set of virtual labels {λ0,1 . . . λ0,p}
+which is associated with the split bucket Bi. In doing so, the
+theoretical analysis on the aggregation remains valid and the
+parameter p provides a means to control the penalty for mis-
+classiﬁcations in aggregating rankings. Note that the compu-
+tational complexity does not increase as the expansion into a
+set of virtual split labels can be conducted implicitly. More-
+over, on computing a prediction, the set of virtual labels can
+be merged into a single label again in a consistent way as all
+labels have the same mean rank value.
+
+To illustrate this “gap broadening” control mechanism, let
+us take a look at a simple aggregation example with three
+MLC-induced rankings using a single virtual label:
+
+{λ1} (cid:2) {λ0} (cid:2) {λ2, λ3, λ4, λ5}
+{λ1} (cid:2) {λ0} (cid:2) {λ2, λ3, λ4, λ5}
+{λ2} (cid:2) {λ0} (cid:2) {λ1, λ3, λ4, λ5}
+
+These bucket orders would be aggregated into a total order
+such that P = ∅ and N = {λ1 . . . λ5} as m0 = 2 (mean rank
+of λ0) and every other mean rank is greater, including m1 =
+2.17. Using a set of two virtual labels, we obtain m0 = m1 =
+2.5, hence, the order of these labels is determined randomly.
+Finally, for three virtual labels, m0 = 3 and m1 = 2.83 such
+that the aggregated calibrated ranking corresponds to a multi-
+label classiﬁcation P = {λ1} and N = {λ2, λ3, λ4 λ5}.
+
+6 Empirical Evaluation
+The purpose of this section is to provide an empirical com-
+parison between state-of-the-art model-based approaches and
+
+In the last equation, the mid-term equals 0 as
+
+k(cid:3)
+
+(mi − σj(i)) =
+
+j=1
+
+j=1
+
+l=1
+
+k(cid:3)
+
+k(cid:3)
+
+1
+k
+
+σl(i) − k(cid:3)
+σj(i).
+(cid:2)k
+
+j=1
+
+Furthermore, the last term is a constant t def=
+σj(i))2 which does not depend on τ. Hence, we obtain
+
+j=1(mi −
+
+k(cid:3)
+
+l2(τ, σj) = c t + k
+
+c(cid:3)
+
+(τ(i) − mi)2.
+
+j=1
+
+i=1
+
+The proof follows directly from Lemma 2.
+
+We have proved that an l2-optimal aggregation with respect
+to the set of permutations can be computed by ordering the la-
+bels according to their mean ranks. Regarding the complex-
+ity, this method requires computational time in the order of
+O(kc + c log c) for computing and sorting the mean ranks,
+
+IJCAI-07
+
+705
+
+0.28
+
+0.27
+
+0.26
+
+0.25
+
+0.24
+
+0.23
+
+0.22
+
+0.21
+
+0.20
+
+0.19
+
+p=1
+p=2
+p=4
+p=8
+p=16
+p=32
+p=64
+p=128
+
+s
+s
+o
+
+l
+ 
+
+i
+
+g
+n
+m
+m
+a
+H
+
+1 5 9 13 17 21 25 29 33 37 41 45 49
+
+k
+
+Figure 1: Gap ampliﬁcation on the (functional) Yeast dataset:
+The estimated Hamming loss clearly decreases in the param-
+eter p, which controls the number of virtual labels used for
+splitting relevant and irrelevant labels.
+
+our novel case-based framework (using the l2-minimizing ag-
+gregation technique). The datasets that were included in the
+experimental setup originate from the bioinformatics ﬁelds
+where multilabeled data can frequently be found. More pre-
+cisely, our experiments considered two types of genetic data,
+namely phylogenetic proﬁles and DNA microarray expres-
+sion data for the Yeast genome, consisting of 2465 genes.2
+Every gene was represented by an associated phylogenetic
+proﬁle of length 24. Using these proﬁles as input features,
+we investigated the task of predicting a “qualitative” (MLR)
+representation of an expression proﬁle: Actually, the proﬁle
+of a gene is a sequence of real-valued measurements, each of
+which represents the expression level of that gene at a partic-
+ular time point. Converting the expression levels into ranks,
+i.e., ordering the time points (= labels) according to the as-
+sociated expression values) and using the Spearman correla-
+tion as a similarity measure between proﬁles was motivated
+in [Balasubramaniyan et al., 2005].3 Here, we further ex-
+tend this representation by replacing rankings with multilabel
+rankings. To this end, we use the zero expression level as a
+natural split point. Thus, the sets Px and Nx correspond, re-
+spectively, to the time points where gene x is over- and under-
+expressed and, hence, have an important biological meaning.
+We used data from eight microarray experiments, giving
+rise to eight prediction problems all using the same input fea-
+tures but different target rankings.
+It is worth mentioning
+that these experiments involve different numbers of measure-
+ments, ranging from 4 to 18. Since in our context, each mea-
+surement corresponds to a label, we obtain ranking problems
+of quite different complexity. Besides, even though the origi-
+nal measurements are real-valued, there are many expression
+proﬁles containing ties. Each of the datasets was randomly
+split into a training and a test set comprising 70% and 30%,
+respectively, of the instances. In compliance with [Balasub-
+
+2This data is publicly available at
+
+http://www1.cs.columbia.edu/compbio/exp-phylo
+3This transformation can be motivated from a biological as well
+
+as data analysis point of view.
+
+ramaniyan et al., 2005], we measured accuracy in terms of
+the (generalized) Spearman rank correlation coefﬁcient, nor-
+malized such that it evaluates to −1 for reversed and to +1
+for identical rankings (see Section 5).
+
+Support vector machines have demonstrated state-of-the-
+art performance in a variety of classiﬁcation tasks, and
+therefore have been used as the underlying binary classi-
+ﬁers for the binary relevance (BR) and calibrated ranking
+by pairwise comparison (CRPC) approaches to multilabel
+learning in previous studies [Elisseeff and Weston, 2001;
+Brinker et al., 2006]. Regarding the associated kernel, we
+considered both linear kernels (LIN) with the margin-error
+penalty C ∈ {2−4 . . . 24} and polynomial kernels (POLY)
+where the degree varied from 1 to 5 and C ∈ {2−2 . . . 22}.
+For each parameter (combination) the validation accuracy
+was estimated by training on a randomly selected subsample
+comprising 70% of the training set and testing on the remain-
+ing 30%. Then, the ﬁnal model was trained on the whole
+training set using the parameter combination which achieved
+the best validation accuracy. Similarly, the number of nearest
+neighbors k ∈ {1, 3, .., 11, 21, .., 151} was determined.
+
+In addition to the original k-NN MLR approach, we in-
+cluded a version (denoted by the sufﬁx “-r”) which only ex-
+ploits the MLC training data, (Px, Nx), and a common exten-
+sion in k-NN learning leading to a slightly modiﬁed aggrega-
+tion step where average ranks are weighted by the distances
+of the respective feature vectors to the query vector (referred
+to as k-NN∗).
+
+The experimental results in Table 2 clearly demonstrate
+that our k-NN approach is competitive with state-of-the-art
+model-based methods. More precisely, k-NN∗ and CRPC-
+POLY achieve the highest level of accuracy, followed by
+k-NN with only a small margin. BR is outperformed by the
+other methods, an observation which is not surprising as BR
+only uses the relevance partition of labels for training and
+cannot exploit the additional rankings of labels. Similarly, the
+MLC versions of k-NN perform worse than their MLR coun-
+terparts. Moreover, CRPC with polynomial kernels performs
+slightly better than with linear kernels, whereas for BR a sub-
+stantial difference cannot be observed. The inﬂuence of gap
+ampliﬁcation is demonstrated in Figure 1 on an MLC task
+replicated from [Elisseeff and Weston, 2001], where genes
+from the same Yeast dataset discussed above have to be as-
+sociated with functional categories. Moreover, as already an-
+ticipated on behalf of our theoretical analysis in Section 5,
+Table 1 impressively underpins the computational efﬁciency
+of our approach from an empirical perspective.
+
+7 Concluding Remarks
+We presented a general framework for multilabel ranking us-
+ing a case-based methodology which is conceptually simpler
+and computationally less complex than previous model-based
+approaches to multilabel ranking. From an empirical perspec-
+tive, this approach is highly competitive with state-of-the-art
+methods in terms of accuracy, while being substantially faster.
+the modular aggregation step provides a
+means to extend this approach in several directions. For
+example, Ha and Haddawy [2003] proposed an appealing
+
+Conceptually,
+
+IJCAI-07
+
+706
+
+Dataset Labels
+alpha
+elu
+cdc
+spo
+heat
+dtt
+cold
+diau
+
+18
+14
+15
+11
+6
+4
+4
+7
+
+k-NN k-NN-r
+0.2096
+0.2126
+0.2332
+0.2255
+0.1834
+0.2021
+0.1691
+0.1858
+0.1186
+0.1576
+0.3089
+0.3155
+0.2719
+0.2739
+0.4074
+0.4069
+
+k-NN∗
+0.2164
+0.2367
+0.2047
+0.1882
+0.1507
+0.3105
+0.2840
+0.4135
+
+k-NN∗-r CRPC-POLY CRPC-LIN BR-POLY BR-LIN
+0.2070
+0.2153
+0.2274
+0.2021
+0.1737
+0.1871
+0.1368
+0.1715
+0.1417
+0.1206
+0.3117
+0.2303
+0.2421
+0.2678
+0.4114
+0.3609
+
+0.2241
+0.2285
+0.2092
+0.1750
+0.1509
+0.3117
+0.2975
+0.4122
+
+0.2167
+0.2164
+0.1825
+0.1710
+0.1517
+0.3034
+0.2741
+0.3996
+
+0.2040
+0.1983
+0.1867
+0.1496
+0.1040
+0.2894
+0.2415
+0.3897
+
+Table 2: Experimental results on the Yeast dataset using the Spearman rank correlation as the evaluation measure.
+
+CRPC
+
+BR
+
+Dataset
+alpha
+elu
+cdc
+spo
+heat
+dtt
+cold
+diau
+
+k-NN
+Test
+1.77
+1.71
+1.73
+1.71
+1.68
+1.64
+1.66
+1.69
+
+Train
+416.90
+240.23
+280.39
+154.09
+52.98
+20.90
+22.81
+52.63
+
+Test
+145.61
+84.41
+100.47
+54.47
+17.86
+7.18
+8.07
+18.85
+
+Train
+44.60
+33.38
+36.66
+24.32
+15.20
+6.68
+8.91
+13.02
+
+Test
+15.84
+12.02
+13.13
+9.11
+5.17
+2.59
+3.15
+4.88
+
+Table 1: Computational complexity (in seconds) for training
+and testing on a Pentium 4 with 2.8GHz (where k = 100 for
+the k-NN approach). The Yeast training and test set consist
+of 1725 and 740 instances, respectively.
+
+probabilistic loss on preferences which originates from the
+Kendall tau loss and extends to both partial and uncertain
+preferences. Efﬁcient methods for (approximate) rank ag-
+gregation with respect to this measure have not been devel-
+oped yet but could potentially be plugged into our case-based
+framework in order to generalize to the uncertainty case.
+Moreover, Chin et al. [2004] studied a weighted variant of
+the Kendall tau loss function and proposed an approximate
+aggregation algorithm which requires polynomial time.
+
+Acknowledgments
+This research was supported by the German Research Foun-
+dation (DFG) and Siemens Corporate Research (Princeton).
+
+References
+[Balasubramaniyan et al., 2005] R.
+
+Balasubramaniyan,
+E. H¨ullermeier, N. Weskamp, and J¨org K¨amper. Clus-
+tering of gene expression data using a local shape-based
+similarity measure.
+Bioinformatics, 21(7):1069–1077,
+2005.
+
+[Bartholdi et al., 1989] J. J. Bartholdi, C. A. Tovey, and
+M. A. Trick. Voting schemes for which it can be difﬁcult
+to tell who won the election. Social Choice and welfare,
+6(2):157–165, 1989.
+
+[Brinker et al., 2006] Klaus Brinker, Johannes F¨urnkranz,
+and Eyke H¨ullermeier. A uniﬁed model for multilabel
+classiﬁcation and ranking. In Proceedings of the 17th Eu-
+ropean Conference on Artiﬁcial Intelligence , 2006.
+
+[Brinker and H¨ullermeier, 2005] Klaus Brinker and Eyke
+In Proceedings
+
+H¨ullermeier. Case-based label ranking.
+of ECML 2006, pages 566–573, 2006.
+
+[Chin et al., 2004] Francis Y. L. Chin, Xiaotie Deng, Qizhi
+Fang, and Shanfeng Zhu. Approximate and dynamic rank
+aggregation. Theor. Comput. Sci., 325(3):409–424, 2004.
+[Dasarathy, 1991] B.V. Dasarathy. Nearest neighbor (NN)
+
+norms: NN pattern classiﬁcation techniques, 1991.
+
+[Dwork et al., 2001] Cynthia Dwork, Ravi Kumar, Moni
+Naor, and D. Sivakumar. Rank aggregation revisited. In
+World Wide Web, pages 613–622, 2001.
+
+[Elisseeff and Weston, 2001] Andr´e Elisseeff and Jason We-
+ston. A kernel method for multi-labelled classiﬁcation. In
+Advances in NIPS 14, pages 681–687, 2001.
+
+[Fagin et al., 2004] Ronald Fagin, Ravi Kumar, Mohammad
+Mahdian, D. Sivakumar, and Erik Vee. Comparing and
+aggregating rankings with ties. In Proc. 23rd ACM Sym-
+posium on PODS, pages 47–58, 2004.
+
+[F¨urnkranz and H¨ullermeier, 2003] Johannes F¨urnkranz and
+Eyke H¨ullermeier. Pairwise preference learning and rank-
+ing. In Proceedings of ECML 2003, pages 145–156, 2003.
+[Ha and Haddawy, 2003] Vu Ha and Peter Haddawy. Simi-
+larity of personal preferences: theoretical foundations and
+empirical analysis. Artif. Intell., 146(2):149–173, 2003.
+
+[Har-Peled et al., 2002] Sariel Har-Peled, Dan Roth, and
+Dav Zimak. Constraint classiﬁcation: A new approach to
+multiclass classiﬁcation and ranking. In Advances in NIPS
+15, 2002.
+
+[H¨ullermeier and F¨urnkranz, 2004] Eyke H¨ullermeier and
+Johannes F¨urnkranz. Comparison of ranking procedures
+in pairwise preference learning. In IPMU–04, pages 535–
+542, 2004.
+
+[Schapire and Singer, 2000] Robert E. Schapire and Yoram
+Singer. BoosTexter: A boosting-based system for text cat-
+egorization. Machine Learning, 39(2/3):135–168, 2000.
+
+[Spearman, 1904] Charles Spearman. The proof and mea-
+surement of association between two things. American
+Journal of Psychology, 15:72–101, 1904.
+
+[Tsoumakas et al., 2006] G. Tsoumakas, I. Katakis, and I.
+Vlahavas. A review of multi-label classiﬁcation methods.
+In 2nd ADBIS Workshop on Data Mining and Knowledge
+Discovery, pages 99–109, 2006.
+
+IJCAI-07
+
+707
+
+

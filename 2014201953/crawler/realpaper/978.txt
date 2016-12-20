@@ -1,0 +1,1106 @@
+Sequence Prediction Exploiting Similarity Information
+
+Istv´an B´ır´o and Zolt´an Szamonek and Csaba Szepesv´ari
+
+Computer and Automation Research Institute of the Hungarian Academy of Sciences
+
+Kende u. 13-17, Budapest 1111, Hungary
+
+E¨otv¨os Lor´and University
+
+P´azm´any P. s´et´any 1/c, Budapest 1117, Hungary
+
+ibiro@sztaki.hu, zszami@elte.hu, szcsaba@sztaki.hu
+
+Abstract
+
+When data is scarce or the alphabet
+is large,
+smoothing the probability estimates becomes in-
+escapable when estimating n-gram models. In this
+paper we propose a method that implements a form
+of smoothing by exploiting similarity information
+of the alphabet elements. The idea is to view the
+log-conditional probability function as a smooth
+function deﬁned over the similarity graph. The al-
+gorithm that we propose uses the eigenvectors of
+the similarity graph as the basis of the expansion
+of the log conditional probability function whose
+coefﬁcients are found by solving a regularized lo-
+gistic regression problem. The experimental results
+demonstrate the superiority of the method when
+the similarity graph contains relevant information,
+whilst the method still remains competitive with
+state-of-the-art smoothing methods even in the lack
+of such information.
+
+1 Introduction
+Statistical language models (SLM) attempt to capture the
+regularities of a natural language using statistical methods to
+construct estimates of distributions of various linguistic units,
+such as morphemes, words, phrases, sentences, or documents.
+Because of the categorical nature and the large vocabulary of
+natural languages, statistical techniques must estimate a large
+number of parameters, and thus depend critically on the avail-
+ability of a large amount of training data. Given the complex-
+ity of languages, such training data is rarely available.
+In
+the lack of a sufﬁciently large and rich dataset, simple ap-
+proaches like straightforward maximum likelihood (ML) es-
+timation tend to produce poor quality models.
+
+Smoothing in this context is typically used to refer to tech-
+niques that combine various ML probability estimates to pro-
+duce more accurate models. An enormous number of tech-
+niques have been proposed for the smoothing of n-gram mod-
+els, including discounting, recursively backing off to lower
+order n-grams, linearly interpolating n-grams of different or-
+ders. An excellent survey of these and some other techniques
+can be found in [Chen and Goodman, 1996].
+
+Clustering models make use of smoothing ideas, but also
+In the
+
+attempt to make use of similarities between words.
+
+class-based n-gram estimation [Brown et al., 1992], a greedy
+algorithm searches the space of clustering to ﬁnd one that in-
+creases the data likelihood the most. The method is extended
+to handle trigram by [Ueberla, 1994], where a heuristic ran-
+domization was used to speed-up the clustering process with
+only a slight loss in performance.
+
+These early works rely on short span relationships
+(such as bigram or trigram) and therefore tend to produce
+syntactically-oriented clusters. Another approach proposed
+by [Bellegarda et al., 1996] exploits large span relation-
+ships between words and results in clusters that are seman-
+tically oriented. The idea is to exploit that documents can
+be thought of as a semantically homogenous set of sentences.
+Hence, if a set of documents is available then this knowledge-
+source could be exploited to create semantically meaningful
+word-clusters. The algorithm forms a word-document matrix
+given the training data, performs singular-value decomposi-
+tion (SVD) on the resulting matrix, and then clusters over the
+projections according to a well-chosen measure.
+
+Clustering is a special case of constructing similarity infor-
+mation over the alphabet elements (most often over the words
+[Dagan et al., 1999] pro-
+or word-forms of a language).
+posed to use a kernel-based smoothing technique where the
+kernel function is built using similarity information derived
+from word-cooccurrence distributions. They have shown up
+to 20% reduction in perplexity for unseen bigrams as com-
+pared to standard back-off schemes. [Toutanova et al., 2004]
+investigated a Markov chain model that exploits a priori simi-
+larity information, whose stationary distribution was used for
+solving prepositional phrase attachment problems.
+
+Our Contribution In this paper we propose a method that
+implements a form of smoothing by exploiting similarity in-
+formation of the alphabet elements. The idea is to view the
+log-conditional probability function as a smooth function de-
+ﬁned over the similarity graph. The algorithm that we pro-
+pose uses the eigenvectors of the similarity graph as the basis
+of the expansion of the log conditional probability function.
+The coefﬁcients of the expansion are found by solving a regu-
+larized logistic regression problem. The experimental results
+demonstrate the superiority of the method when the similarity
+graph contains relevant information, whilst the method still
+remains competitive with state-of-the-art methods even in the
+lack of such information.
+
+IJCAI-07
+
+1576
+
+2 Sequence prediction based on similarity
+
+information
+
+Consider a word prediction task over some vocabulary V. Let
+p(w|h) denote the conditional probability of word w ∈ V,
+where h ∈ V∗
+is some history. If we constrain the size of
+histories to n−1 words we get the well known n-gram model.
+For the sake of simplicity in this paper we will only deal with
+bigrams (the methods proposed can be readily extended to
+higher order n-grams). In what follows the notation p(y|x)
+will be used to denote the bigram probabilities.
+
+Given appropriate basis
+
+functions, {ϕi},
+
+the log-
+
+probabilities of the bigrams can be written in the form
+
+(cid:2)
+
+log p(y|x) ∝
+
+αiϕi(x, y).
+
+i∈I
+
+(1)
+
+Clearly, the simplest choice is to let I = V ×V and use the so-
+called Euclidean basis functions, ϕi(x, y) = ϕ(i1,i2)(x, y) =
+δ(i1, x)δ(i2, y), where δ(·, ·) is the Kronecker’s delta func-
+tion. With this basis function set, ﬁtting this model to some
+dataset is equivalent to maximum likelihood training. The
+main idea in the paper is that given some similarity infor-
+mation over V it might be possible to construct another ba-
+sis function set that facilitates generalization to unseen cases.
+Since the basis functions that we will construct will form an
+overcomplete representation, we will resort to a form of reg-
+ularization to prevent overﬁtting.
+
+Incorporating similarity information
+
+2.1
+Let V = {w1, . . . , w|V|} be the words in the vocabulary. In
+order to estimate the p(y|x) conditional probability distribu-
+tion, where (x, y) ∈ W, we used the similarity information
+hidden in the context. Assume that the similarity informa-
+tion between words is represented as an undirected weighted
+graph G = (V, E, W ), where E ⊂ V × V are the edges
++
+and W : E → R
+0 assigns non-negative weights to word-
+pairs. For mathematical convenience, we use W to denote
+the |V| × |V| weight matrix, where the (i, j)th entry of W
+is the weight of the edge i → j. The idea is to construct
+basis functions that respect the similarity information in W .
+One way to accomplish this is to use spectral graph cluster-
+ing which is known to yield basis functions that can be used
+to represent any square integrable function over G [Chung,
+1997]. In fact, spectral graph clustering methods construct
+basis functions that are natural for constructing geodesically
+smooth global approximations of the target function. In other
+words, smoothness respects the edges of the graph. In our
+case this means that similar words (or word-pairs) will be as-
+signed similar probabilities. It is left for future work to deter-
+mine if the results presented here can be improved by using
+other techniques, such as diffusion wavelets by [Coifman and
+Maggioni, 2006].
+
+2 W D− 1
+
+In the particular method we have chosen, the basis func-
+tions are computed using the singular value decomposition of
+the matrix P = D− 1
+2 . Here D is the diagonal valency
+j wij .
+matrix; its diagonal elements are deﬁned by di =
+This operator is spectrally similar to the normalized graph
+Laplacian operator, L = D− 1
+2 . In fact, ele-
+mentary algebra yields that I − L = D− 1
+2 = P . The
+
+2 (D − W )D− 1
+
+2 W D− 1
+
+(cid:3)
+
+(cid:3)
+
+(cid:3)
+
+v∈V |f (v)|2dv +
+
+spectrum of the graph Laplacian is known to have a close re-
+lationship to global properties of the graph, such as “dimen-
+sion”, bottlenecks, clusters, mixing times of random walks,
+etc. The spectral decomposition method employed is moti-
+vated as follows: The smoothness of a function, f : V →
+R on the graph G can be measured by the Sobolev-norm
+(u,v)∈E(f (u) − f (v))2wuv.
+(cid:6)f (cid:6)G =
+The ﬁrst term here controls the size of the function, whilst
+the second controls the gradient. Using this norm, the ob-
+jective to exploit similarity information can be expressed as
+the desire to ﬁnd a loglikelihood function whose G-norm
+is small. Now, the projection of a function f on the lin-
+ear function space spanned by the top k eigenvectors of the
+Laplacian is the smoothest approximation to f with k ba-
+sis functions, in the sense of the G-norm. Hence, inﬂu-
+enced by [Ding et al., 2002] we decomposed P using sin-
+gular value decomposition: P = U SV T
+. For practical pur-
+poses, we truncated the SVD of P in such a way that the
+(cid:6)Pk(cid:6)F = 0.9 (cid:6)P(cid:6)F , where (cid:6)·(cid:6)F is the Frobenius norm, and
+Pk = UkSkV T
+k is the truncated version of P where only the
+k column vectors of U and k row vectors of V corresponding
+to the k largest singular values of S are kept. For proper nor-
+malization, the singular vectors in Uk are multiplied by the
+square root of the respective singular values [Dhillon, 2001;
+Ding et al., 2002]: U(cid:4)
+
+k = UkS1/2
+
+.
+
+k
+
+Now, the basis functions are obtained using the columns of
+Uk: Denoting these columns by ψ1, . . . , ψk, ϕ(i1,i2)(x, y) =
+δ(i1, y)ψi2 (x), where i1, x, y ∈ V, i2 ∈ {1, . . . , k}. Since
+the similarity information might be unreliable we added
+the Euclidean basis functions, ϕ(cid:4)
+i(x, y) = φ(i1,i2)(x, y) =
+δ(i1, x)δ(i2, y), to the set obtained. This way even when
+the automatically constructed basis functions are useless, the
+method still has a chance to recover. To handle unknown
+[Baker,
+words, one may resort to Nystr¨om’s method (e.g.
+1977]): In order to extend a singular vector ψi to a new word,
+z, it sufﬁces to know wxz for all x ∈ V in the set of known
+ψi(x) can be shown to be a good
+words. In fact,
+approximation.
+
+(cid:3)
+x∈V wxz√
+
+dxdz
+
+In the experiments below we always used a single simi-
+larity graph, though the algorithm has the natural ability to
+use more graphs by simply merging the set of resulting basis
+functions. Just like in regression, we may use all the basis
+functions, as well as all the products of two basis functions:
+
+(cid:2)
+
+(cid:2)
+(cid:2)
+
+i∈I
+a
+αab
+ij ϕa
+
+log p(y|x) ∝
+
+(cid:2)
+
+i,j∈I
+
+a,b
+
+αa
+i ϕa
+
+i (x, y) +
+
+i (x, y)ϕb
+
+j (x, y)
+
+(2)
+
+In fact, this is a second order ANOVA model [Lin, 2000].
+Higher order models (products of more than two basis func-
+tions) may also be used. In practice, however, they are rarely
+used since second order models typically produce sufﬁciently
+good results. When more than one model sets are combined,
+the number of parameters increases rapidly. Hence, the use
+of a regularized ﬁtting method becomes of high importance.
+
+IJCAI-07
+
+1577
+
+2.2 Solving the regression problem
+Since by assumption all of our basis functions depend only
+through the Kronecker delta on y, equation (1) when raised
+to the exponent takes the form:
+
+p(y|β(x), α) =
+
+eαT
+
+y β(x)
+
+1
+Zα
+
+, where Zα =
+
+eαT
+
+i β(x)
+
+(3)
+
+|V|(cid:2)
+(cid:5)T
+
+i=1
+
+is the normalizing factor, α =
+is the ma-
+trix of the weight parameters to be learned , αy contains the
+weight parameters of word y, and β(x) is the vector formed
+from the basis functions evaluated at x. We shall call β(x)
+the feature vector associated with x.
+
+α1, . . . , α|V|
+
+Let the training data be the sequence D = (v1, . . . , vN ),
+vi ∈ V. Assuming that the data is generated by a ﬁrst order
+Markov model where the transition probabilities can be mod-
+eled by a multinomial model (3), the data log-likelihood takes
+the following form:
+
+lML(α|D) =
+
+β(vj−1) −
+
+(cid:6)
+N(cid:2)
+|V|(cid:2)
+
+j=2
+
+αT
+vj
+
+(cid:4)
+
+(cid:7)
+
+(cid:8)(cid:9)
+
+(4)
+
++ const
+
+− log
+
+exp
+
+i=1
+
+αT
+i β(vj−1)
+
+ij
+2λ2
+ij
+
+(cid:10)
+
+λij exp(− α2
+N(cid:2)
+(cid:7)
+
+αT
+vj
+
+j=2
+
+|V|(cid:2)
+
+The maximum likelihood (ML) estimate of the parameter
+vector is the vector that maximizes this function. In order
+to prevent overtraining it is advisable to prefer smooth solu-
+tions, especially if the number of basis functions is big (in
+other words, if the feature vectors, β, are high dimensional).
+One way to enforce smoothness is to introduce a prior dis-
+tribution over the parameters αij . Several choices are pos-
+sible for such priors. In this work we studied the behaviour
+of the method when it was used either with the Laplacian-
+prior, p(αij ) ∝ λij exp(−λij |αij|), or with the Gaussian-
+prior, p(α) ∝ 1
+
+).
+
+Assuming one of the above priors, the training problem be-
+comes the maximization of the following objective function:
+
+lMAP(α|D) =
+
+β(vj−1)−
+
+− log
+
+exp
+
+i=1
+
+αT
+i β(vj−1)
+
+−
+
+(cid:8)(cid:11)
+
+(5)
+
+|V|(cid:2)
+
+k(cid:2)
+
+i=1
+
+j=1
+
+λij |αij|p
+
+i.e. an (cid:9)p
+penalty term is added to the ML objective function.
+Here p = 1 or 2 depending on which prior one wishes to
+use: p = 1 corresponds to the Laplacian prior, whilst p = 2
+corresponds to the Gaussian prior.
+
+We used the SMLR java implementation of [Krishnapuram
+) and
+), to ﬁnd the solution for equation (5). The
+
+et al., 2005] which implemented both the Laplacian (l1
+Gaussian priors (l2
+sketch of the algorithm is shown on Algorithm 1.
+
+3 Experimental Results
+We compared the performance of similarity based smoothing,
+SBS, on synthetic and real-world data to both plain bigram es-
+timates (BI) and interpolated Kneser-Ney smoothing (IKN).
+
+N(cid:2)
+
+i=1
+
+similarity information between words, training data
+
+Algorithm 1 Similarity Based Smoothing (SBS)
+Input:
+Output: estimated probability distribution
+1. Build a similarity graph between words G = (V, E, W )
+2. Calculate the normalized matrix of G: P = D− 1
+2 W D− 1
+3. Determine the SVD decomposition of P = U SV T
+4. Calculate the mapping operator from the singular vectors
+
+2
+
+of top singular values: Φ = UkS
+
+1
+
+2
+
+k
+
+5. Train the Logistic Regression Model weight parameters
+
+using the training data
+
+IKN is considered as one of the best smoothing techniques
+[Goodman, 2001].
+
+In order to evaluate the methods we calculated the em-
+pirical cross-entropy of the trained model on held-out data,
+w1, . . . , wN :
+
+HN (p, ˆp) = − 1
+N
+
+log2 ˆp (wi|wi−1) .
+
+(6)
+
+Here ˆp(wi|wi−1) is the probability assigned to the transition
+from wi−1 to wi by the model and p denotes the true distri-
+bution. (For the synthetic datasets we have wi ∼ p(·|wi−1).)
+Since by assumption, the held-out data has the same distribu-
+tion as the training data, by the Shannon-McMillan-Breiman
+theorem we know that (under mild assumptions) HN is close
+to the cross-entropy of ˆp with respect to the true distribution
+p of the data. The cross-entropy of ˆp and p is the sum of the
+entropy of p and the Kullback-Leibler divergence of ˆp and p,
+a non-negative quantity. The smaller the cross-entropy, the
+closer the estimated model is to the true model.
+
+For each test, we calculated the cross entropies for the
+ML-trained bigram, IKN and the proposed similarity based
+smoothing technique.
+In the case of synthetic datasets we
+also estimated the entropy of the models by using the true
+transition probabilities in (6). The corresponding points in
+the graphs are labeled as ‘model’.
+
+3.1 Tests on Synthetic Data
+The model generating the synthetic data In order to de-
+velop a good understanding of the possible advantages and
+limitations of the proposed method, we tested it in a con-
+trolled environment where data was generated using some
+designated bigram model. In order to make the test interest-
+ing, we decided to use “clustered” Markov models of the fol-
+lowing form: the probability of observing y given x is com-
+puted by
+
+P (y|x) = P ( y | c(y) ) P ( c(y) | c(x) ),
+
+(7)
+where c(x) is the cluster of symbol (word) x (c : V → C
+with |C| < |V|). The idea is that the next observation de-
+pends on the past observation x only through its class, c(x)
+and hence two past observations, x and x(cid:4)
+yield to identical
+future distributions whenever c(x) = c(x(cid:4)
+). Note that when
+P (y|c) = δ(c(y), c) then the model can be thought of as a
+
+IJCAI-07
+
+1578
+
+Hidden Markov Model (HMM) with state transitions deﬁned
+over C, whilst when the observation probabilities are uncon-
+strained then in general no HMM with |C| states is equivalent
+to this model. In any way, the model can be speciﬁed by two
+|C|×|C|
+matrices, (A, B), with Ac1,c2 = P (c2|c1) (A ∈ R
+)
+and By,c = P (y|c) (B ∈ R
+). Let us now describe how
+these matrices were generated.
+
+|V|×|C|
+
+For computing the matrix A, we start with a permutation
+matrix of size |C| × |C| and perturb it with random noise so
+that (i) all transition probabilities are nonzero and (ii) for each
+state the number of “signiﬁcant” transitions lies between 1
+and
+structured matrix with B(cid:4)
+according to
+
+For computing B, we start from the idealized block-
+yc ∝ δ(c(y), c) and then perturb it
+
+|C|
+4 .
+
+yc),
+
+yc + δ(1 + γz(cid:4)
+
+Byc ∝ B(cid:4)
+where the elements of z(cid:4)
+yc are independent random variables
+uniformly distributed in [−0.5, 0.5]. If δ = 0 then the block
+structure of the source is clearly identiﬁable based on the out-
+puts: Given an observation y and knowing C we can infer
+with probability one that the hidden state is c(y) and as noted
+before the model collapses to a hidden Markov model with
+C states. When δ is non-zero this structure is blurred. In the
+experiments we used δ = 0.1 whilst we let γ change in [0, 1].
+Note that γ = 1 roughly corresponds to a noise level of 5%
+in the observations.
+
+Similarity information provided for SBS We controlled
+how well the similarity information provided for SBS reﬂects
+the actual block structure of the data. The perfect similar-
+ity information assigns 0 to observations (words) in different
+clusters, whilst it assigns the same positive value, say 1, to
+observations in the same cluster. The corresponding matrix is
+denoted by S (S ∈ R
+
+): Sxy = δ(c(x), c(y)).
+
+|V|×|V|
+
+We then disturbed S by adding noise to it. For this a ran-
+dom |V| × |V| matrix (Z) was created whose entries for inde-
+pendent, uniformly distributed random variables taking val-
+ues in [0, 1]. Given a noise parameter,  ≥ 0, the perturbed
+matrix is computed by
+
+S = S +  ((−S (cid:9) Z) + ((1 − S) (cid:9) Z)).
+
+Here U (cid:9) V denotes the component wise product of matrices
+U and V , 1 denotes the matrix with all of its entries being
+1. In words, increasing  reduces the inter-cluster similarity
+and increases between-cluster similarity. In the extreme case
+when  = 1 all similarity information is lost.
+
+Training and test datasets A training dataset normally
+contains Ntr = 300 observation sequences (except when we
+experiment by changing this parameter), each having a ran-
+dom length that was generated by drawing a random number
+L from a normal distribution with mean 11 and variance 6 and
+then setting the length to max(2, L). The test dataset (sepa-
+rate from the training dataset) had 5000 sequences which was
+generated using the same procedure. All measurements were
+repeated 9 times and the average values are presented.
+
+3.2 Results
+We performed a sensitivity analysis to test the effect of how
+the various parameters inﬂuence the results. In particular, we
+studied the performance of SBS as a function of the observa-
+tion noise, γ, that masks the identiﬁability of the block struc-
+ture, the noise in the similarity matrix () that gradually de-
+creases the quality of the similarity information available for
+SBS, the number of training sentences (Ntr) and the cluster
+structure. These parameters were changed one by one, whilst
+the others are kept at their default values which were γ = 0.2,
+ = 0.1, Ntr = 300. The default cluster structure was to have
+6 clusters, having observations 30, 20, 10, 5, 5 and 5, respec-
+tively (so that some clusters were bigger, some were smaller).
+Thus |V|, was kept at 75. We present the results for both the
+Laplacian and Gaussian priors, the corresponding results are
+labeled as ‘SBS Gauss’ and ‘SBS Lapl’ in the graphs.
+
+Sensitivity to noise masking the block-structure When
+γ = 0, the observations can be used directly to infer the un-
+derlying classes and the estimation problem is easier. When
+the block-structure masking noise is increased the problem
+becomes harder.
+
+y
+p
+o
+r
+t
+n
+e
+-
+s
+s
+o
+r
+c
+
+ 5.6
+
+ 5.5
+
+ 5.4
+
+ 5.3
+
+ 5.2
+
+ 5.1
+
+ 5
+
+ikn
+sbs lapl
+sbs gauss
+model
+bigram
+
+ 0
+
+ 0.2
+
+ 0.4
+
+ 0.6
+
+ 0.8
+
+ 1
+
+block-structure masking noise
+
+Figure 1: The cross-entropy of models built with various al-
+gorithms as a function of the block-structure masking noise
+parameter (γ)
+
+Figure 1 shows the results of the measurements.
+
+It can
+be observed that the proposed method performs signiﬁcantly
+better over the considered spectrum of γ than its peers: In
+fact, as the masking noise gets bigger, IKN’s performance
+converges to that of the bigram model. On the other hand,
+SBS was able to maintain its estimation accuracy for the
+whole range of γ. In all of these experiments SBS with the
+Gaussian parameter-prior performed slightly better than SBS
+with the Laplace prior. We believe that this is because the
+Laplacian prior prefers sparse solutions and the number of
+basis functions is not high enough for making sparse solu-
+tions preferable.
+
+Robustness against the degradation of the similarity in-
+formation In the next set of experiments we investigated
+the sensitivity of the method to the quality of the similarity
+
+IJCAI-07
+
+1579
+
+y
+p
+o
+r
+t
+
+n
+e
+-
+s
+s
+o
+r
+c
+
+ 6.1
+ 6
+ 5.9
+ 5.8
+ 5.7
+ 5.6
+ 5.5
+ 5.4
+ 5.3
+ 5.2
+ 5.1
+ 5
+
+ 0
+
+ikn
+sbs lapl
+sbs gauss
+model
+bigram
+
+ 200
+no. of sentences in the training corpus
+
+ 400
+
+ 600
+
+ 800
+
+ 1000
+
+Figure 3: The cross-entropy of models built with various al-
+gorithms as a function of the number of sentences in the train-
+ing data (Ntr).
+
+ 1
+
+ikn) − H(p, ˆp
+
+sbs)
+
+information. For this we gradually increased the similarity-
+information noise parameter, , from 0 to 1. As we have
+discussed, when  = 0 the similarity information is perfect,
+whilst when  = 1 all similarity information is lost.
+
+y
+p
+o
+r
+t
+
+n
+e
+-
+s
+s
+o
+r
+c
+
+ 5.7
+
+ 5.6
+
+ 5.5
+
+ 5.4
+
+ 5.3
+
+ 5.2
+
+ 5.1
+
+ 5
+
+ 4.9
+
+ 0
+
+ikn
+sbs lapl
+sbs gauss
+model
+bigram
+
+ 0.4
+
+ 0.2
+ 0.8
+noise in the similarity information
+
+ 0.6
+
+Figure 2: The cross-entropy of models built with various al-
+gorithms as a function of the noise parameter, , governing
+the quality of the similarity information
+
+As expected, when the similarity information gets weaker,
+the performance of SBS degrades and converges to that of
+the ML-estimated bigram model. It is notable that even when
+ = 0.7 (when the similarity information is already very poor)
+SBS performs as well as IKN. The reason is that although in
+these experiments we did not add the Euclidean basis func-
+tions to the set of basis functions, we can expect the spectrum
+of a high-noise similar matrix to be uniform, hence covering
+90% of the spectrum will add almost all singular vectors to
+the basis and thus the model automatically retains its power.
+
+Sparsity of training data The main promise of SBS is that
+by using the similarity information it is capable of achieving
+better performance even when the available training data is
+limited. In order to validate this, we performed a set of ex-
+periments when the number of sentences in the training data
+was varied. The results are shown in Figure 3. Both with the
+Gaussian and the Laplacian priors, SBS outperformed IKN
+for a wide range of values of Ntr. It is interesting to note
+that the Gaussian prior performed much better than any of
+the other methods when the number of sentences was very
+small.
+
+Cluster structure We tested SBS with large variety of clus-
+ter setups, ranging from 1 to 15 clusters, and with vocabulary
+sizes between 7 and 110. The results are summarized on Ta-
+ble 1.
+
+It is clear that if the number of clusters is small or when all
+the words are in different clusters, then there is no signiﬁcant
+structural information in the similarity. It is notable that in
+such cases SBS was still able to perform as well as IKN. On
+the other hand, if there is a signiﬁcant hidden structure in the
+model, SBS greatly outperforms IKN.
+
+clusters
+
+1,1,1,1,1,1,1
+10
+10x2
+10x3
+10x5
+10,5
+10,7,5
+10,7,5,3
+30,20,10
+30,20,10,5x3
+30,20,10,5x3,1x3
+30,20,10,5x3,1x9
+
+H(p, ˆp
+average
+
+-0.0112
+0.1776
+0.4808
+0.8679
+1.5223
+0.3001
+0.5150
+0.6296
+1.7790
+1.3352
+1.0971
+0.6537
+
+stddev
+0.0036
+0.0406
+0.0246
+0.0633
+0.0708
+0.0361
+0.0499
+0.0311
+0.1691
+0.2011
+0.2303
+0.1141
+
+Table 1: The cross-entropy decrease of SBS as compared with
+IKN for a number of different cluster structures
+
+3.3 Tests on Real Data
+
+The task considered is to predict POS sequences on the Wall
+Street Journal (WSJ) corpus. We extracted a weighted di-
+rected sub graph based on all senses in all syntactic categories
+from WordNet [Fellbaum, 1989] for 50, 000 words. Based on
+this information, a POS similarity graph (PG) was built as
+follows: using the Brown corpus1, we ﬁrst collected the pos-
+sible POS categories for every word. Next we created a prior
+POS-tag distribution for all the words. Then for every unique
+word in the Brown corpus, we added the out-links to the POS
+graph according to the WordNet graph, using the weight of
+the link in the WordNet graph and the weight of the POS tags
+in both sides of the link. For example, if we arrive at the
+word live and if the link live → bouncy in the WordNet graph
+has weight w then for all possible POS tag combinations of
+live and bouncy, the link between the POS-pairs (x, y) is in-
+creased by p(x|live) · p(y|bouncy) · w. In the next step, we
+calculated the basis functions as outlined beforehand.
+
+1The Penn Treebank Project: http://www.cis.upenn.edu/ tree-
+
+bank/
+
+IJCAI-07
+
+1580
+
+In another set of experiments a similarity graph was built
+by connecting with a constant weight those POS-tags that
+shared the same preﬁx (e.g. NN, NNP, NNS were grouped
+together).
+
+The training and test corpora were kept separate, with the
+training corpus having 1, 000 sentences (18, 500 POS-tags),
+whilst the test corpus consisted of 5, 000 sentences. The vo-
+cabulary size was 65.
+
+When the similarity graph extracted from WordNet was
+used, SBS failed to achieve a good performance. Investigat-
+ing the similarity graph, it turned out that it was very sparse,
+and it actually used 42 POS only out of the 65 POS tags.
+With the preﬁx-based similarity graph, the algorithm’s per-
+formance became practically indistinguishable to that of IKN.
+We guess that a more principled similarity graph building
+method would be needed in order to achieve a performance
+improvements in this task. SBS in theory is better suited to
+problems with larger alphabets. Unfortunately, SMLR, the
+software tool used for training SBS scales rather poorly with
+the alphabet size, seriously limiting the range of feasible ex-
+periments.
+
+Concentrating on the robustness of the estimate, we com-
+puted the perplexity reduction on those bigrams that occur
+only at most a few (say 4) times in the training corpus. It was
+found that the perplexity reduction of SBS compared to IKN
+is a mild 2%, whilst it is 4.5% as compared to the ML-trained
+bigram model. We also found if we have less sentences the
+SBS performs even a little better.
+
+4 Conclusion
+We have proposed a novel smoothing method to train n-gram
+models: The method constructs basis functions in an auto-
+mated way for a maximum-entropy model by the spectral de-
+composition of a weighted similarity graph. It was found that
+the method is able to outperform some competitors when the
+similarity information is substantially relevant, whilst it re-
+mained competitive even when the similarity information was
+not helpful.
+
+The motivation of the method is the well-known fact that
+in continuous domains smoothness of the target function (or
+density) yields faster convergence. How is it possible to
+achieve similar results in discrete domains? The ﬁrst prob-
+lem is to deﬁne an appropriate notion of smoothness. Spectral
+graph theory suggests that such a notion can be deﬁned based
+on the Laplacian of a similarity graph and that the eigen-
+decomposition of a normalized Laplacian (and other related
+operators) yields an appropriate basis for functions that are
+“smooth”, i.e. which respect the topology (geodesics) in the
+graph. To our best knowledge, this is the ﬁrst work that sug-
+gests the use of automatically constructed basis functions (or
+features) in probabilistic sequence modeling in discrete do-
+mains. Although here we only considered the simplest case,
+i.e., constructing bigram models, the idea is that the underly-
+ing method can be generalized to other more complex prob-
+lems, ranging from n-grams to even whole-sentence language
+models. For such models the similarity information must be
+constructed over extended sequences. One possibility to ac-
+complish this might be to use appropriately constructed string
+
+kernels. However, this investigation is left for future work.
+
+References
+[Baker, 1977] C. T. H. Baker. The numerical treatment of
+
+integral equations. Oxford: Clarendon Press, 1977.
+
+[Bellegarda et al., 1996] J.R. Bellegarda, J.W. Butzberger,
+Zen-Lu Chow, N.B. Coccardo, and D. Naik. A novel word
+clustering algorithm based on latent semantic analysis. In
+ICASSP-96, volume 1, pages 172–175, 1996.
+
+[Brown et al., 1992] P.F. Brown, P.V. de Souza, R.L. Mercer,
+V.J Della Pietra, and J.S. Lai. Class based n-gram mod-
+els of natural language. In Computational linguistics, vol-
+ume 8, 1992.
+
+[Chen and Goodman, 1996] Stanley F. Chen and Joshua
+Goodman. An empirical study of smoothing techniques
+for language modeling. In ACL, pages 310–318, 1996.
+
+[Chung, 1997] F. R. K. Chung. Spectral graph theory. Re-
+gional Conference Series in Mathematics 92. American
+Mathematical Society, Providence, 1997.
+
+[Coifman and Maggioni, 2006] Ronald R Coifman and
+Mauro Maggioni. Diffusion wavelets. Applied Computa-
+tional Harmonic Analysis, 2006.
+
+[Dagan et al., 1999] Ido Dagan, Lillian Lee, and Fernando
+C. N. Pereira. Similarity-based models of word cooccur-
+rence probabilities. Machine Learning, 34:43, 1999.
+
+[Dhillon, 2001] Inderjit S. Dhillon. Co-clustering documents
+and words using bipartite spectral graph partitioning. In
+KDD, pages 269–274, 2001.
+
+[Ding et al., 2002] Chris H. Q. Ding, Xiaofeng He,
+Hongyuan Zha, and Horst D. Simon. Unsupervised
+learning: Self-aggregation in scaled principal component
+space. In PKDD 2002, pages 112–124, 2002.
+
+[Fellbaum, 1989] Christaine Fellbaum, editor. WordNet: An
+Electronic Lexical Database. The MIT Press, Cambridge,
+Massachusetts, 1989.
+
+[Goodman, 2001] J. Goodman. A bit of progress in language
+
+modeling. Technical report, Microsoft Research, 2001.
+
+[Krishnapuram et al., 2005] B. Krishnapuram, L. Carin,
+M. A. T. Figueiredo, and A. J. Hartemink. Sparse multi-
+nomial logistic regression: Fast algorithms and general-
+ization bounds. IEEE Trans. Pattern Anal. Mach. Intell,
+27(6):957–968, 2005.
+
+[Lin, 2000] Yi Lin. Tensor product space ANOVA models.
+
+Annals of Statistics, 28:734–755, 2000.
+
+[Toutanova et al., 2004] Kristina Toutanova, Christopher D.
+Manning, and Andrew Y. Ng. Learning random walk mod-
+els for inducing word dependency distributions. In ICML
+’04, page 103. ACM Press, 2004.
+
+[Ueberla, 1994] J.P. Ueberla. An extended clustering algo-
+rithm for statistical language models. Technical report, Si-
+mon Fraser University, 1994.
+
+IJCAI-07
+
+1581
+
+

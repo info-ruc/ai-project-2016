@@ -1,0 +1,1310 @@
+Hierarchical Heuristic Forward Search in Stochastic Domains
+
+Nicolas Meuleau∗
+
+Ronen I. Brafman
+
+NASA Ames Research Center
+
+Department of Computer Science
+
+Mail Stop 269-3
+
+Moffet Field, CA 94035-1000, USA
+
+Ben-Gurion University
+Beer-Sheva 84105, Israel
+
+nmeuleau@email.arc.nasa.gov
+
+brafman@cs.bgu.ac.il
+
+Abstract
+
+Many MDPs exhibit an hierarchical structure where
+the agent needs to perform various subtasks that are
+coupled only by a small sub-set of variables con-
+taining, notably, shared resources. Previous work
+has shown how this hierarchical structure can be
+exploited by solving several sub-MDPs represent-
+ing the different subtasks in different calling con-
+texts, and a root MDP responsible for sequencing
+and synchronizing the subtasks, instead of a huge
+MDP representing the whole problem. Another im-
+portant idea used by efﬁcient algorithms for solv-
+ing ﬂat MDPs, such as (L)AO* and (L)RTDP, is
+to exploit reachability information and an admissi-
+ble heuristics in order to accelerate the search by
+pruning states that cannot be reached from a given
+starting state under an optimal policy. In this pa-
+per, we combine both ideas and develop a variant of
+the AO* algorithm for performing forward heuris-
+tic search in hierarchical models. This algorithm
+shows great performance improvements over hier-
+archical approaches using standard MDP solvers
+such as Value Iteration, as well as with respect to
+AO* applied to a ﬂat representation of the prob-
+lem. Moreover, it presents a general new method
+for accelerating AO* and other forward search al-
+gorithms. Substantial performance gains may be
+obtained in these algorithms by partitioning the set
+of search nodes, and solving a subset of nodes com-
+pletely before propagating the results to other sub-
+sets.
+
+In many decision-theoretic planning problems, the agent
+needs to perform various subtasks that are coupled only by
+a small sub-set of variables. A good example of this is our
+main application domain: planetary exploration. In this do-
+main, the agent, an autonomous rover, must gather scientiﬁc
+data and perform experiments at different locations. The in-
+formation gathering and experiment running task at each site
+is pretty much self-contained and independent of the other
+sites, except for two issues: the use of shared resources (such
+as time, energy and memory), and the state of some instru-
+
+∗QSS Group Inc.
+
+ments that may be used at different locations (for instance,
+warmed-up or not). The rover has only limited resource for
+each plan execution phase and it must wisely allocate these
+resources to different tasks. In most problem instances, the
+set of tasks is not achievable jointly, and the agent must dy-
+namically select a subset of achievable goals as a function of
+uncertain events outcome.
+
+These problems are often called oversubscribed planning
+problems. They have a natural two-level hierarchical struc-
+ture [Meuleau et al., 2006]. At the lower level, we have the
+tasks of conducting experiments at each site. At the higher
+level, we have the task of selecting, sequencing and coor-
+dinating the subtasks (in the planetary rover domain, this
+includes the actions of tracking targets, navigating between
+locations, and warming-up instruments). This hierarchical
+structure is often obvious from the problem description, but it
+can also be recognized automatically using factoring methods
+such as that of [Amir and Englehardt, 2003].
+
+The potential beneﬁt of hierarchical decomposition is clear.
+We might be able to solve a large problem by solving a num-
+ber of smaller sub-problems, potentially gaining an exponen-
+tial speed-up. Unfortunately, the existence of an hierarchi-
+cal decomposition does not imply the existence of an opti-
+mal decomposable policy. Thus, one must settle for certain
+restricted forms of optimality, such as hierarchical optimal-
+ity [Andre and Russell, 2002], or consider domains in which
+compact optimal policies exist, such as those that satisfy the
+reset assumption of [Meuleau et al., 2006].
+
+This paper formulates an hierarchical forward heuristic
+search algorithm for And-Or search spaces, which we refer
+to as Hierarchical-AO* (HiAO*). This algorithm exploits a
+hierarchical partition of the domain to speed up standard AO*
+search [Nilsson, 1980]. It may be applied anywhere that AO*
+may be applied, that is, for all problems that can represented
+as an acyclic And-Or graph, provided an hierarchical parti-
+tion of the search space is deﬁned. This could be MDPs or
+any other search problem.1 Although there is no formal guar-
+antee that it will result in actual performance improvements,
+our simulations with the rover domain show that it has a great
+potential for oversubscribed planning problems. Further work
+
+1Like standard AO*, HiAO* is not designed to work on prob-
+lems that contain loops. A similar extension to that in [Hansen and
+Zilberstein, 2001] is required to handle these problems.
+
+IJCAI-07
+
+2542
+
+is required to show the relevance of this approach in a more
+general setting. However, this paper outlines directions that
+could beneﬁt a wide variety of application domains, and other
+forward search algorithms such as A*.
+
+The reason why forward heuristic search can be beneﬁ-
+cial in hierarchical MDPs is pretty obvious. It is the well-
+known beneﬁt of using reachability information and admis-
+sible heuristic. The most efﬁcient algorithms for solving ﬂat
+MDPs, such as (L)AO* [Hansen and Zilberstein, 2001] and
+(L)RTDP [Barto ıet al., 1995; Bonet and Geffner, 2003], ac-
+celerate the search by pruning states that cannot be reached
+from a given starting state under an optimal policy. The
+same beneﬁt can be expected in a hierarchical representa-
+tion of the problem. Hierarchical algorithms such as Abort-
+Update [Meuleau et al., 2006] must resolve similar sub-
+problems, but in different calling contexts. Implementations
+based on classical MDP solvers such as Value Iteration or Pol-
+icy Iteration, which ignore the initial state, must consider all
+possible contexts. Forward search algorithms consider only
+reachable contexts, and with a good heuristic function, only a
+subset of these.
+
+More interesting are the reasons why HiAO* can outper-
+form standard heuristic search over ﬂat-domains as imple-
+mented in standard AO*. The ﬁrst reason has to do with the
+order and efﬁciency of the value propagation step, which is
+known to be the costliest part of AO*. HiAO* embodies a
+lazy approach to value updates: the update work is concen-
+trated within a particular sub-domain each time, and work on
+other domains is postponed until their value is needed.
+
+The second beneﬁt of the hierarchical partitioning of the
+domain is the possibility to use macro-connectors. When
+the optimal solution over a subset of states is known, it can
+be represented as a macro-connector similar to the tempo-
+rally abstract actions or macro-actions used in Reinforce-
+ment Learning [Sutton et al., 1999]. Macro-connectors are
+then used while solving other subsets of states, to accelerate
+the traverse of the graph.
+
+The third beneﬁt of forward heuristic search in a hierarchi-
+cal representation is the possibility of using a known solution
+of a subtask to seed the algorithm in charge of solving sim-
+ilar subtasks. As will become apparent later, the dynamics
+within a sub-problem is not inﬂuenced by the calling context.
+The latter inﬂuences the value of nodes, and thus the optimal
+policy, but not the search space structure. Therefore, we can
+reuse expanded solutions for different calling context, using
+them as starting points. Although farther expansion will be
+required, we are likely to beneﬁt from much of this work.
+
+Finally, with a decomposed domain, we believe that one
+can formulate more accurate heuristic functions that are ap-
+propriate for each of the sub-domains. A simple example
+would be the assessment of the value of a sub-domain under
+new calling contexts. We can simply use the value computed
+for similar contexts. A more sophisticated example would be
+the use heuristics speciﬁcally designed for a particular sub-
+domains.
+
+In this paper, we focus on explaining and testing the ﬁrst
+three points above. We provide an abstract, and quite gen-
+eral interpretation of the use of any hierarchical decomposi-
+tion in AO* in terms of (1) propagation order, (2) extra level
+
+by-passing edges, and (3) local solution re-use. These three
+properties emerge naturally when one attempts to search hi-
+erarchically, and they can be used given an arbitrary parti-
+tioning of the state space (that is, beyond the application to
+oversubscription planning). This formulation, its abstract in-
+terpretation, and its evaluation in the rover domain are the
+main contributions of this paper.
+
+In the next section, we explain how we model hierarchical
+MDPs. Then, we review the AO* algorithm, we explain the
+new HiAO* algorithm, and we show how it can be applied to
+oversubscribed planning problems. Finally, we describe our
+empirical evaluation of HiAO* and conclude.
+
+1 Hierarchical MDPs
+
+A Markov Decision Process (MDP) [Puterman, 1994] is a
+four-tuple (cid:2)S, A, T, R(cid:3), where S is a set of states, A is a set
+of actions, T : S × A × S → [0, 1] is the transition func-
+tion which speciﬁes for every two states s, s(cid:2) ∈ S and action
+a ∈ A the probability of making a transition from s to s(cid:2)
+when
+a is executed, and R : S × A × S → R is the reward function.
+We augment the above description with a concrete initial state
+sinit ∈ S, obtaining a quintuple (cid:2)S, A, T, R, sinit(cid:3). In this pa-
+per, we focus on bounded-horizon MDPs (in which the length
+of each trajectory is bounded by a ﬁnite number) and we use
+the undiscounted expected reward criterion.
+
+We shall concentrate on factored MDPs which have the
+form (cid:2)X, A, T, R, sinit(cid:3). Here X is a set of state variables,
+and A, T, R, sinit are as before. The variables in X induce
+a state space, consisting of the Cartesian product of their do-
+mains. To simplify notations, we assume all variables are
+boolean, that is, they are ﬂuents. Typically, it is assumed that
+the transition function T is also described in a compact man-
+ner that utilizes the special form of the state space, such as
+dynamic Bayes net [Dean and Kanazawa, 1993] or proba-
+bilistic STRIPS rules [Hanks and McDermott, 1994]. In this
+paper, we do not commit to a concrete action description lan-
+guage, but we expect it to be variable-based, such as the above
+methods, as we assume that it is easy to identify the relevant
+variables with respect to an action a ∈ A. This is the set
+of variables whose value can change when a is executed, as
+well as those variables that affect the probability by which
+these variables change their value and the immediate reward
+received for executing a.
+
+An hierarchical decompositions of an MDP consists of a
+In its deﬁnition, the notion
+set of smaller factored MDPs.
+of a projection of T and R plays a central role. Let X (cid:2)
+be
+some subset of the variables in X. The projection of T over
+X (cid:2)
+w.r.t. action a ∈ A is well deﬁned if a does not affect the
+value of the variables in X\X (cid:2)
+and the transition probabilities
+and reward of a do not depend on the value of these variables.
+In that case, the actual projection can be obtained by ﬁxing
+some arbitrary value to the variables in X \ X (cid:2)
+
+.
+
+Formally, we deﬁne a hierarchical decomposition of
+a factored MDP M = (cid:2)X, A, T, R, sinit(cid:3) as a tree of
+factored MDPs, MH = {M0, . . . , Mn}, where Mi =
+(cid:2)Xi, A+
+(cid:3). Each Mi is just a factored MDP. The
+only difference is that its set of actions, A+
+i contains a number
+of special control actions which signify the passing of control
+
+i , Ti, Ri, sinit
+
+i
+
+IJCAI-07
+
+2543
+
+M0
+
+˜X0:
+
+At(Start)
+At(Waypoint)
+
+¯X1:
+At(R1)
+Tracked(R1)
+Done(R1)
+
+Resources:
+
+e = 0
+e = 1
+e = 2
+ ...
+
+˜X1:
+DoneIP(R1)
+Cored(R1)
+
+M1
+
+A0:
+
+Navigate (*,*)
+Trackstart (*)
+
+μ1
+μ2
+
+¯X2:
+At(R2)
+Tracked(R2)
+Done(R2)
+
+˜X2:
+DoneIP(R2)
+Cored(R2)
+
+A1:
+
+IP(R1)
+
+Core(R1)
+
+TakePicture(R1)
+
+Abort
+
+A2:
+
+IP(R2)
+
+Core(R2)
+
+TakePicture(R2)
+
+Abort
+
+M2
+
+Figure 1: Decomposition of a simple rover problem: a root
+process M0 navigates among two rocks, R1 and R2, and
+schedules two corresponding subprocesses M1 and M2 (IP
+˜Xi is the set of private
+stands for “Instrument Placement”).
+¯Xi is the separation between sub-
+variables of process i, and
+task i and the root process.
+
+to its parent or one of its children. These actions encode the
+hierarchy, too. More speciﬁcally, Xi ⊆ X; A+
+is the union
+i
+of some subset Ai ⊆ A together with two types of control
+actions: μj corresponds to passing control to a child process
+Mj, and Abort signiﬁes the passing of control back to the par-
+ent process; Ti is the projection of T over Xi, such that Ti is
+(cid:2)
+well-deﬁned; Ri depends on Xi and Ai only; and sinit
+is the
+(cid:2)
+i=1,...,n Xi = X,
+projection of sinit over Xi. In addition,
+i=1,...,n Ai = A, Ai ∩ Aj = ∅ for every i (cid:9)= j, and when-
+ever x ∈ Xi ∩ Xj then x ∈ Xk for every k such that Mk is on
+the path between Mi and Mj (which is known as the running
+intersection property). See [Meuleau et al., 2006] for a more
+detailed description of this model. A decomposition of M
+into MH can be obtained automatically by a straightforward
+extension of the methods described in [Amir and Englehardt,
+2003] for deterministic planning domains.
+
+i
+
+As an illustration, Fig. 1 describes a decomposition of a
+simple planetary rover domain into three sub-domains. M0
+is the top-level domain in which we control the position of
+the rover and the choice of which subtask to perform next
+(these are the μi actions). M1 and M2 represent the subtasks
+associated with experimenting on of one of two rocks. M0
+shares some variables with its children, and the resource level
+is a variable shared by all.
+
+2 Hierarchical AO*
+
+We start with a short review of the AO* algorithm. Next, we
+show how a hierarchical partition of the search nodes may
+be exploited to accelerate the algorithm, and we provide the
+pseudo-code of a new general algorithm called Hierarchical-
+AO* (HiAO*).
+
+1: Initialize the explicit graph G to the start state sinit.
+2: Mark sinit as open.
+3: while the greedy solution graph contains some open
+
+4:
+5:
+6:
+7:
+
+nodes do
+
+s := any open node of the greedy graph.
+Unmark s as open.
+EXPAND(s). // Expand the greedy graph
+UPDATE(s). // Update state values and mark best ac-
+tions
+
+8: Return the greedy solution graph.
+
+Algorithm 1: Standard AO*.
+
+for each s(cid:2) ∈ S such that T (s, a, s(cid:2)) > 0 do
+
+if s(cid:2) /∈ G (s(cid:2)
+
+is not already present in G) then
+
+is a terminal state then
+
+V (s(cid:2)) := 0.
+
+to G.
+
+Add s(cid:2)
+if s(cid:2)
+
+1: for each a ∈ A do
+2:
+3:
+4:
+5:
+6:
+7:
+8:
+9:
+10:
+
+else
+
+V (s(cid:2)) := H(s(cid:2)).
+Mark s(cid:2)
+as open.
+
+Add the connector (s, a, ·) to G.
+
+Algorithm 2: EXPAND(s).
+
+2.1 The AO* Algorithm
+AO* [Nilsson, 1980] is a generalization of A* to And-Or
+graphs. As such, it can be applied to the problem of gen-
+erating a policy for an MDP given an initial state, assuming
+there are no loops in the transition graph [Hansen and Zilber-
+stein, 2001]. In MDPs, an OR node corresponds to a choice
+of an action at a state, and an AND node corresponds to the
+set of possible states resulting from each such choice. The
+possible AND nodes are annotated by their probability.
+
+AO* maintains two basic structures: the explicit graph and
+the greedy graph. The explicit graph simply depicts the por-
+tion of the search space that has been expanded so far. The
+greedy graph is a subgraph of the explicit graph which repre-
+sents those nodes that are reachable by the greedy policy. To
+obtain the greedy graph, one needs to perform dynamic pro-
+gramming in the explicit graph, propagating values bottom-
+up from the leaf nodes (using their heuristic values) to the root
+node. The value of an AND node is the expected value of its
+children, and the value of an OR node is the maximum over
+the value of its children. If we note the choice that yielded this
+maximum, we can now generate the greedy graph by simply
+following these choices starting at the root node. The pseudo-
+code for AO* is described in Algorithms 1 - 3.
+
+If an admissible heuristic function is used in AO*, then
+the value of each node may only decrease at each iteration.2
+When we update the value of a node outside the greedy graph,
+the greedy graph may not be affected because the update can
+only reduce the value of the node. Thus, a choice that was
+sub-optimal cannot become optimal. Consequently, new node
+values need only be propagated up edges marked as optimal,
+
+2In a reward-maximization framework, an admissible heuristic is
+
+an heuristic that never underestimates the value of a state.
+
+IJCAI-07
+
+2544
+
+1: Create set Z containing only the state s.
+2: repeat
+3:
+
+Remove from Z a state s(cid:2)
+s(cid:2)
+Set V (s(cid:2)) := maxa∈A
+
+in G occurs in Z.
+
+(cid:3)(cid:4)
+
+such that no descendent of
+
+(cid:5)
+
+4:
+
+5:
+
+s(cid:2)(cid:2)∈G T (s(cid:2), a, s(cid:2)(cid:2)) (R(s(cid:2), a, s(cid:2)(cid:2)) + V (s(cid:2)(cid:2)))
+
+as optimal.
+
+and mark the connector associated with the best action
+in s(cid:2)
+if V (s(cid:2)) decreased at previous step (it cannot increase)
+then
+
+along connectors marked as
+
+6:
+
+Add all parents of s(cid:2)
+optimal to Z.
+7: until Z is empty.
+
+Algorithm 3: UPDATE(s).
+
+1: Initialize the explicit graph G to the start state sinit.
+2: Mark sinit as open.
+3: SOLVE(S0, sinit).
+4: Return the greedy solution graph starting at sinit.
+
+Algorithm 4: Hierarchical AO*.
+
+i.e., denoting the optimal choice in that state.
+
+In most cases, the most expensive parts of AO* are: (1)
+the update stage, where we propagate value changes up the
+explicit graph (Alg. 3); (2) the computation of the fringe, that
+is, the set of open nodes in the greedy graph (line 2 of Alg. 1).
+We show below how a partition of the states expanded by
+AO* may be exploited to accelerate these two operations.
+
+2.2 The HiAO* Algorithm
+
+We now assume that the state space S is partitioned into sub-
+sets S0, . . . , Sk. Furthermore, we assume that these subsets
+are organized in a hierarchy in the form of a tree,3 so that:
+(1) the starting state sinit belongs to the root subset denoted
+S0; (2) state transitions are possible only between states in the
+same subsets, or between two states belonging to two subsets
+one being the parent of the other. These choices are motivated
+by the hierarchical MDP framework presented above, where
+a child subset represents a subprocess that can be called from
+the current subset/process (therefore, we sometime use the
+term “subprocess” to designate a child subset). However, our
+formalism is general and can be applied to any instantiation
+of AO* where a hierarchy of nodes can be deﬁned.
+
+The HiAO* algorithm is presented in Alg. 4 - 6. The al-
+gorithm also uses the same function EXPAND() as standard
+AO* (Alg. 2). The basic principle of this algorithm is the fol-
+lowing: each time that the optimal action in a state leads to a
+child subset (in other words, each time it appears optimal to
+call a subprocess from the current state), we recursively call
+the HiAO* algorithm to solve this child subset completely
+before continuing solution of the current level. We explain
+below how this simple mechanism may beneﬁt the algorithm.
+
+3The algorithm can be generalized to handle hierarchies repre-
+
+sented by a directed acyclic graph.
+
+1: while the greedy solution graph starting at s contains
+
+some open nodes in Si do
+
+2:
+
+s(cid:2) := any open node of the greedy graph starting at s
+in Si.
+Unmark s(cid:2)
+EXPAND(s(cid:2)
+
+3:
+4:
+5: Mark all nodes created at previous step and that belong
+
+as open.
+).
+
+to a child of Si as outdated.
+HIERARCHICALUPDATE(Si, s(cid:2)
+
+).
+
+6:
+
+Algorithm 5: Function SOLVE(Si, s).
+
+Delaying the propagation of new values: The main prin-
+ciple implemented by HiAO* is to delay the propagation of
+new node values in between states belonging to different
+subsets. Let us ﬁrst consider why delaying updates might
+be useful. Suppose that we have expanded node u and
+then node v, and following their expansion, their value has
+changed. In standard AO*, following the change in value in u
+we would propagate this information upwards along marked
+edges. Then, we would repeat the process for v. However,
+it is quite possible that u and v have common ancestors, and
+thus we will update these ancestors twice. Sometimes, such
+an update is important because it inﬂuences our choice of
+which node to expand. Sometimes, such an update can be
+delayed, and we can save the repeated update of shared an-
+cestors. HiAO* tries to exploit the second case, assuming it
+happens more often than the ﬁrst case.
+
+The general scheme we propose for delaying updates is as
+follows. We associate to each subset Si a set of nodes to up-
+date Zi similar to the set Z used in Alg. 3. At any particular
+point, the algorithm has a single subset of nodes in focus and
+performs the standard AO* operations only inside of that sub-
+set. Whenever a state s ∈ Si is expanded and thus needs to be
+evaluated, we insert it into Zi and enter a loop that will prop-
+agate its value up into the graph by emptying and re-ﬁlling
+the set Zi, as in standard AO* (Alg. 3). However, each time
+that a new value needs to be propagated to a state s(cid:2)
+belong-
+ing to another subset Sj , j (cid:9)= i (Sj is necessarily the parent
+or a child of Si), s(cid:2)
+is added to Zj and not to Zi (line 18 of
+Alg. 6), and so, it is excluded from the loop that works only
+with Zi. So, the propagation is limited to the subset Si, and
+nodes that would need to be updated but belong to another
+subset Sj are just stored in Zj, but they are not re-evaluated
+yet and their new value is not propagated yet.
+
+So, when are the nodes in Sj, j (cid:9)= i updated? The an-
+swer depends on the hierarchical relation between Sj on Si.
+If Sj is the parent of Si, then the states that have been put in
+Zj during the solution of Si are updated when the algorithm
+moves focus from Si back to its parent subset Sj. If Sj is
+child of Si, then the states in Zj are updated at the latest pos-
+sible time, that is, when we want to evaluate a state outside
+of Sj that may lead into Sj under the optimal action. This
+may never happen if calling subprocess Sj is the optimal de-
+cision in none of the states visited by the algorithm later on,
+in which case we save all the work of updating states in Sj.
+In practice, this is implemented through the use of outdated
+markers, as explained below.
+
+One of the basic principle of the HiAO* algorithm is that,
+
+IJCAI-07
+
+2545
+
+1: Zi := Zi ∪ {s}.
+2: while Zi (cid:9)= ∅ do
+3:
+
+Remove from Zi a state s(cid:2)
+s(cid:2)
+Set V (s(cid:2)) := maxa∈A
+
+in G occurs in Zi.
+(cid:3)(cid:4)
+
+such that no descendent of
+
+(cid:5)
+
+,
+
+s(cid:2)(cid:2)∈G T (s(cid:2), a, s(cid:2)(cid:2)) (R(s(cid:2), a, s(cid:2)(cid:2)) + V (s(cid:2)(cid:2)))
+
+call a∗(s(cid:2)) the optimal action in s(cid:2)
+associated connector as optimal.
+while executing a∗(s(cid:2)) in s(cid:2)
+not in Si and that are marked as outdated do
+
+for each child Sj of Si do
+
+may lead to states that are
+
+, and mark the
+
+for each s(cid:2)(cid:2) ∈ Sj such that T (s(cid:2), a∗(s(cid:2)), s(cid:2)(cid:2)) > 0
+and s(cid:2)(cid:2)
+
+is marked as outdated do
+
+as outdated.
+
+Unmark s(cid:2)(cid:2)
+HIERARCHICALUPDATE(Sj , NULL).
+SOLVE(Sj, s(cid:2)(cid:2)
+(cid:3)(cid:4)
+
+Set V (s(cid:2)) := maxa∈A
+
+).
+
+s(cid:2)(cid:2)∈G T (s(cid:2), a, s(cid:2)(cid:2)) (R(s(cid:2), a, s(cid:2)(cid:2)) + V (s(cid:2)(cid:2)))
+
+(cid:5)
+
+,
+
+call a∗(s(cid:2)) the optimal action in s(cid:2)
+associated connector as optimal.
+
+, and mark the
+
+if V (s(cid:2)) decreased at previous step (it cannot increase)
+then
+
+for each state s(cid:2)(cid:2)
+nector marked as optimal do
+
+that is a parent of s(cid:2)
+
+along a con-
+
+if s(cid:2)(cid:2) ∈ Si then
+to Zi.
+
+Add s(cid:2)(cid:2)
+
+else
+
+Call Sj , j (cid:9)= i, the subset containing s(cid:2)(cid:2)
+Add s(cid:2)(cid:2)
+if Sj is a child of Si then
+
+to Zj.
+
+.
+
+Mark s(cid:2)(cid:2)
+, and all its predecessors in Sj along
+connectors marked as optimal, as outdated.
+Algorithm 6: Function HIERARCHICALUPDATE(Si, s).
+
+4:
+
+5:
+
+6:
+7:
+
+8:
+9:
+10:
+11:
+
+12:
+
+13:
+
+14:
+15:
+16:
+17:
+18:
+19:
+20:
+
+deleted (line 8 of Alg. 6), but the markers of all other entry
+nodes are kept.4 If we later get to update another state outside
+of Sj and that can lead to s(cid:2)(cid:2) ∈ Sj, then the outdated marker
+of s(cid:2)(cid:2)
+in Sj needs
+to be updated, even if no new node has been added to Zj in
+the mean time.
+
+will indicate that the greedy graph below s(cid:2)(cid:2)
+
+Convergence: As long as the problem contains no loop, Hi-
+erarchical AO* is guaranteed to terminate in ﬁnite time and
+to return the optimal solution:
+Theorem 1 If the heuristic H is admissible, then HiAO* re-
+turns the optimal policy in ﬁnite time.
+
+HiAO* may not always be efﬁcient, particularly if the number
+of connections between subsets is large. However, we claim
+that, in the case of oversubscription planning, the state par-
+tition induced by the hierarchy is efﬁcient and allows lever-
+aging the general principle presented above. The simulation
+results presented in this paper support this claim.
+
+We now present two acceleration techniques that can be
+implemented in HiAO* to get further leverage from the hier-
+archy, but are not used in the pseudo-code of Alg. 4 - 6.
+
+Optimizing the algorithm: The HiAO* algorithm pre-
+sented above exhibits the following inefﬁciency.
+If an ac-
+tion a leading to a state s(cid:2) ∈ Sj appears optimal in state
+s ∈ Si (i (cid:9)= j), then the algorithm will SOLVE completely
+the sub-problem Sj starting in s(cid:2)
+before returning to state s.
+In the process of solving Sj , the Q-value of action a in s
+may only decrease, so that it may happen that, before we are
+done solving Sj, a does not appear as optimal in s anymore.
+The algorithm presented above will not detect this and single-
+mindedly continue solving Sj until the greedy policy starting
+in s(cid:2)
+
+is known, which can be highly inefﬁcient.
+
+This issue can easily be addressed under an additional hy-
+pothesis that is satisﬁed in the hierarchical planning context
+described above and that could easily be relaxed to deal with
+a more general case. We assume that each action either does
+not change the partition subset (in the case of hierarchical
+planning, this holds true for all primitive actions a ∈ A),
+or it leads with certainty to a single state belonging to a dif-
+ferent subset (this is the case of control passing actions μi
+and Abort). Then, we can modify the algorithm by adding
+a threshold parameter τ to the function SOLVE(S, s) so that,
+when the value of s falls below τ during the solution of S, the
+function exits. In the initial call to SOLVE (line 3 of Alg. 4),
+the threshold parameter is set to −∞, so that optimization
+will be pursued until its end. Later calls (line 10 of Alg. 6) are
+performed in the following way: while computing the value
+of a state (lines 4 and 11 of Alg. 6), we record the Q-value
+of the best action that does not change the partition subset
+(primitive action), the Q-value of the best action that induce
+a change of subset (control-passing action), and the Q-value
+of the second best control-passing action. If a control-passing
+action appears optimal and we enter the loop in lines 5 to 11,
+
+4A straightforward improvement to the algorithm is to delete the
+outdated marker in all nodes of Sj belonging to the greedy graph
+starting in s(cid:3) after recomputing this graph.
+
+when we are done updating a node in Si that can possibly
+lead to a node s in a child subset Sj (j (cid:9)= i) under the optimal
+action, then we must know with accuracy the set of optimal
+decisions that leads from s either to terminal states, or back
+into Si. A node of Sj is marked as outdated if the greedy
+subgraph starting at that node has a chance of not being ac-
+curate or complete. Suppose that the algorithm is currently
+working in subset Si and needs to propagate a new value to
+a state s belonging to a child Sj of Si. Then, as explained
+above, the update of s is delayed and s is just added to Zj
+(line 18 of Alg. 6). In addition, all nodes of Sj “above” s in
+the greedy graph are marked as outdated (line 19 and 20 of
+Alg. 6). Later, if we want to evaluate a node outside of Sj that
+can lead to a state s(cid:2) ∈ Sj , the value of s(cid:2)
+may not be accurate,
+because we have delayed propagation of new values in Sj. If
+this is the case, then s(cid:2)
+must be marked as outdated and, con-
+sequently, two operations are performed: (1) we purge the set
+Zj and update all the nodes in Sj that need to be re-evaluated
+using a recursive call to HIERARCHICALUPDATE() (line 9 of
+Alg. 6). This may change the greedy policy in Sj below some
+of the entry nodes of Sj , including node s(cid:2)
+; (2) the greedy
+graph starting at s(cid:2)
+in Sj is updated through a call to SOLVE()
+(line 10 of Alg. 6). So, the outdated marker in s(cid:2)
+may be
+
+IJCAI-07
+
+2546
+
+then the threshold parameter τ used for the call to SOLVE()
+in line 10 is set to the Q-value of the best primitive action, or
+the second best control-passing action, depending on which
+is greater. In this way, SOLVE aborts the solution of a child
+subset as soon as the action leading into it does not appear
+optimal anymore. Note that the outdated marker is removed
+(line 8 of Alg. 6) only if SOLVE completed.
+
+By-passing levels: Two of the operations of standard AO*
+require it to traverse up or down a large part of the explicit
+graph. The function EXPAND() selects a node on the fringe of
+the greedy graph. This requires computing the fringe, which
+is done by following marked edges down from the root note.
+This operation is often one of the most costly.5 The function
+UPDATE() also propagates information up the graph, when
+determining the greedy parents of a recently updated nodes
+(line 6 of Alg. 3). Because HiAO* performs the standard
+AO* operations only inside of a subset of nodes, it saves time
+on both operations. First, the search graph projected to each
+subset is smaller, so that the size of the fringe for that subset
+and the time to compute it is likely to be (much) smaller. Of
+course, by doing this, we expand the most promising fringe
+node in a given subset, and not in the entire greedy graph as
+AO* does. So, we inﬂuence the order in which nodes are
+selected for expansion, which may have good or bad conse-
+quences. Second, as explained before, HiAO* postpones the
+propagation of some values from a subset to another other,
+and thus limits the propagation of information up in the graph.
+To gain more leverage, HiAO* may be augmented with
+macro-connectors that represent the effect of applying the
+greedy solution for a subset of nodes. Macro-connectors are
+then used when solving other subsets, to accelerate the tra-
+verse of the graph. Imagine, for instance, that u belongs to
+Si, and applying some action a leads from u to u(cid:2) ∈ Sj,
+to u(cid:2)(cid:2) ∈ Si. Then,
+j (cid:9)= i, and then applying a(cid:2)
+leads from u(cid:2)
+we add an explicit edge between u and u(cid:2)(cid:2)
+and we use it when
+solving Si. By doing this, we build, in effect, a projection
+of the greedy graph on Si. The new edge between u and u(cid:2)(cid:2)
+helps us during the solution of Si in two circumstances: when
+we compute the fringe, we can jump over a large number of
+states that ﬂat AO* would have considered individually; and
+similarly when we determine the greedy parents of a recently
+updated node. Creating and maintaining macro-connectors
+increases the complexity of HiAO* slightly, but the efﬁciency
+gained compensates for this extra cost. Indeed, our simula-
+tions showed that this is one of the major causes of the good
+performances exhibited by our algorithm.
+
+3 Application to Oversubscription Planning
+
+We now focus on the class of problems that motivates this
+work, that is, oversubscribed planning problems. Follow-
+ing [Meuleau et al., 2006], these problems are naturally mod-
+elled in the hierarchical planning framework presented above
+with a two-level hierarchy. There is a single root process M0
+
+5It is possible to store the fringe and update it as we progress, but
+it turns out that because the structure we are searching is a directed
+acyclic graph, not a tree, this is a costly operation.
+
+and multiple leaf/child processes Mi, i = 1, . . . n represent-
+ing the different subtasks the agent can select to perform. For
+each subprocess Mi, we deﬁne:
+
+• ¯Xi = Xi ∩ X0 are the separator (shared) variables be-
+tween M0 and Mi. The shared variables include, but
+are not limited to, the shared resource levels. They may
+also include, for instance, the state of instruments used
+to perform several subtasks.
+
+• (cid:6)Xi = Xi \ X0 are the private variables of Mi. Typically,
+
+they represent the state of advancement of the subtask.
+
+• X0−i = X0 \ Xi is the difference of M0 and Mi.
+(cid:7)n
+(cid:2)n
+The set of private variables of M0 is deﬁned as
+states: S = 2X
+2X0−i .
+
+(cid:6)X0 = X0 \
+X0−i. We also deﬁne various classes of
+(cid:6)Si = 2 eXi , S0−i =
+
+i=1
+, Si = 2Xi ,
+
+Xi =
+
+i=1
+
+¯Si = 2 ¯Xi ,
+
+We restrict our attention to domain satisfying the reset as-
+sumption of [Meuleau et al., 2006]. The reset assumption
+states that whenever the process moves into a child sub-MDP,
+the state of the private variables of this sub-MDP is the same.
+It holds true in the rover domain because the rover must have
+its arm stowed and all of its instruments parked prior to any
+movement, and so, this is its conﬁguration when it arrives at
+a new rock/subtask. Moreover, actions of preparing the rock
+for a measurement, such as coring the rock, have to be redone
+if we abort this rock before completing the measure, because
+it is not possible to put the rover arm exactly at the place it
+was when the rock was cored. So, all intermediate work to-
+wards the goal is lost once we move to another rock. Note
+that variables that are not private to the child sub-MDP, such
+as resource levels, are not reset to their initial value when we
+abort the subtask. Note also that this assumption is not as re-
+strictive as it may look, since the user may modify the sets
+¯XI if needed: if some intermediate work may be preserved
+when we abort a subtask Mi before its completion, then the
+ﬂuent representing this intermediate state should be moved
+¯Xi. However, HiAO*, as well as the algorithms
+from
+in [Meuleau et al., 2006], work better if the separation sets
+are as small as possible.
+
+˜Xi to
+
+Under the reset assumption, the space of reachable states is
+naturally partitioned into a hierarchy of subsets. The root sub-
+set S0 represents the states where all subtasks are in their ini-
+tial condition. For each subtask i and each state s0−i ∈ S0−i,
+there is a child subset Si[s0−i] containing all states where
+(1) Mi is not in its initial condition, (2) the private variable
+of every other subtasks Mj, j (cid:9)= i, have their initial value,
+and (3) the variables in X0−i are equal to s0−i, and so, s0−i
+represents the context in which subtask i is called. All other
+states, for instance, states where two subtask are not in their
+initial state, are not reachable. The Abort-Update algorithm
+of [Meuleau et al., 2006] is an instance of Asynchronous Pol-
+icy Iteration [Bertsekas and Tsitsiklis, 1997] that that exploits
+this property. Here, we stress that this hierarchical partition
+may serve as the basis to an implementation of HiAO*. In
+a sense, HiAO* is to Abort-Update what standard AO* is to
+Policy Iteration.
+
+IJCAI-07
+
+2547
+
+Reusing macro-actions: As explained above, when we ap-
+ply HiAO* on an oversubscribed planning problem, there is a
+subset Si[s0−i], for each subtask Mi and each context s0−i in
+which Mi may be started. For a ﬁxed i, the dynamics within
+Si[s0−i] do not depend on the context s0−i. The latter in-
+ﬂuences the value of states where we transit when we abort
+the subtask (the exit values), and so, the optimal policy, but
+not the structure of the explicit graph representing Si[s0−i].
+Therefore, if we have computed part of the explicit graph for
+a given context, we can reuse/copy it when we want to solve
+the same subtask in another context. We might need to ex-
+pand this graph further, because different exit values may in-
+duce different policies. Similarly, this seed may contain some
+nodes that we would not have created if we started the solu-
+tion of subtask i in the new context from scratch. However,
+we could beneﬁt from this because much of the work of ex-
+panding the graph is already done.
+
+Optimality: HiAO* ﬁnds the optimal solution within the
+predeﬁned hierarchy, which is the deﬁnition of hierarchical
+optimality[Andre and Russell, 2002]. As shown in [Meuleau
+et al., 2006], if the problem satisﬁes the reset assumption,
+then there is an absolute optimal policy that can be encoded in
+the hierarchy deﬁned above. Therefore, HiAO* ﬁnds the opti-
+mal policy if the reset assumption holds. If the reset assump-
+tion does not hold, HiAO* based on the hierarchy deﬁned
+above ﬁnds an hierarchical optimal policy, which may be of
+lesser value than an absolute optimal policy. However, we
+can use a different hierarchical representation of the problem
+that would guarantee absolute optimality. This is achieved by
+deﬁning a subset Si[s−i] for each subtask Mi and each state
+s−i ∈ S−i = 2X\Xi (note that, now, the context also includes
+the private variable of subtasks Mj, for all j (cid:9)= i).
+
+4 Experimental Evaluation
+
+The goal of our empirical evaluation is to show that the fun-
+damental structural changes of HiAO* are beneﬁcial. For
+this purpose, we used several problem instances from a com-
+plex planetary rover domain. In this domain, an autonomous
+rover must navigate in a discrete graph representing its sur-
+rounding and the authorized navigation paths, and schedule
+observations to be performed on different rocks situated at
+different locations. Each action as an uncertain positive re-
+source consumption and a probability of failing. The domain
+also contains a signiﬁcant amount of uncertainty coming from
+the tracking mechanism: To perform some measurement on
+a rock, the rover must be tracking this rock; and to navigate
+along a path, it must be tracking one of the rocks that enables
+following this path. However, the rover may randomly loose
+track of some rocks while navigating along some path, and
+there is no way to re-acquire a rock once the rover lost track
+of it (the probability of losing track of a rock depends on the
+rock and the path followed). Each problem instance is natu-
+rally decomposed in a two-level hierarchy where the root task
+is responsible for navigating in the graph, tracking the rocks,
+and performing some measures that are not bound to a rock,
+such as taking a panoramic camera picture. Each subtask rep-
+resent a rock and may possibly contain several goals (several
+
+)
+s
+(
+ 
+e
+m
+
+i
+t
+ 
+n
+o
+i
+t
+u
+c
+e
+x
+E
+
+ 2500
+
+ 2000
+
+ 1500
+
+ 1000
+
+ 500
+
+ 0
+
+AO*
+Hierarchical AO*
+
+ 80
+
+ 100
+
+ 120
+
+ 140
+
+ 160
+
+Initial resource
+
+Figure 2: Execution time on a sample rover problem.
+
+measures may be taken on the rock).
+
+Our test problems are far out of reach of standard ﬂat MDP
+solvers such as Value Iteration, as well as hierarchical algo-
+rithms based on ﬂat MDP solvers such as the Abort-Update
+algorithm of [Meuleau et al., 2006]. For instance, the prob-
+lem used in Fig. 2, with an initial resource of 100, as a total
+number of 71 ﬂuents, and so 271 states, which is way above
+what a standard MDP solver can handle. Once the prob-
+lem is hierarchically decomposed, the root MDP contains 53
+ﬂuents (and so, 253 states), and each sub-MDP contains 39
+ﬂuents (239 states), and so, it cannot be solved by Abort-
+Update. Therefore, HiAO* outperforms approaches based on
+ﬂat MDP solvers. This is due to the well-known advantage
+of reachability and heuristic information that focus the search
+only on the relevant parts of the state space.
+
+It is more interesting is to compare HiAO* with standard
+AO*, which uses reachability and heuristic information, but
+does not leverage from the hierarchical structure of the do-
+main. Figure 2 presents a typical performance curve. It was
+obtained using a problem instance involving 3 rocks, 2 goals
+per rock, and 2 goals in the root process (panoramic images).
+It shows the evolution of the solution time of standard AO*
+and HiAO* as a function of the initial resource available to
+the rover. Although the complexity of the problem increases
+badly with the initial resource, this increase is much less in
+HiAO* due to the savings during value updates and graph
+traversal. Very similar results were obtained with nearly all
+problem instances that we tried, the advantage of HiAO* in-
+creasing with the problem size. The only exceptions are tiny
+problem instances that are solved in fraction of seconds by
+both algorithms.
+
+The results depicted above were obtained using a version
+of HiAO* that implements delayed propagation, as described
+above, and that uses macro-connectors to by-pass subprocess
+states when solving the root process. These two principles
+are pretty general and can be implemented in any instance of
+AO*, provided that a hierarchical partition of the state space
+is deﬁned. However, the algorithm used does not implement
+macro-action re-use, which is more speciﬁc to oversubscrip-
+tion planning. We tried macro-action re-use but did not ob-
+
+IJCAI-07
+
+2548
+
+[Bonet and Geffner, 2003]
+
+[Dean and Kanazawa, 1993]
+
+Bonet, B.; and Geffner, H. 2003.
+Labeled RTDP:
+Improving the
+Convergence of Real-Time Dy-
+namic Programming. In Proceed-
+ings of
+the Thirteenth Interna-
+tional Conference on Automated
+Planning and Scheduling, 12–21.
+Menlo Park, Calif.: AAAI Press.
+
+Dean, T.; and Kanazawa, K. 1993.
+A Model for Reasoning about Per-
+sistence and Causation. Computa-
+tional Intelligence 5(3):142–150.
+
+[Hanks and McDermott, 1994] Hanks, S.; and McDermott, D.V.
+1994. Modeling a Dynamic and
+Uncerain World I: Symbolic Prob-
+abilistic Reasoning about Change.
+Artiﬁcial Intelligence 66(1):1–55.
+
+[Hansen and Zilberstein, 2001] Hansen ,E.A.; and Zilberstein, S.
+2001. LAO*: A Heuristic Search
+Algorithm that Finds Solutions
+with Loops. Artiﬁcial Intelligence
+129(1-2):35–62.
+
+[Meuleau et al., 2006]
+
+[Nilsson, 1980]
+
+[Puterman, 1994]
+
+[Sutton et al., 1999]
+
+Meuleau, N.; Brafman, R.; and Be-
+nazera, E. 2006. Stochastic Over-
+subscription Planning using Hier-
+archies of MDPs. In Proceedings
+of the Sixteenth International Con-
+ference on Automated Planning
+and Scheduling, 121–130. Menlo
+Park, Calif.: AAAI Press.
+
+Nilsson, N.J. 1980. Principles of
+Artiﬁcial Intelligence. Palo Alto,
+Calif.: Tioga Publishing Company.
+
+Puterman, M.L. 1994. Markov
+Decision Processes:
+Discrete
+Stochastic Dynamic Program-
+ming. New York, NY: Wiley.
+
+Sutton, R.S.; Precup, D.; and
+Singh, S.P. 1999. Between MDPs
+and Semi-MDPs: A Framework
+for Temporal Abstraction in Rein-
+forcement Learning. Artiﬁcial In-
+telligence 112(1-2):181–211.
+
+serve any signiﬁcant change in the solution time with this op-
+tion turned on (we sometimes observed a very small decrease
+in the performances). In a sense, this is pretty encouraging,
+as the most general modiﬁcations to standard AO* search turn
+out to be also the most efﬁcient.
+
+5 Conclusions
+We showed how AO* can be modiﬁed to make use of hier-
+archical decompositions of a domain. This leads to the ﬁrst
+forward search algorithm that explicitly deals with hierarchi-
+cal domains. We analyzed the relationship between standard
+AO* and the hierarchical version in terms of its effect on the
+order of propagation and the introduction of shortcuts in the
+form of edges that by-pass levels. Although there is no for-
+mal guarantee that these modiﬁcations will induce an actual
+performance improvement, our experimental evaluation us-
+ing over-subscribed planning problems indicate that they are,
+indeed, beneﬁcial. Therefore, this paper outlines research di-
+rections that could beneﬁt a wide variety of application do-
+mains, and possibly other forward search algorithms. In fu-
+ture work, we shall examine an additional possible beneﬁt of
+hierarchical decompositions: the ability to formulate special-
+ized and more accurate heuristic functions.
+
+Acknowledgements
+This work was supported by NASA Intelligent Systems pro-
+gram under grant NRA2-38169. This work was performed
+while Ronen Brafman was visiting NASA Ames Research
+Center as a consultant for the Research Institute for Advanced
+Computer Science. Ronen Brafman was supported in part by
+The Paul Ivanier Center for Robotics Research and Produc-
+tion Management and the Lynn and William Frankel center
+for Computer Sciences at Ben-Gurion University.
+
+References
+[Amir and Englehardt, 2003]
+
+[Andre and Russell, 2002]
+
+[Barto ıet al., 1995]
+
+Amir, E.;
+and Englehardt; B.
+2003. Factored Planning. In Pro-
+ceedings of the Eighteenth Inter-
+national Joint Conference on Ar-
+tiﬁcial Intelligence, 929–935. San
+Francisco, Calif.: Morgan Kauf-
+mann.
+
+State Abstraction
+
+and Russell, S.
+Andre, D.;
+for
+2002.
+Programmable
+Reinforcement
+Learning Agents. In Proceedings
+of the Eighteenth National Con-
+ference on Artiﬁcial Intelligence,
+119–125. Menlo Park, Calif.:
+AAAI Press.
+
+Barto, A.G.; Bradtke, S.J.; and
+Singh, S.P. 1995. Learning to Act
+using Real-Time Dynamic Pro-
+gramming. Artiﬁcial Intelligence
+672(1-2):81–138.
+
+[Bertsekas and Tsitsiklis, 1997] Bertsekas, D.P.; and Tsitsiklis, J.
+1997. Neuro-Dynamic Program-
+ming. Belmont, Mass.: Athena
+Scientiﬁc.
+
+IJCAI-07
+
+2549
+
+

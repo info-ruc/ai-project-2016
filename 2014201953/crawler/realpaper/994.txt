@@ -1,0 +1,925 @@
+Efﬁcient HPSG Parsing with Supertagging and CFG-ﬁltering
+
+Takuya Matsuzaki 1
+
+Yusuke Miyao 1
+
+Jun’ichi Tsujii 1,2,3
+
+1. Department of Computer Science, University of Tokyo
+
+Hongo 7-3-1, Bunkyo-ku, Tokyo 113-0033, Japan
+
+2. School of Computer Science, University of Manchester
+
+3. NaCTeM (National Center for Text Mining)
+{matuzaki, yusuke, tsujii}@is.s.u-tokyo.ac.jp
+
+Abstract
+
+An efﬁcient parsing technique for HPSG is pre-
+sented. Recent research has shown that supertag-
+ging is a key technology to improve both the speed
+and accuracy of lexicalized grammar parsing. We
+show that further speed-up is possible by elimi-
+nating non-parsable lexical entry sequences from
+the output of the supertagger. The parsability of
+the lexical entry sequences is tested by a technique
+called CFG-ﬁltering, where a CFG that approxi-
+mates the HPSG is used to test it. Those lexical
+entry sequences that passed through the CFG-ﬁlter
+are combined into parse trees by using a simple
+shift-reduce parsing algorithm, in which structural
+ambiguities are resolved using a classiﬁer and all
+the syntactic constraints represented in the original
+grammar are checked. Experimental results show
+that our system gives comparable accuracy with
+a speed-up by a factor of six (30 msec/sentence)
+compared with the best published result using the
+same grammar.
+
+1 Introduction
+Deep syntactic analysis by lexicalized grammar parsing of-
+fers a solid basis for intelligent text processing, such as
+question-answering, text mining, and machine translation. In
+those tasks, however, a large amount of text has to be pro-
+cessed to build a useful system. One of the main difﬁculties
+of using lexicalized grammars for such large-scale applica-
+tions is the inefﬁciency of parsing caused by complicated data
+structures used in such grammars.
+
+Recent research showed the importance of supertagging
+for the speed, as well as the accuracy, of lexicalized gram-
+mar parsing [Clark and Curran, 2004; Ninomiya et al., 2006].
+Supertagging is a tagging process where lexical entries are
+assigned to the words in the input sentence [Bangalore and
+Joshi, 1999]. In lexicalized grammars, a lexical entry encodes
+many constraints on how a word is combined with surround-
+ing words or phrases. The parsing efﬁciency is therefore in-
+creased by supertagging because it makes the search space
+explored by the parser much narrower.
+
+The current accuracy of the supertagger is, in general, not
+sufﬁcient to use it as a single-tagger, which assigns only one
+
+lexical entry for each word, because the number of supertags
+is generally large (more than 1000 in our case) and only one
+or two tagging errors in a sentence will cause a parse failure
+in many cases. In previous research [Clark and Curran, 2004;
+Ninomiya et al., 2006], the problem is overcome by assign-
+ing several supertags to each word in a sentence, i.e., multi-
+supertagging; the supertagger initially assigns only a small
+number of lexical entries to each word and the number of
+lexical entries is gradually increased until the parser ﬁnds a
+successful parse. In short, the parser ‘takes over’ a part of the
+supertagger’s task and resolves a certain amount of the lexical
+ambiguity by itself to avoid parse failures.
+
+In this paper, we show that, by making the supertagger
+more powerful, the workload of the parser can be further re-
+duced and the overall system becomes more efﬁcient. Specif-
+ically, we combine the supertagger with a CFG that approxi-
+mates the original lexicalized grammar, to enumerate maybe-
+parsable supertag assignments in the order of their scores
+given by the supertagger. We say a supertag sequence is
+maybe-parsable if the sequence is parsable by the approxi-
+mating CFG. The most time-consuming part of the enumer-
+ation algorithm is parsing of the input sentence with the ap-
+proximating CFG. However, we can do this CFG parsing ef-
+ﬁciently because the CFG is generally sparse, i.e., the combi-
+nation of symbols that appear in a CF-rule is highly restricted.
+The enumerated supertag sequences are parsed by an
+HPSG parser one by one, until a successful parse is obtained.
+Though the enumerated supertag sequences are not necessar-
+ily parsable by the original HPSG, we observed in the exper-
+iments that the parser ﬁnds a successful parse within only a
+few maybe-parsable supertag sequences for most sentences.
+The biggest advantage of our approach is that the HPSG
+parser used in the last stage of the system, which is the most
+computationally demanding part in the previous approach,
+can now be replaced by a simpler and more efﬁcient parsing
+algorithm. Our HPSG parser is implemented as a classiﬁer-
+based, deterministic shift-reduce parser that is guided by a
+CFG-forest. The CFG-forest is created by the approximating
+CFG, and it approximates the HPSG-forest that would be ob-
+tained if the input supertag sequence were fully parsed with
+the HPSG. We do not need to keep many hypothetical sub-
+analyses represented by complex feature structures, as in the
+chart parsers used in the previous approach, since the input to
+the HPSG parser is single-supertagged and also we can know
+
+IJCAI-07
+
+1671
+
+almost surely which sub-analysis grows into a well-formed
+parse tree by referring to the CFG-forest.
+
+2 Background
+
+2.1 Head-driven Phrase Structure Grammar
+
+HPSG [Pollard and Sag, 1994] is a linguistic theory based
+on the lexicalized grammar formalism. An instance of HPSG
+grammar mainly consists of two parts: a small number of
+rule schemata and a large number of lexical entries. The rule
+schemata represent general grammatical constraints, while
+the lexical entries in the lexicon express word-speciﬁc char-
+acteristics.
+In HPSG, both lexical entries and phrasal con-
+stituents are represented by typed feature structures called
+signs and applications of the rule schemata are implemented
+by uniﬁcation of signs and schemata.
+
+Figure 1 presents an example of HPSG parsing for the sen-
+tence “I like it.”1 First, three lexical entries are selected from
+ones associated with each word in the lexicon. Then, the
+lexical entries of “like” and “it” are combined by applying
+the Head-Complement schema to them and then the resultant
+phrasal sign of the verb phrase “like it” is combined with the
+lexical entry of “I” by the Subject-Head schema.
+
+Variations of syntactic constructions allowed for a word are
+represented by different lexical entries associated to the word
+in the lexicon. These variations include not only ones with
+different subcategorization frames (e.g., transitive and in-
+transitive) but also ‘transformational’ variations such as pas-
+sivization and wh-extraction. The form of a parse tree con-
+structed upon a word sequence is hence highly constrained
+once a lexical entry is selected for each word.
+
+2.2 Supertagging
+
+Supertagging is a process where the words in the input sen-
+tence are tagged with ‘supertags.’ In our case, a supertag is a
+lexical template, which is a common structure shared among
+lexical entries for different words.
+
+Supertagging can be formulated as a sequence labeling task
+and several types of techniques have been applied to it. We
+selected a simple approach proposed by Clark [2002], which
+uses a maximum entropy classiﬁer. The conditional probabil-
+ity of a supertag sequence t = t1 . . . tn given a (POS-tagged)
+sentence s is calculated as:
+
+P (t|s) =
+
+n(cid:2)
+
+i=1
+
+P (ti|s) =
+
+n(cid:2)
+
+i=1
+
+1
+Zi
+
+exp (W · Φ(s, ti, i))
+
+(1)
+
+where W is a vector of feature weights, Φ(s, ti, i) is the fea-
+ture vector, and Zi is a normalization constant.
+
+As is clear from the equation above, the supertagger ne-
+glects the parsability of the supertag sequence. We empiri-
+cally show that, by combining a CFG-ﬁlter with the supertag-
+ger, it is possible to enumerate supertag sequences which are
+most of the case parsable, in the order of the probability de-
+ﬁned in Eq.(1), with only a small additional processing time.
+
+n1
+
+t1
+
+I
+
+n2
+
+t2
+
+like
+
+t3
+
+it
+
+Figure 2: Analysis by the approximating CFG
+
+2.3 CFG-ﬁltering
+
+CFG-ﬁltering [Kiefer and Krieger, 2000; Torisawa et al.,
+2000] is a parsing technique for uniﬁcation-based grammars.
+In HPSG parsing based on CFG-ﬁltering, an input sentence
+is ﬁrst parsed by a CFG that approximates the original HPSG
+and then the CFG-parsing is ‘replayed’ using the HPSG. The
+CFG parsing in the ﬁrst stage is much faster than normal
+HPSG parsing since the uniﬁcation operations are replaced
+by identity checking of atomic symbols of CFG, which is a
+much more faster operation than uniﬁcation.
+
+The non-terminal symbols N , the terminal symbols T , and
+the set of CF-rules R in the approximating CFG respectively
+represent (abstracted) phrasal signs, (abstracted) lexical en-
+tries, and instantiations of the rule schemata. For example, the
+CFG tree in Figure 2, which is an analysis of the sentence “I
+like it.” by an approximating CFG, corresponds to the HPSG
+In Figure 2, n1, n2, t1, t2, and t3
+parse tree in Figure 1.
+are non-terminal and terminal symbols of the approximating
+CFG which represent feature structures at the corresponding
+positions in the HPSG parse tree.
+
+The number of possible phrasal signs in an HPSG is in-
+ﬁnite in general. To approximate the HPSG by a CFG, we
+thus need to abstract away several parts of the phrasal signs
+to keep the number of abstracted signs ﬁnite. The abstraction
+of the feature structures is speciﬁed by means of a restrictor
+[Shieber, 1985] on the feature structures; a restrictor takes a
+feature structure and overwrites several feature values in it to
+the most general values allowed for the features.
+
+We use one of the algorithms proposed by Kiefer and
+Krieger [2000] to approximate the HPSG. The algorithm
+ﬁnds all possible abstracted phrasal signs by iteratively ap-
+plying the schemata to abstracted signs that have been found
+so far. A sketch of the algorithm is as follows:
+
+1: Restrict all the lexical entries and obtain the set of termi-
+
+Apply s to n1 and n2 as daughters and obtain the
+mother phrasal sign m
+Restrict m to m(cid:2)
+if m(cid:2) /∈ Ni+1 then
+
+Ni+1 ← Ni+1 ∪ {m(cid:2)}
+R ← R ∪ {m(cid:2) → n1n2}
+
+nal symbols T
+2: i ← 0; Ni ← T
+3: while Ni (cid:3)= Ni+1 do
+4: Ni+1 ← Ni
+5:
+6:
+7:
+
+for all n1, n2 ∈ Ni do
+for all schema s do
+
+8:
+9:
+10:
+11:
+12: N ← Ni
+
+1Feature structures used in the example are very simpliﬁed ones;
+
+a much more complicated grammar is used in the experiments.
+
+The restrictor deﬁnes a many-to-one mapping from the set
+of supertags (i.e., lexical entries) to the set of terminal sym-
+
+IJCAI-07
+
+1672
+
+Figure 1: HPSG parsing
+
+bols T . We however pretend there is a one-to-one mapping
+between these two sets by allowing multiple occurrences of
+the same terminal symbols in T , if necessary, and remember-
+ing which supertag was mapped to which terminal symbol.
+In the rest of the paper, we assume such a one-to-one relation
+and treat terminal symbols and supertags interchangeably.
+
+An important property of the CFG approximation is that
+the language of the obtained CFG is a superset of the set of
+parsable supertag sequences.
+In other words, if a supertag
+sequence is not parsable by the CFG, it is also not parsable
+by the HPSG. We use this property to eliminate non-parsable
+supertag sequences from the output of the supertagger.
+
+3 An efﬁcient multi-stage parsing algorithm
+
+for HPSG
+
+Our parsing system takes as input a POS-tagged sentence,
+((cid:7)w1, p1(cid:8) , . . . , (cid:7)wn, pn(cid:8)) where wi is a word and pi is a POS
+tag, and outputs an HPSG parse tree. The algorithm is as
+follows:
+1: for all (cid:7)wi, pi(cid:8) in the input sentence do
+2:
+
+Assign scores by the supertagger to supertags associ-
+ated to wi in the lexicon
+
+3: j ← 0
+4: repeat
+5:
+6:
+7:
+8:
+
+j ← j + 1
+t ← j-th best maybe-parsable supertag sequence
+Parse t with the approximating CFG
+Select an HPSG parse tree by the disambiguator, using
+the CFG forest made in the above step
+
+9: until a well-formed HPSG parse tree is obtained
+10: return the selected HPSG parse tree
+
+The approximating CFG is generally not equivalent to the
+HPSG, and therefore, a maybe-parsable supertag sequence
+might not be parsable by the HPSG. In such cases, the dis-
+ambiguator at line 8 fails to ﬁnd a well-formed HPSG parse
+tree and another supertag sequence is tried in the next iter-
+ation. The disambiguator might fail even when the maybe-
+parsable sequence is truly parsable by the HPSG because the
+CFG-forest created at line 7 may contain a tree not licensed
+by the HPSG and the disambiguator might mistakenly try to
+reproduce such a tree with the HPSG. However, we found
+such cases are empirically rare and thus decided to simply try
+the next supertag sequence in such cases. The rest of this sec-
+
+tion describes the algorithm of enumerating maybe-parsable
+supertag sequences (line 6) and the disambiguator (line 8).
+
+3.1 Enumeration of maybe-parsable supertag
+
+sequences
+
+The algorithm is based on Jim´enez and Marzal’s algorithm
+[Jim´enez and Marzal, 2000], which enumerates, given a
+weighted CFG and an sentence, the N -best parse trees for
+the sentence in order of their weights. In their algorithm, the
+input sentence is ﬁrst parsed with the weighted CFG using the
+CKY algorithm and then the N -best parse trees are obtained
+by enumerating the top N derivations of the root edge, i.e.,
+the edge which spans the whole input and whose label is the
+start symbol. The N -best derivations of an edge e are recur-
+sively obtained by combining the N -best sub-derivations of
+the sub-edges of e and selecting the top N derivations from
+the combinations. In reality, it is not necessary to calculate all
+the N -best derivations for every edge in the chart because the
+N -best sub-derivations can be enumerated in a ‘lazy’ manner.
+See their paper for further details on their algorithm.
+
+To obtain the N -best parsable supertag sequences, instead
+of the N -best parse trees, we modify Jim´enez and Marzal’s
+algorithm as follows. Our algorithm takes as input a sentence
+w = (w1, w2, . . . ) and a list of scored supertags for each
+word, {(cid:7)tij, sij (cid:8)}, where tij is the j-th scored supertag for
+wi and sij is the log-probability of tij . Given the input and
+the approximating CFG, Ga, we make a weighted CFG such
+that each CF-rule in Ga has a weight zero and each ‘leaf rule’
+tij → wi has a weight sij . Note that the score of a deriva-
+tion deﬁned by the weighted CFG equals the log-probability
+of the supertag sequence on the fringe of the derivation. The
+fringe of a derivation is the sequence of pre-terminals (i.e.,
+tijs) of the tree of the derivation. In the ﬁrst phase of the al-
+gorithm, we parse the input sentence with the weighted CFG
+by using the CKY algorithm. In the second phase of the al-
+gorithm, we enumerate the N -best fringes of the derivations
+of the root edge. Just as in Jim´enez and Marzal’s algorithm,
+we can recursively obtain the N -best fringes for an edge e by
+concatenating the N -best sub-fringes for the sub-edges of e
+and selecting the top N fringes from them in a lazy manner.
+We made several modiﬁcations to the basic algorithm de-
+scribed above in order to make it more efﬁcient. The ﬁrst
+is that we replace the CKY algorithm used in the ﬁrst step
+of the algorithm with an agenda-based best-ﬁrst parsing al-
+
+IJCAI-07
+
+1673
+
+gorithm. We further split the agenda-based parsing into two
+stages. The ﬁrst stage of the best-ﬁrst parsing stops when a
+root edge is found. In most cases, the ﬁrst maybe-parsable su-
+pertag sequence is truly parsable with the original HPSG. In
+such cases, we need only the best-scored parse tree since the
+ﬁrst maybe-parsable supertag sequence is its fringe. When
+the second supertag sequence is requested, we start the sec-
+ond stage, in which the best-ﬁrst parsing is continued until all
+the edges scored greater than (α − θ) are added to the chart,
+where α is the score of the best-scored parse tree and θ is a
+user-deﬁned threshold. At the end of the second stage, any
+edge used in a parse tree with a score greater than (α − θ) is
+stored in the chart and therefore we can ﬁnd all the maybe-
+parsable sequences scored greater than (α − θ) without fully
+parsing the input sentence.
+
+Another modiﬁcation is that we set the weight of the leaf
+rule tij → wi to (sij −si1) instead of sij . Note that this mod-
+iﬁcation does not alter the supertag sequences enumerated by
+the algorithm or their orders. By this modiﬁcation, generation
+of edges with small scores is suppressed for the same reason
+as in A∗-parsing [Klein and Manning, 2003].
+
+The last modiﬁcation is that, before the agenda-based pars-
+ing starts, we discard all the supertags for word wi whose
+scores are less than si1 − β, where β is a user-deﬁned thresh-
+old. By this modiﬁcation, we might lose some maybe-
+parsable sequences in which those discarded supertags ap-
+pear. In the experiments, however, we found that the accu-
+racy of parse trees created upon such supertag sequences with
+low scores is generally low. We therefore decided to use this
+thresholding with β for the efﬁciency of the enumeration.
+
+3.2 Disambiguation by shift-reduce parsing with a
+
+guiding forest
+
+We use an algorithm based on deterministic shift-reduce pars-
+ing to select an HPSG parse tree from those that can be
+constructed upon a given supertag sequence. Although we
+could use other disambiguation algorithms, the deterministic-
+parser-like algorithm is well suited to our framework because
+there is almost no need to keep multiple hypothetical sub-
+analyses (as in bottom-up chart parsing algorithms) to avoid
+search failure, since the supertag sequence given to the parser
+is maybe-parsable and we also have a CFG-forest on the su-
+pertag sequence, which guides the shift-reduce parser just like
+an LR-table with inﬁnite look-ahead.
+
+Deterministic, classiﬁer-based approaches to disambigua-
+tion have been applied to dependency parsing (e.g., [Yamada
+and Matsumoto, 2003; Nivre and Scholz, 2004]) and CFG
+parsing (e.g., [Sagae and Lavie, 2005]). Note that we can-
+not apply these algorithms to HPSG parsing in a straightfor-
+ward manner since they cause many parse failures for highly
+constrained grammars such as HPSG; to avoid parse failures,
+we need the approximating CFG for ﬁltering the supertag se-
+quences and for making the guiding CFG forest.
+
+The disambiguator has two components, a stack of phrasal
+and lexical signs, S, and a queue of lexical signs (i.e., su-
+pertags), Q. The input to the disambiguator is a POS-
+tagged sentence, a maybe-parsable supertag assignment t =
+(t1, t2, . . . ), and a forest, f , created by parsing t with the
+
+approximating CFG, using the CKY algorithm. The disam-
+biguation algorithm is as follows:
+1: S ← empty stack; Q ← (t1, t2, . . . )
+2: while Q is not empty or length(S) > 1 do
+3:
+4:
+5:
+
+if Γ(S, f ) = φ then
+
+return fail
+a ← argmax
+a∈Γ(S,f )
+
+W · Φ(S, Q, a)
+
+(cid:7)S, Q(cid:8) ← apply(a, (cid:7)S, Q(cid:8))
+
+6:
+7: r ← pop(S)
+8: return r
+In the algorithm, a denotes a parser action, Γ(S, f ) is the set
+of possible parser actions given the stack S and the forest
+f , W is the vector of feature weights, and Φ(S, Q, a) is the
+feature vector. There are two types of parser action:
+SHIFT: it pops a lexical sign from Q and pushes it into S.
+APPLY SCHEMA X: it applies an n-ary schema X to the
+top n elements of S and replaces them with the resulting
+mother phrasal sign.
+
+For example, the HPSG parse tree in Figure 1 is constructed
+by the following sequence of actions: SHIFT, SHIFT, SHIFT,
+APPLY SCHEMA Head Complement,
+APPLY SCHEMA Subject Head. The weight vector W is
+obtained with the averaged-perceptron algorithm [Collins and
+Duffy, 2002] with the polynomial kernel of degree 2.
+
+The set of possible actions Γ(S, f ) is determined so that
+the parser never ‘goes out of the forest.’; Γ(S, f ) is cre-
+ated by ﬁrst mapping each element in S, i.e., signs of sub-
+trees, to its corresponding node in f , then selecting actions
+which can lead to at least one complete CFG parse tree in
+f that includes all the nodes to which some stack elements
+are mapped, and ﬁnally eliminating from them any such AP-
+PLY SCHEMA Xs whose schema X is not applicable to the
+stack elements on the top of S.
+
+4 Experiments
+
+In this section, we ﬁrst give a brief summary of the speciﬁc
+HPSG grammar used in the experiments and also describe the
+test/training data we used. We then give implementation de-
+tails of the supertagger, the CFG-ﬁlter, and the disambiguator.
+Finally the experiments and their results are discussed.
+
+4.1 Enju grammar
+We used Enju version 2.12, an HPSG grammar for English
+[Miyao et al., 2005]. The design of the grammar basically
+follows the deﬁnition of [Pollard and Sag, 1994]. Twelve
+schemata are deﬁned in the grammar (9 binary schemata and
+3 unary schemata). The lexicon of the grammar was extracted
+from Sections 02-21 of the Penn Treebank [Marcus et al.,
+1994] (39,832 sentences). The grammar consists of 2,253
+lexical entries for 9,567 words.
+
+A program that converts the Penn Treebank into an HPSG
+treebank is also distributed with the grammar. We used it to
+make the training and test data for the experiment. A standard
+training/development/test split of the data is used; i.e., we
+
+2http://www-tsujii.is.s.u-tokyo.ac.jp/enju/index.html
+
+IJCAI-07
+
+1674
+
+description
+
+surrounding words
+
+surrounding POS tags
+
+feature templates
+
+w
+−2, p
+
+−1, w0, w1
+−1, p0, p1, p2, p3
+
+p
+
+combinations
+
+w
+
+−1w0, w0w1, p
+−2p
+p0p1p2p3, p
+−2p
+−1, p
+
+p0p1p2, p
+
+−1w0, p0w0, p1w0,
+−1p0, p
+−1p0, p0p1, p1p2
+
+−1p0p1,
+
+Table 1: Features used in the supertagger
+
+used the HPSG treebanks created from Section 02-21/22/23
+of the Penn Treebank as training/development/test data.
+
+4.2
+
+Implementation details
+
+HPSG supertagger
+Table 1 lists the features used in our supertagger. In the ta-
+ble, px and wx respectively denote a POS tag and a word at
+relative position x from the target word. We used the same
+feature set as one used in Ninomiya et al.’s HPSG supertag-
+ger so that the comparison of our system and theirs becomes
+more meaningful. The number of supertags is 2,253 (i.e., the
+number of lexical entries). 3
+
+CFG-ﬁlter
+We created an approximating CFG from the Enju grammar by
+Kiefer and Krieger’s algorithm. Examples of the features we
+restricted in the approximation are PHON (phonology fea-
+ture), SYNSEM:LOCAL:CONT (semantic structures of the
+phrase), and SYNSEM:LOCAL:CAT:HEAD:AGR (agree-
+ment feature). The CFG contains 1,241 terminal symbols,
+20,647 non-terminal symbols, and 458,988 rules.
+
+Disambiguator
+Table 2 lists features used in the disambiguator.4 Features 1-
+4 are adaptations of the features used in Sagae and Lavie’s
+CFG shift-reduce parser [Sagae and Lavie, 2005], and fea-
+tures 5-9 are adaptations of ones used in Miyao and Tsujii’s
+CKY-style HPSG parser [Miyao and Tsujii, 2005]. Feature
+10 includes several types of valency constraint read off from
+the phrasal/lexical signs. For example, from a lexical sign for
+a ditransitive usage of “give”, we extract two features, “sub-
+ject=NP” and “complement=NP NP”.
+
+4.3 Experimental results
+
+We evaluated the speed and the accuracy of the proposed
+method on sentences in the test data of ≤ 40 words (2,162
+sentences) and ≤ 100 words (2,299 sentences). We measured
+the accuracy of the parse results by the precision (LP) and re-
+call (LR) of the (labeled) predicate-argument relations output
+by the parser. See [Miyao and Tsujii, 2005] for details of the
+deﬁnition of the predicate-argument relations. The F1 score
+
+3Many of them do not, however, appear in the training treebank.
+The ‘effective’ size of the tag set is thus around 1,300 since the rest
+of supertags, which do not appear in the training data, are assigned
+very low probabilities by the supertagger and hence rarely used.
+
+4S(i) and Q(i) denote i-th elements from the top of the stack and
+the queue. S(n).left dep (resp. S(n).right dep) denotes the most re-
+cently found lexical dependent of the head word of S(n) that is to the
+left (resp. right) of S(n)’s head; S(n).lmost pos (S(n).rmost pos)
+denotes the POS tag of the left-most (right-most) word of S(n).
+
+1. surface form of the head word of x
+2. POS tag of the head word of x
+3. lexical template of the head word of x
+4. phrasal category of x (e.g., S, NP, NX)
+
+8<
+:
+
+S(0), . . . , S(3), Q(0), . . . , Q(3),
+
+1-4 are for x ∈
+
+S(0).left dep, S(0).right dep,
+S(1).left dep, S(1).right dep
+5. distance between head words of S(0) and S(1)
+6. whether a comma exists between S(0) and S(1)
+7. whether a comma exists inside S(0) or S(1)
+8. pair of S(1).rmost pos and S(0).lmost pos
+9. number of words dominated by S(0) and S(1)
+10. valence features of S(0), S(1), Q(0), and Q(1)
+
+9=
+;
+
+Table 2: Features used in the parser
+
+is the harmonic mean of LP and LR. All the timing informa-
+tion was collected on an AMD Opteron server with a 2.4-GHz
+CPU. The two parameters, β and θ, were manually tuned us-
+ing the development set; β = log(1000) and θ = log(100).
+
+Table 3 lists the results of the parsing experiments on the
+test set. The table also lists several reported results on the
+same test set by other HPSG parsers with the same grammar:
+Ninomiya et al.’s parser is the model III in [Ninomiya et al.,
+2006], which is the supertagger-based HPSG parser brieﬂy
+explained in Section 1. Miyao and Tsujii’s parser is a CKY-
+style HPSG parser [Miyao and Tsujii, 2005]5. Both parsers
+use maximum entropy models for the disambiguation, and the
+main difference between them is the inclusion of a supertag-
+ger by Ninomiya et al.’s parser. The higher efﬁciency of our
+approach is clear from the table: out system runs around six
+times faster than Ninomiya et al.’s parser with comparable
+accuracy.
+
+On the test set of the sentences ≤ 100 words, our method
+found a well-formed parse for 97.1% of the sentences.6 In
+preliminary experiments on the development set, we found
+the rate of successfully parsed sentences reached nearly 100%
+when we chose larger values for β. However, for such set-
+tings, average parse time signiﬁcantly increased and the F1
+score did not improve because while the recall slightly im-
+proved, the precision slightly deteriorated. For example, with
+β = log(105), 99.6% of the sentences in the development
+set got a parse with an average parse time of 52.9 ms. This
+fact means that when the ﬁrst maybe-parsable supertag se-
+quence is assigned very low probability by the supertagger,
+the enumeration algorithm needs to generate many edges un-
+til it ﬁnds the sequence, but the HPSG parse created on such
+a sequence is not so accurate.
+
+Table 4 shows the cumulative percentages of the sentences
+on which the parser found a well-formed parse within a cer-
+tain number of maybe-parsable supertag sequences. This ex-
+periment was done on the development set and with the same
+parameter values as the above experiment. For about 95%
+of the sentences, the ﬁrst maybe-parsable supertag sequence
+
+5Enju parser (ver2.1). http://www-tsujii.is.s.u-tokyo.ac.jp/enju
+6For those sentences on which the parser failed, we collected par-
+tial parse results by applying the disambiguator (without a guiding
+forest) on the 1-best supertag sequence and evaluated the predicate-
+argument relations identiﬁed in those partial parse results.
+
+IJCAI-07
+
+1675
+
+Sentences ≤ 40 words
+
+Sentences ≤ 100 words
+
+Parsers
+this paper
+Ninomiya et al. [2006]
+Miyao and Tsujii [2005]
+
+LP
+
+87.15
+87.66
+85.33
+
+LR
+
+86.65
+86.53
+84.83
+
+F1
+
+86.90
+87.09
+85.08
+
+Avg. Time
+
+25.9 ms
+155 ms
+509 ms
+
+LP
+
+86.93
+87.35
+84.96
+
+LR
+
+86.47
+86.29
+84.25
+
+F1
+
+86.70
+86.81
+84.60
+
+Avg. Time
+
+29.6 ms
+183 ms
+674 ms
+
+Table 3: Results of parsing on Section 23
+
+# of invocations
+
+1
+
+cumulative%
+
+94.89
+
+≤5
+96.90
+
+≤10
+97.14
+
+≤20 ≤111
+97.32
+97.63
+
+Table 4: Number of enumerated supertag sequences until a
+successful parse
+
+Sub-module
+POS tagging
+Supertagging
+Enumeration of supertag sequences
+CKY parsing of a supertag sequence
+Disambiguation by the HPSG parser
+other
+total
+
+Avg. time (%)
+7.4 ms (27%)
+7.0 ms (26%)
+3.4 ms (12%)
+0.6 ms (2.3%)
+7.7 ms (28%)
+
+1.9 ms
+
+28 ms (100%)
+
+Table 5: Breakdown of the average processing time
+
+was truly parsable with the HPSG and more than ﬁve invoca-
+tions of the HPSG parser were needed for only 0.7% of the
+sentences.7 For any failed sentences, the enumerator returned
+no maybe-parsable supertag sequences, i.e, the CFG-parser
+failed on those sentences. These observations mean that the
+CFG approximation was a fairly tight one, and hence, the
+number of ‘unfruitful’ invocations of the HPSG parser, which
+do not give a well-formed parse tree, was kept small.
+
+Table 5 shows a breakdown of the average processing time
+on the development set. The table suggests that our approach
+signiﬁcantly reduced the ‘workload’ of the HPSG parser by
+its small overhead for the enumeration of maybe-parsable
+supertag sequences; the processing time used in the HPSG
+parser is now very close to that for POS tagging.
+
+References
+
+[Bangalore and Joshi, 1999] S. Bangalore and A. K. Joshi.
+Supertagging: An approach to almost parsing. Compu-
+tational Linguistics, 25(2):237–265, 1999.
+
+[Clark and Curran, 2004] S. Clark and J. R. Curran. The im-
+portance of supertagging for wide-coverage ccg parsing.
+In Proc. COLING, pages 282–288, 2004.
+
+[Clark, 2002] S. Clark. Supertagging for combinatory cate-
+
+gorial grammar. In Proc. TAG+6, pages 19–24, 2002.
+
+[Collins and Duffy, 2002] M. Collins and N. Duffy. New
+ranking algorithms for parsing and tagging: Kernels over
+discrete structures, and the voted perceptron.
+In Proc.
+ACL, pages 263–270, 2002.
+
+7111 at the right-most column is the maximum number of
+
+maybe-parsable supertag sequences enumerated for a sentence.
+
+[Jim´enez and Marzal, 2000] V. M. Jim´enez and A. Marzal.
+Computation of the n best parse trees for weighted and
+stochastic context-free grammars. In Proceedings of the
+Joint IAPR International Workshops on Advances in Pat-
+tern Recognition, pages 183–192, 2000.
+
+[Kiefer and Krieger, 2000] B. Kiefer and H.-U. Krieger. A
+context-free approximation of head-driven phrase struc-
+ture grammar. In Proc. IWPT, pages 135–146, 2000.
+
+[Klein and Manning, 2003] D. Klein and C. D. Manning. A*
+parsing: Fast exact viterbi parse selection. In Proc. HLT-
+NAACL, pages 40–47, 2003.
+
+[Marcus et al., 1994] M. P. Marcus, B. Santorini, and M. A.
+Marcinkiewicz. Building a large annotated corpus of en-
+glish: The Penn Treebank. Computational Linguistics,
+19(2):313–330, 1994.
+
+[Miyao and Tsujii, 2005] Y. Miyao and J. Tsujii. Probabilis-
+tic disambiguation models for wide-coverage HPSG pars-
+ing. In Proc. ACL, pages 83–90, 2005.
+
+[Miyao et al., 2005] Y. Miyao, T. Ninomiya, and J. Tsu-
+jii. Corpus-oriented grammar development for acquiring
+a Head-driven Phrase Structure Grammar from the Penn
+Treebank.
+In Natural Language Processing - IJCNLP
+2004, volume 3248 of LNAI, pages 684–693. Springer-
+Verlag, 2005.
+
+[Ninomiya et al., 2006] T. Ninomiya,
+
+T. Matsuzaki,
+Y. Miyao, Y. Tsuruoka, and J. Tsujii. Extremely lexical-
+ized models for accurate and fast HPSG parsing. In Proc.
+EMNLP, pages 155–163, 2006.
+
+[Nivre and Scholz, 2004] J. Nivre and M. Scholz. Determin-
+In Proc. COL-
+
+istic dependency parsing of english text.
+ING, pages 64–70, 2004.
+
+[Pollard and Sag, 1994] C. Pollard and I. A. Sag. Head-
+Driven Phrase Structure Grammar. University of Chicago
+Press, 1994.
+
+[Sagae and Lavie, 2005] K. Sagae and A. Lavie. A classiﬁer-
+In Proc.
+
+based parser with linear run-time complexity.
+IWPT, pages 125–132, 2005.
+
+[Shieber, 1985] S. M. Shieber. Using restriction to extend
+parsing algorithms for complex-feature-based formalisms.
+In Proc. ACL, pages 145–152, 1985.
+
+[Torisawa et al., 2000] K. Torisawa, K. Nishida, Y. Miyao,
+and J. Tsujii. An HPSG parser with CFG ﬁltering. Natural
+Language Engineering, 6(1):63–80, 2000.
+
+[Yamada and Matsumoto, 2003] H. Yamada and Y. Mat-
+sumoto. Statistical dependency analysis with support vec-
+tor machines. In Proc. IWPT, pages 195–206, 2003.
+
+IJCAI-07
+
+1676
+
+

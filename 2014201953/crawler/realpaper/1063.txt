@@ -1,0 +1,869 @@
+Voronoi Random Fields: Extracting the Topological Structure of Indoor
+
+Environments via Place Labeling
+
+Stephen Friedman, Hanna Pasula, and Dieter Fox
+
+Department of Computer Science & Engineering
+
+University of Washington
+
+Seattle, WA 98195
+
+Abstract
+
+The ability to build maps of indoor environments
+is extremely important for autonomous mobile ro-
+bots. In this paper we introduce Voronoi random
+ﬁelds (VRFs), a novel technique for mapping the
+topological structure of indoor environments. Our
+maps describe environments in terms of their spa-
+tial layout along with information about the differ-
+ent places and their connectivity. To build these
+maps, we extract a Voronoi graph from an occu-
+pancy grid map generated with a laser range-ﬁnder,
+and then represent each point on the Voronoi graph
+as a node of a conditional random ﬁeld, which is a
+discriminatively trained graphical model. The re-
+sulting VRF estimates the label of each node, inte-
+grating features from both the map and the Voronoi
+topology. The labels provide a segmentation of
+an environment, with the different segments corre-
+sponding to rooms, hallways, or doorways. Experi-
+ments using different maps show that our technique
+is able to label unknown environments based on pa-
+rameters learned from other environments.
+
+1 Introduction
+
+Building semantically meaningful representations of indoor
+environments is a fundamental goal of robot mapping. Over
+the last few years, the SLAM (simultaneous localization and
+mapping) community has made tremendous progress in the
+development of efﬁcient and highly accurate map-building
+techniques. Most of these techniques focus on accurately cap-
+turing the metric layout and/or topological structure of an en-
+vironment. While raw metric maps have the advantage of be-
+ing well suited for robot navigation tasks, they are typically
+unstructured and contain no information about the different
+types of places or objects in an environment. Topological
+approaches are more compact and expressive in that they de-
+scribe locally distinctive places, but these distinctive places
+are often deﬁned in a robot’s perceptual space and are not
+necessarily related to indoor areas such as rooms or hallways.
+Other researchers, for instance [Beeson et al., 2005], fo-
+cused on detecting places such as rooms, hallways, and door-
+ways. However, most of these techniques detect only very
+
+speciﬁc structures and rely on hand-tuned rules to do so. Re-
+cently, [Mozos et al., 2005] introduced a technique that uses
+AdaBoost to learn place classiﬁers based on various features
+extracted from laser range-scans and cameras. While they
+achieve good results in classifying individual points in an en-
+vironment, their approach does not take the connectivity of
+these points into account, and so does not generate a topolog-
+ical, spatially consistent representation of an environment.
+
+The goal of our research is to generate semantically mean-
+ingful,
+topological-metric descriptions of indoor environ-
+ments. We aim to label every location in a metric map of
+an environment with the type of place it belongs to. These
+labels provide an intrinsic segmentation of the map, one that
+represents the topological structure of an environment. Such
+a structure will enable robots to better communicate with hu-
+mans about places, goals, and trajectories.
+
+To achieve this goal, we introduce Voronoi random ﬁelds
+(VRFs), a novel method for generating semantically mean-
+ingful descriptions of indoor environments. Our approach
+uses a state-of-the-art SLAM technique to generate a metric
+occupancy grid map of an environment [Fox et al., 2006]. It
+then extracts the Voronoi graph of this map [Latombe, 1991],
+which provides a compact representation of the free space
+and the connectivity structure of the environment. For each
+point on the Voronoi graph, VRFs then estimate the type of
+place it belongs to. This is done by generating a conditional
+random ﬁeld with hidden nodes corresponding to the points
+on the Voronoi graph. Conditional random ﬁelds are discrim-
+inatively trained graphical models that have been shown to
+outperform generative approaches in areas such as natural
+language processing [Lafferty et al., 2001] and computer vi-
+sion [Kumar and Hebert, 2003]. The place labels estimated
+by our Voronoi random ﬁeld provide a segmentation of an
+environment, with the different segments corresponding to
+rooms, hallways, junctions, or doorways. Since a robot’s
+place labels should be consistent with how humans perceive
+the structure of environments, we use human-labeled training
+data to learn the parameters of our VRFs.
+
+The paper is organized as follows. After describing related
+work in Section 2, we introduce Voronoi random ﬁelds, our
+application of conditional random ﬁelds to labeling Voronoi
+graphs, and also show how to perform inference and learn-
+ing in this model. Experiments are described in Section 4,
+followed by conclusions and a discussion of future work.
+
+IJCAI-07
+
+2109
+
+2 Related Work
+
+Voronoi graphs are an extremely useful topological repre-
+sentation of indoor environments [Latombe, 1991]. [Thrun,
+1998] constructs topological representations of environments
+by segmenting and pruning a Voronoi graph extracted from
+an occupancy grid map. This approach does not distinguish
+between different types of places and is rather brittle since
+it makes deterministic modeling decisions based on manually
+tuned, local features. In order to learn a topological map of an
+environment, [Kuipers and Beeson, 2002] generate distinc-
+tive views by unsupervised clustering of raw laser range-data
+and associate these views with distinctive states. [Tomatis et
+al., 2003] represent places in a hybrid topological-metric map
+as corners and openings detected with a laser range-ﬁnder.
+Their focus is on place recognition for SLAM, and the topo-
+logical nodes are not classiﬁed into types of places.
+
+[Beeson et al., 2005] detect topological places based on
+gateways and pathways in a reduced extended Voronoi graph,
+which they extract from occupancy grid maps. Their tech-
+nique relies on various hand-tuned rules to detect places and
+the authors do not show how it generalizes to complex sce-
+narios in unseen environments.
+
+Our work focuses on place classiﬁcation. We do not intend
+to detect individual, distinctive places, but rather aim at label-
+ing any location in an environment. Furthermore, we do not
+try to solve the place recognition, or data association, prob-
+lem, which aims at detecting when a robot has returned to a
+previously visited place [Tomatis et al., 2003]. We build on
+the fact that this problem is solved sufﬁciently well by state-
+of-the-art SLAM techniques, which generate accurate laser
+range-maps of indoor environments [Fox et al., 2006].
+
+In a similar vein as our research, [Stachniss et al., 2005]
+use AdaBoost to learn place classiﬁers based on features ex-
+tracted from laser range-scans and camera images. They
+show how to connect the classiﬁer outputs to a hidden Markov
+model, which then performs HMM ﬁltering on the trajectory
+followed by a robot. While this technique performs very well,
+it still has several limitations compared to our approach. The
+HMM only operates on the given trajectory, so the classiﬁca-
+tion of places in an environment depends on the actual path
+followed by a robot. Furthermore, the approach is not able
+to make use of the connectivity of an environment when la-
+beling places. In contrast to HMM ﬁltering, we show how to
+perform collective labeling on a Voronoi graph of an environ-
+ment. Our model thus takes both local features and connec-
+tivity information into account. Additionally, it is able to gen-
+erate a topological, semantically labeled graph description of
+an environment.
+
+3 Voronoi Random Fields
+
+3.1 Conditional Random Fields
+
+Conditional random ﬁelds (CRFs) are undirected graphical
+models that were developed for labeling sequence data [Laf-
+ferty et al., 2001]. Unlike HMMs and Markov random ﬁelds,
+which assume that observations are independent given the
+hidden state, CRFs make no assumptions about the depen-
+dency structure between different parts of the data. CRFs are
+
+thus especially suitable for classiﬁcation tasks that rely on
+complex and overlapping data and features.
+
+The nodes in a CRF represent hidden states, denoted y =
+(cid:2)y1, y2, . . . , yn(cid:3), and data, denoted x. Note that while indi-
+vidual observations xi are often connected to the correspond-
+ing hidden states yi, our data x consists of a complete map of
+an environment, and we connect all hidden states to this sin-
+gle map. The nodes yi, along with the connectivity structure
+represented by the undirected edges between them, deﬁne the
+conditional distribution p(y|x) over the hidden states y. Let
+C be the set of cliques in the graph of a CRF. Then, a CRF fac-
+torizes the conditional distribution into a product of clique po-
+tentials φc(x, yc), where every c ∈ C is a clique in the graph
+and x and yc are the observed data and the hidden nodes in
+the clique c, respectively. Clique potentials are functions that
+map variable conﬁgurations to non-negative numbers. Intu-
+itively, a potential captures the “compatibility” among the
+variables in the clique: the larger the potential value, the more
+likely the conﬁguration. Using clique potentials, the condi-
+tional distribution over the hidden states is written as
+
+(cid:2)
+
+p(y | x) =
+
+(cid:3)
+
+(cid:4)
+
+1
+
+Z(x)
+
+φc(x, yc),
+
+(1)
+
+c∈C
+
+y
+
+c∈C
+
+where Z(x) =
+φc(x, yc) is the normalizing par-
+tition function. The computation of this partition function is
+exponential in the size of y since it requires summation over
+all possible conﬁgurations of hidden states y. Hence, exact
+inference is possible for a limited class of CRF models only.
+Potentials φc(x, yc) are described by log-linear combina-
+
+tions of feature functions fc(), i.e.,
+
+(cid:5)
+
+(cid:6)
+
+φc(x, yc) = exp
+
+wT
+
+c · fc(x, yc)
+
+,
+
+(2)
+
+where wT
+is the transpose of a weight vector wc, and
+c
+fc(x, yc) is a function that extracts a vector of features from
+the variable values. Using feature functions, we rewrite the
+conditional distribution (1) as
+
+(cid:9)
+
+(cid:7)(cid:8)
+
+p(y | x) =
+
+1
+
+Z(x)
+
+exp
+
+wT
+
+c · fc(x, yc)
+
+(3)
+
+c∈C
+
+Before we describe how to perform efﬁcient inference and
+learning in CRFs, we will show how CRFs can be used for
+labeling places in an environment.
+
+3.2 Voronoi Random Fields for Place Labeling
+
+To label the different places in an environment, we estimate
+the place types at the points of a discrete Voronoi graph of
+the environment. Such a graph is deﬁned via the points that
+are equidistant to the closest two or more obstacles in an en-
+vironment [Latombe, 1991]. The left panel in Figure 1 shows
+an occupancy grid map generated by our laser mapping ap-
+proach along with the corresponding Voronoi graph (after
+pruning). As can be seen, the Voronoi graph nicely repre-
+sents the connectivity structure of the environment. Hallway
+intersections and their entries into rooms are typically repre-
+sented by points that have three or more neighbors. Note that
+any point in the environment can be associated with a point
+on the Voronoi graph. Thus, by estimating place labels on the
+Voronoi graph, we can determine the place type of any point
+in the environment.
+
+IJCAI-07
+
+2110
+
+We label the points on a Voronoi graph by converting
+the graph into a conditional random ﬁeld, which we call a
+Voronoi random ﬁeld (VRF). A VRF is constructed from a
+Voronoi graph by representing the points vi on the Voronoi
+graph as the hidden nodes yi of the VRF. The state of the
+hidden nodes ranges over the different place types: room,
+doorway, hallway, junction, and other. The neigh-
+boring points in the Voronoi graph are also connected in the
+VRF, thereby allowing the VRF to take the labels of neigh-
+boring points into account and thus probabilistically model
+connectivity constraints. The observed data x is extracted
+from the Voronoi graph and the local map area visible from
+each Voronoi point. We use two types of features extracted
+from the data:
+Spatial features describe the layout of the local area around a
+Voronoi point. Most of of our spatial features are inspired
+by those used by [Stachniss et al., 2005] for laser-based
+place detection. These features are extracted from the oc-
+cupancy grid map; they include distance to the closest ob-
+stacle and shape information about the area visible from
+the Voronoi point.
+
+Connectivity features make use of the connectivity informa-
+tion encoded by the Voronoi graph. These features include
+place types of the neighboring nodes, number of neigh-
+bors in the Voronoi graph, and shape information about the
+graph, such as curvature. Additionally, we use a feature
+that describes the size of the minimal loop going through a
+node in the Voronoi graph. This feature is extremely use-
+ful for tasks such as distinguishing doorways from narrow
+passages in rooms. While doorways are typically not part
+of a small loop, small loops with narrow passages are often
+caused by furniture such as tables (see Figure 1).
+
+Our VRFs contain three types of cliques. First, each node in
+the VRF is a single node clique, the potential of which is a
+weighted function of the spatial and connectivity features ex-
+tracted at that node. The second type of clique contains pairs
+of VRF nodes that are connected in the Voronoi graph. The
+potential of these cliques measures the spatial compatibility
+between place types. A third type of clique is generated for
+each node that has three neighbors. While such “junction”
+nodes often correspond to intersections in hallways, they also
+occur frequently in rooms. This ﬁnal clique type contains
+four nodes and measures the compatibility between the labels
+of all nodes connected at such a junction in the Voronoi graph
+(more than three neighbors could be handled if necessary).
+
+3.3
+
+Inference
+
+Inference in CRFs can estimate either the marginal distribu-
+tion of each hidden variable yi or the most likely conﬁgura-
+tion of all hidden variables y (i.e., MAP estimation), as de-
+ﬁned in (3). Both tasks can be solved using belief propagation
+(BP), which works by sending local messages through the
+graph structure of the model. Each node sends messages to
+its neighbors based on messages it receives and the clique po-
+tentials, which are deﬁned via the observations and the neigh-
+borhood relation in the CRF. For instance, the “observation”
+potential of a node is computed by ﬁrst extracting the features
+described in Section 3.2 at the map location corresponding to
+
+the node, and then feeding them through the log-linear func-
+tion (2) (we actually use derived features, see Section 3.4).
+
+BP generates provably correct results in graphs with no
+loops, such as trees or polytrees. However, since virtually
+all VRFs contain loops, we apply loopy belief propagation,
+an approximate inference algorithm that is not guaranteed to
+converge to the correct probability distribution [Murphy et
+al., 1999]. In our experiments, we compute the MAP labeling
+of an environment using max-product loopy BP. Fortunately,
+even when the algorithm failed to converge, our experiments
+showed reasonable results.
+
+3.4 Learning
+
+CRF Parameter Learning
+The goal of CRF parameter learning is to determine the
+weights of the feature functions used in the conditional likeli-
+hood (3). CRFs learn these weights discriminatively by max-
+imizing the conditional likelihood of labeled training data.
+While there is no closed-form solution for optimizing (3), it
+can be shown that (3) is convex relative to the weights w.
+Thus, the global optimum of (3) can be found using a nu-
+merical gradient algorithm. Unfortunately, this optimization
+runs an inference procedure at each iteration, which can be
+intractably inefﬁcient when using loopy BP in large VRFs.
+
+We therefore resort to maximizing the pseudo-likelihood
+of the training data, which is given by the sum of local likeli-
+hoods p(yi | MB(yi)), where MB(yi) is the Markov blanket
+of variable yi: the set of the immediate neighbors of yi in
+the CRF graph [Besag, 1975]. Optimization of this pseudo-
+likelihood is done by minimizing the negative of its log, re-
+sulting in the following objective function:
+
+(w−(cid:10)w)T (w−(cid:10)w)
+Gaussian shrinkage prior with mean (cid:10)w and variance σ2.
+
+Here, the terms in the summation correspond to the neg-
+ative pseudo log-likelihood and the right term represents a
+
+L(w) = −
+
+log p(yi | MB(yi), w) +
+
+n(cid:8)
+
+i=1
+
+2σ2
+
+(4)
+
+Without additional information, the prior mean is typically set
+to zero. In our approach, we use unconstrained L-BFGS [Liu
+and Nocedal, 1989], an efﬁcient gradient descent method,
+to optimize (4). The key advantage of maximizing pseudo-
+likelihood rather than the likelihood (3) is that the gradient of
+(4) can be computed extremely efﬁciently, without running
+an inference algorithm. Learning by maximizing pseudo-
+likelihood has been shown to perform very well in different
+domains; see [Richardson and Domingos, 2006] or [Kumar
+and Hebert, 2003] for an example.
+
+AdaBoost for Feature Induction
+While the features described in Section 3.2 could be used di-
+rectly as continuous observations in CRFs, we found that this
+approach did not yield very good results. This is due to the
+fact that the log-linear representation underlying CRFs corre-
+sponds to a unimodal Gaussian likelihood for each continu-
+ous feature, which is not ﬂexible enough to capture the com-
+plex relationships between place types and feature values.
+
+We overcome this limitation by extracting suitable features
+from our continuous feature values using AdaBoost [Fre-
+und and Schapire, 1996], which has been applied success-
+
+IJCAI-07
+
+2111
+
+fully by [Mozos et al., 2005] in the context of place recog-
+nition. Speciﬁcally, we learn a binary AdaBoost classiﬁer
+for each place type by using maps of labeled indoor environ-
+ments to generate training data for every class c in the form of
+Dc = {(cid:2)x1, y1(cid:3), (cid:2)x2, y2(cid:3), . . . , (cid:2)xn, yn(cid:3)}, where each xi con-
+tains the features extracted for a speciﬁc Voronoi point, and
+yi ∈ {−1, +1} speciﬁes whether or not this point belongs
+to the class c. As weak classiﬁers we use binary decision
+stumps applied to the features.
+In this case, AdaBoost se-
+quentially learns a weighted set of T decision stumps, each
+deﬁned by a feature f c
+t . Note that the same
+feature can be used multiple times with different thresholds.
+The weighted combination of these decision stumps gives the
+classiﬁcation of whether or not a feature vector x belongs to
+place type c,
+
+t and a threshold θc
+
+(cid:11)
+
+(cid:12)
+
+T(cid:8)
+
+H c(x) = sign
+
+αc
+t hc
+
+t (x)
+
+(5)
+
+t=1
+
+t
+
+− θc
+
+t (x) = sign(xf c
+
+t ) is the output of the t-th deci-
+Here hc
+sion stump, and αc
+t is the learned weight associated with it.
+Essentially, AdaBoost automatically determines which of the
+continuous features (and thresholds applied to them) are most
+useful in supporting good classiﬁcation results.
+
+We investigated two ways of combining AdaBoost and
+CRFs. The ﬁrst, which we call V RFD, takes all the Ada-
+t (x) learned for all the classes c
+Boost decision stumps hc
+and uses them as binary features in a CRF. The CRF then
+learns the weights for those stumps and for the neighbor-
+hood potentials using pseudo-likelihood maximization as de-
+scribed above. The second approach, called V RFM , uses
+the weighted sum, or margin [Niculescu-Mizil and Caru-
+ana, 2005], of each AdaBoost classiﬁer as a continuous fea-
+ture (the sum inside the sign in (5)). For C place types,
+V RFDuses CT binary features, T for each of the C place
+types, and V RFM uses the C continuous features that are
+generated by weighted summation of the decision stumps.
+
+3.5 Summary
+Our approach learns the parameters of VRFs from labeled
+maps of training environments. To do so, it ﬁrst learns a bi-
+nary AdaBoost classiﬁer for each place type from manually
+labeled maps. For each map, we generate the corresponding
+Voronoi random ﬁeld using the features learned by AdaBoost.
+The parameters of these VRFs are then learned by maximiz-
+ing the pseudo-likelihood (4) of the training data, using para-
+meter sharing. The resulting parameters are the weights of the
+different types of cliques occurring in a VRF. After learning,
+a novel environment is labeled as follows:
+
+1. Generate occupancy grid map using mobile robot laser-
+
+range SLAM techniques [Fox et al., 2006].
+
+2. Extract Voronoi graph from the map.
+3. Generate Voronoi random ﬁeld with nodes and edges
+
+corresponding to the Voronoi graph.
+
+4. Extract spatial and connectivity features from the map
+and generate the learned AdaBoost decision stumps to
+be used as observations in the VRF.
+
+5. Run max-product loopy BP inference to estimate the
+
+MAP labeling of the nodes in the VRF.
+
+4 Experimental Results
+
+We evaluated our approach on maps of four indoor environ-
+ments, acquired as laser range-data from the Radish robot
+data repository [Howard and Roy, 2003]. For each data set,
+we generated an occupancy grid map and extracted a Voronoi
+graph from that map. We then manually labeled each point
+on each graph as either room, doorway, hallway, or
+junction, where a junction can be an intersection be-
+tween hallways or an entry area into a room. The training set
+contained approximately 1,250 Voronoi points. We extracted
+53 different features at each point and used AdaBoost to gen-
+erate 25 decision stumps for each of the four classes, resulting
+in a total of 100 binary features used in our VRFs. AdaBoost
+learning took about a minute; learning the parameters of a
+VRF took an additional minute on a standard desktop PC.
+Loopy-BP MAP inference generally took less than a minute
+per test map when it converged. However, we allowed for
+a generous time-out based on the graph diameter, such that
+those that did not converge would run for up to 5 minutes.
+
+To assess the contributions of the different aspects of our
+VRF framework, we compared the following four approaches
+using leave one out cross-validation on the maps. The ﬁrst,
+denoted ABS , uses AdaBoost along with the spatial features
+to classify each point on the Voronoi graphs. The second,
+ABSC , additionally uses connectivity features extracted from
+the Voronoi graphs. These features include information such
+as number of neighbors in the graph, size of the smallest
+loop containing a node, and the distance to the closest ob-
+stacle. The third approach, V RFD, is a VRF that uses the
+AdaBoost decision stumps as binary features. The ﬁnal ap-
+proach, V RFM , uses the weighted sum, or margin, of each
+AdaBoost classiﬁer as features. For learning, we set the prior
+
+mean of all weights (cid:10)w to zero (compare (4)).
+
+ABS
+ABSC
+V RFD
+V RFM
+
+ABld. Allen
+90.8
+87.0
+92.1
+88.6
+93.3
+93.6
+94.2
+93.1
+
+Frbg.
+82.0
+86.6
+91.5
+91.3
+
+Intel
+81.1
+83.7
+86.4
+88.2
+
+Avg.
+
+85.2 ± 4.4
+87.8 ± 3.5
+91.2 ± 3.3
+91.7 ± 2.6
+
+Table 1: Accuracy of leave one out place labeling.
+
+Table 1 summarizes the accuracy of the different tech-
+niques in terms of the percentages of correct labels for the
+four test environments. Not surprisingly, the accuracy of
+AdaBoost increases consistently when adding connectivity
+features (for an average increase from 85.2% to 87.8%). The
+lower two rows display the accuracy of using AdaBoost for
+feature induction in VRFs. Both VRF approaches perform
+signiﬁcantly better than AdaBoost, though the difference be-
+tween them is not signiﬁcant. Note that the test maps are
+very diverse, so the cross-validation demonstrates good gen-
+eralization to new environments for all techniques.
+
+While these numbers indicate an improvement of VRFs
+over AdaBoost, they do not adequately reﬂect the true per-
+formance gain achieved by our VRF technique. To get an
+additional assessment of the techniques, we considered the
+following scenario. A mobile robot is placed at a random
+location in the map and takes the shortest path to another
+
+IJCAI-07
+
+2112
+
+Figure 1: Intel test map: (left) Occupancy grid map built via SLAM along with Voronoi graph. (middle) The labeled Voronoi graph deﬁnes
+a place type for each point on the map. Hallways are colored gray (red), rooms light gray (green), doorways dark grey (blue), and junctions
+are indicated by black circles. (right) Topological-metric map given by the segmentation of the labeled Voronoi graph. The spatial layout of
+rooms and hallway sections is provided along with a connectivity structure indicated by lines and dots (doorways are dark gray (blue) dots).
+
+randomly chosen location. Along its path, the robot records
+the sequence of rooms, hallway sections, junctions, and door-
+ways it passes through. We used edit distance to compare
+sequences recorded on maps labeled using our algorithms to
+those recorded on ground truth maps. Edit distance deter-
+mines the minimum number of operations (insertions, dele-
+tions) needed to make the inferred path match the ground
+truth path. Our resulting measure, called topological edit dis-
+tance (TED), reports the ratio of edit distance to path length;
+a lower TED ratio means better performance. The ﬁnal re-
+ported statistic is the average of 100 randomly selected paths
+in the map. The random paths taken on the correspond-
+ing maps in different tests were chosen consistently to al-
+low a straightforward comparison. The TED scores of the
+aforementioned experiments are summarized in Table 4. The
+V RFDmethod offers clear improvements signiﬁcant at the
+p<0.06 level over ABSC . The V RFM method appears bet-
+ter, but the overall improvement is insigniﬁcant due to poor
+performance on the Allen map. One explanation for this is
+that V RFM failed to correctly label several junctions between
+hallways, which many paths will pass through.
+
+ABS
+ABSC
+V RFD
+V RFM
+
+ABld. Allen
+79.4
+60.5
+30.9
+35.7
+22.1
+18.2
+14.3
+50.6
+
+Frbg.
+76.6
+74.2
+23.7
+21.0
+
+Intel
+62.6
+59.8
+25.7
+22.2
+
+Avg.
+
+69.8 ± 9.4
+50.1 ± 20.0
+22.4 ± 3.1
+27.0 ± 15.8
+
+Table 2: Topological Edit Distance of leave-one-out place labeling.
+
+Figure 1 shows the performance of our technique on one
+of our test maps (shown for V RFD, V RFM is very similar).
+The coloring of the middle map is given by labeling all points
+with the label of the nearest point in the VRF. The right panel
+shows the exploded topological-metric map resulting from
+grouping contiguous room and hallway regions of the same
+label into topological nodes. As can be seen, the topological-
+metric map generated automatically by our VRF nicely rep-
+resents the environment’s connectivity structure (indicated by
+lines and doorway and hallway nodes) and the spatial layout
+
+of individual rooms and hallway sections. Figure 2 provides
+a visual comparison of V RFDwith ABSC (AdaBoost using
+spatial and connectivity features). In agreement with the re-
+sults given in Table 2, our approach generates signiﬁcantly
+more consistent segmentations of the environments. For in-
+stance, AdaBoost generates a large number of false-positive
+doorways and hallways, especially in the cluttered rooms of
+the Freiburg map. Our labelings are also more consistent than
+those reported by [Stachniss et al., 2005].
+
+5 Conclusions
+
+We presented Voronoi random ﬁelds, a novel approach to
+generating semantically meaningful topological-metric de-
+scriptions of indoor environments. VRFs apply discrimina-
+tively trained conditional random ﬁelds to label the points of
+Voronoi graphs extracted from occupancy grid maps. The
+hidden states of our VRFs range over different types of
+places, such as rooms, hallways, doorways, and junctions. By
+performing inference in the graph structure, our model is able
+to take the connectivity of environments into account. We
+use AdaBoost to learn useful binary features from the contin-
+uous features extracted from Voronoi graphs and occupancy
+maps. The parameters of our model are trained efﬁciently
+using pseudo-likelihood. Experiments show that our tech-
+nique enables robots to label unseen environments based on
+parameters learned in other environments, and that the spatial
+reasoning supported by VRFs results in substantial improve-
+ments over a local AdaBoost technique.
+
+We consider these results extremely encouraging; they pro-
+vide mobile robots with the ability to reason about their en-
+vironments in terms more similar to human perception. As a
+next step, we will add high-level contextual information such
+as the length of hallways and the shape of rooms to our model.
+Each segmentation will then correspond to a two-level CRF,
+with the upper level representing the features of these places
+(similarly to [Liao et al., 2006]). To avoid summing over
+all possible CRF structures, we will replace MAP estimation
+with a sampling or k-best technique.
+
+An obvious shortcoming of our current approach is the re-
+
+IJCAI-07
+
+2113
+
+Figure 2: Abuilding (left) and Freiburg (right) test maps labeled by AdaBoost (upper row) and our VRF technique (lower row). The VRF
+technique is far more accurate in detecting junctions and its segmentations are spatially more consistent than those done by AdaBoost.
+
+striction to laser range data. As in the work of [Stachniss et
+al., 2005; Torralba et al., 2004], we intend to add visual fea-
+tures in order to improve place recognition.
+
+Finally, the longterm goal of this research is to generate
+maps that represent environments symbolically in terms of
+places and objects. To achieve this goal, we will combine our
+VRF technique with approaches to object detection, such as
+the one proposed by [Limketkai et al., 2005]. In this appli-
+cation, the place labeling performed by the VRF will provide
+context information for the object labeling performed jointly
+at the lower levels of a hierarchical CRF model.
+
+Acknowledgments
+This work has partly been supported by NSF CAREER grant
+number IIS-0093406, and by DARPA’s ASSIST and CALO
+Programs (contract numbers: NBCH-C-05-0137, SRI sub-
+contract 27-000968).
+
+References
+[Beeson et al., 2005] P. Beeson, N.K. Jong, and B. Kuipers. To-
+wards autonomous topological place detection using the ex-
+tended Voronoi graph. In Proc. of IEEE ICRA, 2005.
+
+[Besag, 1975] J. Besag. Statistical analysis of non-lattice data. The
+
+Statistician, 24, 1975.
+
+[Freund and Schapire, 1996] Yoav Freund and Robert E. Schapire.
+Experiments with a new boosting algorithm. In Proc. of ICML,
+1996.
+
+[Fox et al., 2006] D. Fox, J. Ko, K. Konolige, B. Limketkai, and
+B. Stewart. Distributed multi-robot exploration and mapping.
+Proc. of the IEEE, 94(7), 2006. Special Issue on Multi-Robot
+Systems.
+
+[Howard and Roy, 2003] A. Howard and N. Roy. The robotics data
+set repository (radish), 2003. radish.sourceforge.net.
+[Kuipers and Beeson, 2002] B. Kuipers and P. Beeson. Bootstrap
+
+learning for place recognition. In Proc. of AAAI, 2002.
+
+[Kumar and Hebert, 2003] S. Kumar and M. Hebert. Discrimina-
+tive random ﬁelds: A discriminative framework for contextual
+interaction in classiﬁcation. In Proc. of ICCV, 2003.
+
+[Lafferty et al., 2001] J. Lafferty, A. McCallum, and F. Pereira.
+Conditional random ﬁelds: Probabilistic models for segmenting
+and labeling sequence data. In Proc. of ICML, 2001.
+
+[Latombe, 1991] J.-C. Latombe. Robot Motion Planning. Kluwer
+Academic Publishers, Boston, MA, 1991. ISBN 0-7923-9206-X.
+[Liao et al., 2006] L. Liao, D. Fox, and H. Kautz. Hierarchical con-
+In
+
+ditional random ﬁelds for GPS-based activity recognition.
+[Thrun et al., 2007].
+
+[Limketkai et al., 2005] B. Limketkai, L. Liao, and D. Fox. Rela-
+
+tional object maps for mobile robots. In Proc. of IJCAI, 2005.
+
+[Liu and Nocedal, 1989] D. C. Liu and J. Nocedal. On the limited
+memory BFGS method for large scale optimization. Math. Pro-
+gramming, 45(3, (Ser. B)):503–528, 1989.
+
+[Mozos et al., 2005] O. Martinez-Mozos, C. Stachniss, and W. Bur-
+gard. Supervised learning of places from range data using ad-
+aboost. In Proc. of IEEE ICRA, 2005.
+
+[Murphy et al., 1999] K. Murphy, Y. Weiss, and M. Jordan. Loopy
+belief propagation for approximate inference: An empirical
+study. In Proc. of UAI, 1999.
+
+[Niculescu-Mizil and Caruana, 2005] A. Niculescu-Mizil
+
+and
+Predicting good probabilities with supervised
+
+R. Caruana.
+learning. In Proc. of ICML, 2005.
+
+[Richardson and Domingos, 2006] M. Richardson and P. Domin-
+gos. Markov logic networks. Machine Learning, 62(1-2), 2006.
+O. Martinez-Mozos,
+A. Rottmann, and W. Burgard. Semantic labeling of places. In
+[Thrun et al., 2007].
+
+[Stachniss et al., 2005] C.
+
+Stachniss,
+
+[Thrun et al., 2007] S. Thrun, R. Brooks, and H. Durrant-Whyte,
+editors. Robotics Research: The Twelfth International Sympo-
+sium, volume 28 of Springer Tracts in Advanced Robotics (STAR)
+series. Springer Verlag, 2007.
+
+[Thrun, 1998] S. Thrun. Learning metric-topological maps for in-
+door mobile robot navigation. Artiﬁcial Intelligence, 99(1), 1998.
+[Tomatis et al., 2003] N. Tomatis, I. Nourbakhsh, and R. Siegwart.
+Hybrid simultaneous localization and map building: a natural in-
+tegration of topological and metric. Robotics and Autonomous
+Systems, 44(1), 2003.
+
+[Torralba et al., 2004] A. Torralba, K. Murphy, and W. Freeman.
+Contextual models for object detection using boosted random
+ﬁelds. In Neural Information Processing Systems (NIPS), 2004.
+
+IJCAI-07
+
+2114
+
+

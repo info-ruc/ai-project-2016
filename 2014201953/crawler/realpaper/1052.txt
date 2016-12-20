@@ -1,0 +1,1565 @@
+Discriminative Learning of Beam-Search Heuristics for Planning
+
+Yuehua Xu
+
+School of EECS
+
+Alan Fern
+
+Sungwook Yoon
+
+School of EECS
+
+Computer Science & Engineering
+
+Oregon State University
+
+Oregon State University
+
+Arizona State University
+
+Corvallis, OR 97331
+
+Corvallis, OR 97331
+
+Tempe, AZ 85281
+
+xuyu@eecs.oregonstate.edu
+
+afern@eecs.oregonstate.edu
+
+Sungwook.Yoon@asu.edu
+
+Abstract
+
+We consider the problem of learning heuristics for
+controlling forward state-space beam search in AI
+planning domains. We draw on a recent framework
+for “structured output classiﬁcation” (e.g. syntac-
+tic parsing) known as learning as search optimiza-
+tion (LaSO). The LaSO approach uses discrimi-
+native learning to optimize heuristic functions for
+search-based computation of structured outputs and
+has shown promising results in a number of do-
+mains. However, the search problems that arise in
+AI planning tend to be qualitatively very different
+from those considered in structured classiﬁcation,
+which raises a number of potential difﬁculties in di-
+rectly applying LaSO to planning. In this paper, we
+discuss these issues and describe a LaSO-based ap-
+proach for discriminative learning of beam-search
+heuristics in AI planning domains. We give conver-
+gence results for this approach and present experi-
+ments in several benchmark domains. The results
+show that the discriminatively trained heuristic can
+outperform the one used by the planner FF and an-
+other recent non-discriminative learning approach.
+
+1 Introduction
+A number of state-of-the-art planners are based on the
+old idea of forward state-space heuristic search [Bonet and
+Geffner, 1999; Hoffmann and Nebel, 2001; Nguyen et al.,
+2002]. The success is due to the recent progress in deﬁning
+domain-independent heuristic functions that work well across
+a range of domains. However, there remain many domains
+where these heuristics are deﬁcient, leading to planning fail-
+ure. One way to improve the applicability and robustness of
+such planning systems is to develop learning mechanisms that
+automatically tune the heuristic to a particular domain based
+on prior planning experience. In this work, we consider the
+applicability of recent developments in machine learning to
+this problem.
+In particular, given a set of solved planning
+problems from a target domain, we consider using discrim-
+inative learning techniques for acquiring a domain-speciﬁc
+heuristic for controlling beam search.
+
+Despite the potential beneﬁts of learning to improve for-
+ward state-space planning heuristics, there have been few re-
+
+ported successes. While there has been a substantial body
+of work on learning heuristics or value functions to control
+search, e.g. [Boyan and Moore, 2000; Zhang and Dietterich,
+1995; Buro, 1998], virtually all such work has focused on
+search optimization problems. These problems involve ﬁnd-
+ing “least cost” conﬁgurations of combinatorial objects and
+have a much different ﬂavor than the types of domains en-
+countered in benchmarks from AI planning. To our knowl-
+edge, no such previous system has been demonstrated on
+benchmark domains from AI planning.
+
+Recent work [Yoon et al., 2006] has made progress toward
+learning heuristics for planning domains. The work focused
+on improving the heuristic used by the state-of-the-art planner
+FF [Hoffmann and Nebel, 2001]. In particular, the approach
+used linear regression to learn an approximation of the differ-
+ence between FF’s heuristic and the observed distances-to-
+goal of states in the training plans. The primary contribution
+of the work was to deﬁne a generic knowledge representa-
+tion for features and a features-search procedure that allowed
+learning of good regression functions across a range of plan-
+ning domains. While the approach showed promising results,
+the learning mechanism has a number of potential shortcom-
+ings. Most importantly, the mechanism does not consider
+the actual search performance of the heuristic during learn-
+ing. That is, learning is based purely on approximating the
+observed distances-to-goal in the training data. Even if the
+learned heuristic performs poorly when used for search, the
+learner makes no attempt to correct the heuristic in response.
+In this paper, we consider a learning approach that tightly
+couples learning with the actual search procedure, iteratively
+updating the heuristic in response to observed search errors.
+This approach is discriminative in the sense that it only at-
+tempts to learn a heuristic that discriminates between “good”
+and “bad” states well enough to ﬁnd the goal, rather than at-
+tempting to precisely model the distance-to-goal. In many
+areas of machine learning, such discriminative methods have
+been observed to outperform their non-discriminative coun-
+terparts. A main goal of this work is to demonstrate such
+beneﬁts in the context of planning.
+
+Our learning approach is based on the recent framework
+of learning as search optimization (LaSO) [Daume III and
+Marcu, 2005], which was developed to solve “structured out-
+put classiﬁcation” problems. Such problems involve map-
+ping structured inputs (e.g. sentences) to structured outputs
+
+IJCAI-07
+
+2041
+
+(e.g. syntactic parses) and classiﬁcation can be posed as per-
+forming a search over candidate outputs guided by a heuris-
+tic. LaSO provides an approach for discriminative learning
+of such heuristics and has demonstrated good performance
+across several structured classiﬁcation problems. However,
+the search problems corresponding to structured classiﬁca-
+tion are qualitatively very different from those typical of AI
+planning domains. For example, in structured classiﬁcation
+the search problems typically have a single or small number
+of solution paths, whereas in AI planning there are often a
+very large number of equally good solutions. Given these
+differences, the utility of LaSO in our context is not clear.
+
+The main contributions of this paper are to describe a
+LaSO-inspired algorithm for learning beam-search heuristics,
+to prove the convergence of the algorithm, and to provide an
+empirical evaluation in a number of AI planning domains.
+Our empirical results show that the approach is able to learn
+heuristics that improve beam-search compared to using the
+heuristic from the planner FF. In addition, the results show
+that discriminative learning appears to have an advantage over
+the existing non-discriminative approach.
+
+In what follows, we ﬁrst give our problem setup for learn-
+ing planning heuristics. Next, we give an overview of the
+LaSO framework for structured classiﬁcation, followed by a
+description of our LaSO variant and convergence analysis. Fi-
+nally, we present experiments and conclude.
+
+2 Learning Planning Heuristics
+Planning Domains. A planning domain D deﬁnes a set of
+possible actions A and a set of states S in terms of a set of
+predicate symbols P , action types Y , and constants C. A
+state fact is the application of a predicate to the appropriate
+number of constants, with a state being a set of state facts.
+Each action a ∈ A consists of: 1) an action name, which is
+an action type applied to the appropriate number of constants,
+2) a set of precondition state facts Pre(a), 3) two sets of state
+facts Add(a) and Del(a) representing the add and delete ef-
+fects respectively. As usual, an action a is applicable to a state
+s iff Pre(a) ⊆ s, and the application of an (applicable) action
+a to s results in the new state s
+
+(cid:2) = (s \ Del(a)) ∪ Add(a).
+
+Given a planning domain, a planning problem is a tuple
+(s, A, g), where A ⊆ A is a set of actions, s ∈ S is the ini-
+tial state, and g is a set of state facts representing the goal.
+A solution plan for a planning problem is a sequence of ac-
+tions (a1, . . . , al), where the sequential application of the se-
+(cid:2)
+where g ⊆ s
+.
+quence starting in state s leads to a goal state s
+In this paper, we will view planning problems as directed
+graphs where the vertices represent states and the edges repre-
+sent possible state transitions. Planning then reduces to graph
+search for a path from the initial state to goal.
+
+(cid:2)
+
+Learning to Plan. We focus on learning heuristics in the
+simple, but highly successful, framework of forward state-
+space search planning. Our goal is to learn heuristics that
+can quickly solve problems using breadth-ﬁrst beam search
+with a small beam width. Given a representative training
+set of problems from a planning domain, our approach ﬁrst
+solves the problems using potentially expensive search and
+then uses the solutions to learn a heuristic that can guide a
+
+small width beam search to the same solutions. The hope is
+that the learned heuristic will then quickly solve new prob-
+lems that could not be practically solved prior to learning.
+
+Heuristic Representation. We consider learning heuristic
+functions that are represented as linear combinations of fea-
+tures, i.e. H(n) = Σiwi ·fi(n) where n is a search node, fi is
+a feature of search nodes, and wi is the weight of feature fi.
+One of the challenges with this approach is deﬁning a generic
+feature space from which features are selected and weights
+are learned. The space must be rich enough to capture im-
+portant properties of a wide range of domains, but also be
+amenable to searching for those properties. For this purpose
+we will draw on prior work [Yoon et al., 2006] that deﬁned
+such a feature space, based on properties of relaxed plans,
+and described a search approach for ﬁnding useful features.
+In this investigation, we will use the features from that work
+in addition to using the relaxed-plan length heuristic.
+
+The approach of [Yoon et al., 2006] used a simple weight
+learning method, where weights were tuned by linear regres-
+sion to predict the distance-to-goal of search nodes in the
+training set. While this approach showed promise, it is obliv-
+ious to the actual performance of the heuristic when used for
+search. In particular, even if the heuristic provides poor guid-
+ance for search on the training problems no further learning
+will occur. The main objective of this work is to improve per-
+formance by investigating a more sophisticated weight learn-
+ing mechanism that is tightly integrated with the search pro-
+cess, iteratively adapting the heuristic in response to observed
+search errors. Below we ﬁrst describe prior work from struc-
+tured classiﬁcation upon which our approach is based, and
+then describe its adaptation to our setting.
+
+3 Learning Heuristics for Structured
+
+Classiﬁcation
+
+Structured classiﬁcation is the problem of learning a map-
+ping from structured inputs to structured outputs. An example
+problem is part-of-speech tagging where the goal is to learn a
+mapping from word sequences (i.e. sentences) to sequences
+of part-of-speech tags. Recent progress in structured classi-
+ﬁcation includes methods based on condition random ﬁelds
+[Lafferty et al., 2001], Perceptron updates [Collins, 2002],
+and margin optimization [Taskar et al., 2003].
+
+A recent alternative approach [Daume III and Marcu,
+2005] views structured classiﬁcation as a search problem and
+learns a heuristic for that problem based on training data. In
+particular, given a structured input x, the problem of labeling
+x by a structured output y is treated as searching through an
+exponentially large set of candidate outputs. For example, in
+part-of-speech tagging where x is a sequence of words and
+y is a sequence of word tags, each node in the search space
+is a pair (x, y
+is a partial labeling of the words in
+x. Learning corresponds to inducing a heuristic that quickly
+directs search to the search node (x, y) where y is the de-
+sired output. This framework, known as learning as search
+optimization (LaSO), has demonstrated state-of-the-art per-
+formance on a number of structured classiﬁcation problems
+and serves as the basis of our work.
+
+(cid:2)) where y
+
+(cid:2)
+
+LaSO assumes a feature-vector
+
+function F (n) =
+
+IJCAI-07
+
+2042
+
+(cid:5)f1(n), . . . , fm(n)(cid:6) that maps search nodes to descriptive
+features. For example, in part-of-speech tagging, the features
+may be indicators that detect when particular words are la-
+beled by particular tags, or counts of the number of times an
+article-tag was followed by a noun-tag in a partial labeling
+(cid:2)
+. The heuristic is a linear combination of these features
+y
+H(n) = F (n) · w, where w is a weight vector. LaSO at-
+tempts to select a w that guides search to the target solution
+by directly integrating learning into the search process. For
+each training example, LaSO conducts a search guided by the
+heuristic given by the current weights. Whenever a “search
+error” is made, the weights are updated so as to avoid the
+same type of error in the future. The process repeats until
+convergence or a stopping conditions. Convergence results
+have been stated [Daume III and Marcu, 2005] for certain
+types of weight updates.
+
+4 Learning Heuristics for Planning
+
+Given the success of LaSO in structured classiﬁcation, it
+is interesting to consider its applications to a wider range
+of search problems. Here we focus on search in AI plan-
+ning. Recall that our “learning to plan” training set con-
+tains planning problems with target solutions. This problem
+can be viewed as structured classiﬁcation with a training set
+{(xi, yi)}, where each xi = (s0, g) is a planning problem
+and each yi = (s0, s1, ..., sT ) is a sequence of states along
+a solution plan for xi. We can now consider applying LaSO
+to learn a heuristic that guides a forward state-space search to
+ﬁnd the solution yi for each xi.
+
+While in concept it is straightforward to map planning to
+the LaSO framework, it is not so obvious that the approach
+will work well. This is because the search problems arising
+in AI planning have very different characteristics compared
+to those tackled by LaSO so far. Most notably, there are typi-
+cally a large number of good (even optimal) solutions to any
+given planning problem. These solutions may take very dif-
+ferent paths to the goal or may result by simply reordering the
+steps of a particular plan. For example, in the Blocks world,
+in any particular state, there are generally many possible good
+next actions as it does not matter which order the various goal
+towers are constructed. Despite the possibility of many good
+solutions, LaSO will attempt to learn a heuristic that strictly
+prefers the training-set solutions over other equally good so-
+lutions that are not in the training set. This raises the potential
+for the learning problem to be impossible to solve or very dif-
+ﬁcult since many of the other good solutions to xi may be
+inherently identical to yi. In such cases, it is simply not clear
+whether the weights will converge to a good solution or not.
+One approach to overcoming this difﬁculty might be to in-
+clude many or all possible solutions in the training set.
+In
+general, this is not practical due to the enormous number of
+possible good plans, though studying methods for computing
+compact representations of such plan sets and using them in
+LaSO is of interest. Rather, in this work we continue to use
+a single target solutions and evaluate an algorithm very much
+like the original LaSO, noting the potential practical prob-
+lems that might arise due to multiple solutions. Interestingly,
+below we are able to derive a convergence result for this al-
+
+gorithm under certain assumptions about the structure of the
+multiple good solutions relative to the target solution.
+
+Below we describe a variant of LaSO used in our planning
+experiments. Our variant is based on the use of breadth-ﬁrst
+beam search, which is not captured by the original LaSO and
+that we found to be more useful in the context of planning.
+We will refer to the modiﬁed procedure as LaSO
+
+∗
+
+.
+
+Beam search. In breadth-ﬁrst beam search, a beam B of
+beam width b is generated at each search step resulting in a
+beam of b nodes. At each step, all of the nodes on the cur-
+rent beam are expanded and the top b children, as scored by
+the heuristic, are taken to be the next beam. This process
+continues until a goal node appears on the beam, at which
+point a solution plan has been found. When the beam width
+is small, many nodes in the search space are pruned away, of-
+ten resulting in the inability to ﬁnd a solution or ﬁnding very
+sub-optimal solutions. When the beam width increases, the
+quality of the solutions tend to improve, however, both the
+time and space complexity increases linearly with the beam
+width, leading to practical limitations. The goal of our work
+is to learn a domain-speciﬁc heuristic that allows for beam
+search with small b to replicate the result of using a large b.
+This can be viewed as a form of speedup learning.
+
+Discriminative Learning. The input to our learner is a set
+{(xi, yi)} of pairs, where xi = (s0, g) is a training problem
+from the target planning domain and yi = (s0, s1, . . . , sT )
+is a state sequence corresponding to a solution plan for xi.
+Our training procedure will attempt to ﬁnd weights such that
+for each problem the j’th state in the solution is contained in
+the j’th beam of the search. A search error is said to occur
+whenever this is not the case. Figure 1 gives pseudo-code
+for the overall learning approach. The top-level procedure
+repeatedly cycles through the training set passing each exam-
+∗
+to arrive at updated weights. The procedure
+ple to LaSO
+terminates when the weights remain unchanged after cycling
+through all examples or a user deﬁned stopping condition.
+
+Given a training example (xi, yi), LaSO
+
+conducts a beam
+search starting with the initial beam {(xi, (s0))}, i.e. a sin-
+gle search node with an empty plan. After generating beam
+∗ = (xi, (s0, s1, . . . , sj)) is not on the
+j of the search, if n
+beam then we have a search error. In this case, we update the
+more preferred by the heuris-
+weights in a way that makes n
+tic, ideally enough to remain on the beam next time through
+the search. We use a weight updating rule, similar to the Per-
+ceptron update proposed in [Daume III and Marcu, 2005]
+
+∗
+
+∗
+
+„P
+
+«
+
+w = w + α ·
+
+F (n)
+
+n∈B
+
+|B|
+
+− F (n∗)
+
+where 0 < α ≤ 1 is a learning rate parameter, F (n) is the
+feature vector of search node n and B is the current beam. In-
+tuitively this update rule moves the weights in a direction that
+decreases the heuristic value (increase the preference) of the
+and increases the heuristic value for
+desired search node n
+the nodes in the beam. After the weight update, the beam is
+and the search contin-
+replaced by the single search node n
+is guaranteed to terminate
+ues. Note that each call to LaSO
+in T search steps, generating training examples as necessary.
+
+∗
+
+∗
+
+∗
+
+IJCAI-07
+
+2043
+
+HeuristicLearn ({(xi, yi)}, b)
+w ← 0
+repeat until w is unchanged or a large number of iterations
+
+for every (xi, yi)
+
+LaSO∗((xi, yi), w, b)
+
+return w
+
+LaSO∗ ((x, y), w, b)
+// x is a planning problem (s0, g)
+// y is a solution trajectory (s0, s1, . . . , sT )
+// w is the weight vector
+B ← {(x, (s0))} // initial beam
+for j = 0, . . . , T − 1
+
+B ← BeamExpand(B, w, b)
+n∗ ← (x, (s1, . . . , sj+1)) // desired node
+if n∗ /∈ B then
+
+w ← Update(w, B, n∗)
+B ← {n∗}
+
+BeamExpand (B, w, b)
+candidates ← {}
+for every n ∈ B
+for every n ∈ candidates
+
+candidates ← candidates∪ Successors(n)
+H(n) ← w · F (n) // compute heuristic score of n
+
+return b nodes in candidates with lowest heuristic value
+
+Figure 1: The discriminative learning algorithm.
+
+5 Convergence of LaSO∗
+∗
+We now prove that under certain assumptions LaSO
+is guar-
+anteed to converge in a ﬁnite number of iterations to a set of
+weights that solves all of the training examples. In particu-
+lar, we extend the convergence results of the original LaSO to
+the case of “multiple good solutions”. The proof is a simple
+generalization of the one used to prove convergence of Per-
+ceptron updates for structured classiﬁcation [Collins, 2002].
+Consider a set of training problems (xi, yi), where xi =
+(s0, g) and yi = (s0, s1, . . . , sT ). For each (xi, yi) we denote
+= (xi, (s0, . . . , sj)) the node on the desired search
+by n
+path at depth j for example i. Also let Dij be the set of all
+∗
+i0. That is,
+nodes that can be reached in j search steps from n
+Dij is the set of all possible nodes that could be in the beam
+after j beam updates. In our result, we will let R be a constant
+such that ∀i, j, ∀n ∈ Dij, (cid:9)F (n)−F (n
+)(cid:9) ≤ R where F (n)
+is the feature vector of node n and (cid:9) · (cid:9) denotes 2-norm.
+
+∗
+ij
+
+∗
+ij
+
+Our results will be stated in terms of the existence of a
+weight vector that achieves a certain margin on the training
+set. Here we use a notion of margin that is suited to our beam
+search framework and that is meaningful when there is no
+weight vector that ranks the target solutions as strictly best,
+i.e. there can be other solutions that look just as good or bet-
+ter. As deﬁned below a beam margin is a triple (b
+, δ1, δ2)
+where b
+
+is a non-negative integer, and δ1, δ2 ≥ 0.
+(cid:2)
+
+Deﬁnition 1 (Beam Margin). A weight vector w has beam
+margin (b
+, δ1, δ2) on a training set {(xi, yi)} if for each i, j
+there is a set D
+
+⊆ Dij of size at most b
+
+such that
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+ij
+
+∀n ∈ Dij − D(cid:4)
+ij
+∀n ∈ D(cid:4)
+ij
+
+, w · F (n) − w · F (n∗
+
+ij) ≥ δ1 and,
+
+,
+
+δ1 > w · F (n) − w · F (n∗
+
+ij) ≥ −δ2
+
+(cid:2)
+
+, δ1, δ2) if at each search
+Weight vector w has beam margin (b
+∗
+ij better than most other nodes
+depth it ranks the target node n
+nodes bet-
+by a margin of at least δ1, and ranks at most b
+∗
+ij by a margin no greater than δ2. Whenever this
+ter than n
+condition is satisﬁed we are guaranteed that a beam search
+
+(cid:2)
+
+(cid:2)
+
+using weights w will solve all of the train-
+with width b > b
+(cid:2) = 0 corresponds to the
+ing problems. The case where b
+more typical deﬁnition of margin (also used by the original
+LaSO), where the target is required to be ranked higher than
+> 0 we
+all other nodes. By considering the case where b
+can show convergence in cases where no such “dominating”
+weight vector exists, yet there are weight vectors that allow
+search to correctly solve the training problems. The following
+uses a large enough beam width
+theorem shows that if LaSO
+relative to the beam margin, then it is guaranteed to converge
+after a ﬁnite number of mistakes.
+
+∗
+
+(cid:2)
+
+∗
+
+Theorem 1. If there exists a weight vector w, such that
+(cid:2)
+, δ1, δ2) on the training
+(cid:9)w(cid:9) = 1 and w has beam margin (b
+1 + δ2
+(cid:2)
+set, then for any beam width b >
+, the number of
+δ1
+
+(cid:3)
+
+b
+
+(cid:2)
+
+(cid:2)
+
+(cid:3)2
+
+bR
+
+.
+
+is bounded by
+
+mistakes made by LaSO
+
+δ1(b−b(cid:3))−δ2b(cid:3)
+(cid:2)
+Proof. (Sketch) Let wk be the weights before the k
+th mis-
+(cid:2)
+1 = 0. Suppose the k
+th mis-
+take is made. Then w
+take is made when the beam B at depth j does not con-
+∗ = n
+∗
+ij . Using the fact that for
+tain the target node n
+∗) > wk · F (n), one can derive that
+n ∈ B, wk · F (n
+(cid:9)wk+1(cid:9)2 ≤ (cid:9)wk(cid:9)2 + R
+, which by induction implies that
+(cid:9)wk+1(cid:9)2 ≤ kR
+. Next, using the deﬁnition of beam margin
+one can derive that w · wk+1 ≥ w · wk + (b−b(cid:3))δ1
+− b(cid:3)δ2
+b ,
+which implies that w · wk+1 ≥ k
+. Combin-
+ing these inequalities and noting that (cid:9)w(cid:9) = 1 we get that
+1 ≥ w·wk+1
+
+b
+(b−b(cid:3))δ1−b(cid:3)δ2
+
+(b−b(cid:3))δ1−b(cid:3)δ2
+
+, implying the theorem.
+
+(cid:7)w(cid:7)(cid:7)wk+1(cid:7) ≥ k
+
+2
+
+2
+
+b
+
+√
+b
+
+kR
+
+Notice that when b
+
+vector, the mistake bound reduces to
+
+(cid:2) = 0, i.e. there is a dominating weight
+, which does not
+
+(cid:3)2
+
+(cid:2)
+
+R
+δ1
+
+(cid:2)
+
+δ1
+
+is
+
+(cid:2)
+
+(2b(cid:3)+1)R
+
+(cid:3)2
+(cid:2)
+
+depend on the beam width and matches the result stated in
+[Daume III and Marcu, 2005]. This is also the behavior when
+. In the case when δ1 = δ2 and we use the minimum
+b >> b
+(cid:2) + 1, the bound
+beam width allowed by the theorem b = 2b
+larger than
+
+, which is a factor of (2b
+. Thus, this result points to a trade-off between
+when b >> b
+∗
+.
+the mistake bound and computational complexity of LaSO
+That is, the computational complexity of each iteration in-
+creases linearly with the beam width, but the mistake bound
+decreases as the beam width becomes large. This agrees with
+the intuition that the more computation time we are willing to
+put into search at planning time, the less we need to learn.
+
+(cid:2) + 1)2
+
+6 Experimental Results
+
+We present experiments in ﬁve STRIPS domains: Blocks
+world, Pipesworld, Pipesworld-with-tankage, PSR and
+Philosopher. We set a time cut-off of 30 CPU minutes and
+considered a problem to be unsolved if a solution is not found
+within the cut-off. Given a set of training problems we gener-
+ated solution trajectories by running both FF and beam search
+with different beam widths and then taking the best solution
+found as the training trajectory. For Blocks world, we used
+a set of features learned in previous work [Yoon et al., 2005;
+Fern et al., 2003; Yoon, 2006] and for the other domains we
+
+IJCAI-07
+
+2044
+
+∗
+
+used the those learned in [Yoon et al., 2006; Yoon, 2006]. In
+all cases, we include FF’s heuristic as a feature.
+
+∗
+
+∗
+
+We used LaSO
+
+to learn weights with a learning rate of
+0.01. For Philosopher, LaSO
+was run for 10000 iterations
+with a learning beam width of 1. For the other domains,
+was run for 1000 or 5000 iterations with a learn-
+LaSO
+ing beam width of 10 (this beam width did not work well
+for Philosopher). The learning times varied across domains,
+depending on the number of predicates and actions, and the
+length of solution trajectories. The average time for process-
+ing a single problem in a single iteration was about 10 sec-
+onds for PSR, 2 seconds for Pipesworld-with-tankage, and
+less than 1 seconds for the other domains.
+
+Domain Details. Blocks world problems were generated
+by the BWSTATES generator [Slaney and Thi´ebaux, 2001].
+Thirty problems with 10 or 20 blocks were used as training
+data, and 30 problems with 20, 30, or 40 blocks were used for
+testing. There are 15 features in this domain including FF’s
+relax-plan-length heuristic. The other four domains are taken
+from the fourth international planning computation (IPC4).
+Each domain included 50 or 48 problems, roughly ordered
+by difﬁculty. We used the ﬁrst 15 problems for training and
+the remaining problems for testing. Including FF’s relaxed-
+plan-length heuristic, there were 35 features in Pipesworld,
+11 features in Pipesworld-with-tankage, 54 features in PSR
+and 19 features in Philosopher.
+
+∗
+
+∗
+
+Performance Across Beam Sizes. Figure 2 gives the per-
+formance of beam search in each domain for various beam
+widths. The columns correspond to four algorithms: LEN
+- beam search using FF’s relaxed-plan-length heuristic, U -
+beam search using a heuristic with uniform weights for all
+- beam search using the heuristic learned us-
+features, LaSO
+(with learning beam width speciﬁed above), and
+ing LaSO
+LR - beam search using the heuristic learned from linear re-
+gression as was done in [Yoon et al., 2006]. Each row corre-
+sponds to a beam width and shows the number of solved test
+problems and the average plan length of the solved problems.
+In general, for all algorithms we see that as the beam width
+increases the number of solved problems increases and solu-
+tion lengths improve. However, after some point the number
+of solved problems typically decreases. This behavior is typ-
+ical for beam search, since as the beam width increases there
+is a greater chance of not pruning a solution trajectory, but the
+computational time and memory demands increase. Thus, for
+a ﬁxed time cut-off we expect a decrease in performance.
+∗
+
+Versus No Learning. Compared to LEN, LaSO
+
+LaSO
+
+∗
+
+∗
+
+tended to signiﬁcantly improve the performance of beam
+search, especially for small beam widths—e.g.
+in Blocks
+∗
+solves twice as many prob-
+world with beam width 1 LaSO
+lems as LEN. The average plan length has also been reduced
+signiﬁcantly for small beam widths. As the beam width
+and LEN decreases but
+increases the gap between LaSO
+still solves more problems with comparable solution
+LaSO
+has the best performance with
+quality. In Pipesworld, LaSO
+beam width 5, solving 12 more problems than LEN. As the
+beam width increases, again the performance gap decreases,
+consistently solves more problems than LEN. The
+but LaSO
+trends are similar for the other domains, except that in PSR,
+∗
+for large beam widths.
+LEN solves slightly more than LaSO
+
+∗
+
+∗
+
+∗
+
+Problems solved
+LaSO∗
+
+Problems solved
+LaSO∗
+
+Problems solved
+LaSO∗
+
+Problems solved
+LaSO∗
+
+b
+1
+5
+10
+20
+50
+100
+500
+1000
+
+b
+1
+5
+10
+20
+50
+100
+500
+1000
+
+b
+1
+5
+10
+20
+50
+100
+500
+1000
+
+b
+1
+5
+10
+20
+50
+100
+500
+1000
+
+b
+1
+5
+10
+20
+50
+100
+500
+1000
+
+LEN
+
+13
+21
+22
+23
+20
+19
+17
+16
+
+LEN
+
+11
+16
+17
+17
+18
+18
+21
+20
+
+LEN
+
+6
+6
+6
+9
+6
+5
+5
+5
+
+LEN
+
+0
+0
+1
+7
+13
+13
+4
+1
+
+LEN
+
+0
+0
+0
+0
+0
+0
+0
+0
+
+U
+0
+0
+0
+0
+0
+0
+0
+0
+
+U
+13
+17
+17
+17
+19
+16
+18
+18
+
+U
+4
+8
+8
+8
+5
+4
+6
+6
+
+U
+0
+4
+20
+18
+17
+15
+4
+2
+
+U
+33
+33
+33
+32
+6
+16
+7
+1
+
+Pipesworld-with-tankage
+
+Problems solved
+LaSO∗
+
+Blocks World
+
+Average plan length
+
+LR
+11
+19
+19
+22
+19
+20
+23
+20
+
+LEN
+6022
+3094
+2589
+921
+522
+290
+101
+100
+
+U
+-
+-
+-
+-
+-
+-
+-
+-
+
+LaSO∗
+2444
+939
+1035
+671
+488
+218
+122
+103
+
+Pipesworld
+
+LR
+8
+19
+21
+22
+21
+21
+21
+20
+
+LEN
+375
+1467
+2192
+161
+264
+83
+39
+31
+
+U
+
+Average plan length
+LaSO∗
+1739
+1409
+740
+173
+84
+72
+67
+52
+
+4323
+3176
+2252
+1287
+643
+233
+73
+47
+
+LR
+2
+6
+9
+9
+6
+5
+4
+7
+
+PSR
+
+LR
+0
+9
+13
+17
+16
+13
+2
+1
+
+Philosopher
+
+LR
+33
+33
+33
+32
+23
+18
+7
+4
+
+Average plan length
+
+LEN
+139
+466
+142
+530
+81
+73
+301
+69
+
+U
+
+2990
+914
+2357
+503
+289
+138
+142
+61
+
+LaSO∗
+1491
+427
+390
+273
+417
+135
+159
+79
+
+Average plan length
+
+U
+-
+
+231
+178
+151
+106
+91
+61
+50
+
+LaSO∗
+
+-
+
+275
+194
+183
+105
+86
+53
+39
+
+Average plan length
+
+U
+363
+363
+363
+368
+255
+287
+225
+198
+
+LaSO∗
+
+-
+
+5469
+3999
+2612
+966
+1348
+254
+214
+
+LEN
+
+-
+-
+
+516
+374
+154
+114
+55
+39
+
+LEN
+
+-
+-
+-
+-
+-
+-
+-
+-
+
+25
+26
+25
+27
+27
+24
+17
+19
+
+13
+28
+26
+27
+27
+27
+25
+22
+
+7
+8
+8
+11
+10
+9
+9
+8
+
+0
+14
+12
+12
+16
+9
+2
+1
+
+0
+24
+21
+18
+10
+9
+2
+1
+
+LR
+4254
+1767
+368
+227
+102
+157
+84
+68
+
+LR
+3888
+1300
+800
+885
+4111
+165
+74
+38
+
+LR
+1678
+1556
+739
+880
+548
+58
+45
+100
+
+LR
+
+-
+
+228
+160
+146
+109
+86
+48
+43
+
+LR
+363
+363
+363
+358
+308
+281
+220
+204
+
+Figure 2: Experimental results for ﬁve planning domains.
+
+∗
+
+∗
+
+LaSO
+
+signiﬁcantly improves over U in Blocks world,
+Especially in
+Pipesworld and Pipesworld-with-tankage.
+Blocks world, where U does not solve any problem. For PSR,
+only improves over U at beam width 5 and is always
+LaSO
+worse in Philosopher (see discussion below).
+
+∗
+
+The results show that LaSO
+
+is able to improve on the
+state-of-the-art heuristic LEN and that in the majority of our
+domains learning is beneﬁcial compared to uniform weights.
+was achieved for
+In general, the best performance for LaSO
+small beam widths close to those used for training.
+
+∗
+
+Comparing LaSO
+
+with Linear Regression. To com-
+pare with prior non-discriminative heuristic learning work we
+learned weights using linear regression as done in [Yoon et
+al., 2006] utilizing the Weka linear regression tool. The re-
+sults for the resulting learned linear-regression heuristics are
+shown in the columns labeled LR.
+∗
+For Blocks world, LR solves fewer problems than LaSO
+
+∗
+
+IJCAI-07
+
+2045
+
+∗
+
+with beam widths smaller than 100 but solves more prob-
+with beam widths larger than 100. For
+lems than LaSO
+always
+Pipesworld and Pipesworld-with-tankage, LaSO
+∗
+is better
+solves more problems than LR. In PSR, LaSO
+than LR with beam width 5, but becomes slightly worse as
+the beam width increases. In Philosopher, LR outperforms
+LaSO
+
+, solving all problems with small beam widths.
+
+∗
+
+∗
+
+∗
+
+(cid:2)
+
+∗
+
+∗
+
+The results indicate that LaSO
+
+can signiﬁcantly improve
+over non-discriminative learning (here regression) and that
+there appears to be utility in integrating learning directly in
+can fail to
+to search. The results also indicate that LaSO
+converge to a good solution in some domains where regres-
+sion happens to work well, particularly in Philosopher. In this
+domain, since action sequences can be almost arbitrarily per-
+muted, there is a huge set of inherently identical optimal/good
+tries to make the single training solution
+solutions. LaSO
+look better than all others, which appears problematic here.
+More technically, the large set of inherently identical solu-
+tions means that the beam-width threshold required by The-
+orem 1, i.e. (1 + δ2
+, is extremely large, suggesting poor
+δ1
+convergence properties for reasonably beam widths.
+∗
+
+)b
+
+Plan Length. LaSO
+
+can signiﬁcantly improve success
+rate at small beam widths, which is one of our main goals.
+However, the plan lengths at small widths are quite subop-
+timal, which is typical behavior of beam search. Ideally we
+would like to obtain these success rates without paying a price
+in plan length. We are currently investigating ways to im-
+in this direction. Also we note that typically one
+prove LaSO
+of the primary difﬁculties of AI planning is to simply ﬁnd a
+path to the goal. After ﬁnding such a path, if it is signiﬁcantly
+sub-optimal, incomplete plan analysis or plan rewriting rules
+can be used to signiﬁcantly prune the plan, e.g. see [Ambite
+∗
+et al., 2000]. Thus, we can use the current LaSO
+to quickly
+ﬁnd goals followed by fast plan length optimization.
+
+∗
+
+7 Summary and Future Work
+
+We discussed the potential difﬁculties of applying LaSO to
+AI planning given the qualitative differences between search
+problems in AI planning and those in structured classiﬁca-
+tion. Nevertheless, our preliminary investigation shows that
+in several planning domains our LaSO variant is able to sig-
+niﬁcantly improve over the heuristic of FF plan and over
+regression-based learning [Yoon et al., 2006]. We conclude
+that the approach has good promise as a way of learning
+heuristics to control forward state-space search planners. Our
+results also demonstrated failures of the discriminative ap-
+proach, where it performed signiﬁcantly worse than linear re-
+gression, which suggest future directions for improvement.
+
+In future work we plan to extend our approach to automat-
+ically induce new features. Another important direction is to
+investigate the sensitivity of the LaSO approach to the par-
+ticular solutions provided in the training data.
+In addition,
+understanding more general conditions under which the ap-
+proach is guaranteed to converge is of interest. Currently,
+we have shown a sufﬁcient condition for convergence but not
+necessary. We are also interested in determining the computa-
+tional complexity of learning linear heuristics for controlling
+beam search. Also of interest is to investigate the use of plan
+
+analysis in LaSO to convert the totally ordered training plans
+to partially-order plans, which would help deal with the prob-
+lem of “many inherently identical solutions” experienced in
+domains such as Philosopher. Finally, we plan to consider
+other search spaces and settings such as partial-order plan-
+ning, temporal-metric planning, and probabilistic planning.
+
+Acknowledgments
+
+This work was supported by NSF grant IIS-0307592 and
+DARPA contract FA8750-05-2-0249.
+
+References
+[Ambite et al., 2000] Jose Luis Ambite, Craig A. Knoblock, and
+
+Steven Minton. Learning plan rewriting rules. In ICAPS, 2000.
+
+[Bonet and Geffner, 1999] Blai Bonet and Hector Geffner. Plan-
+
+ning as heuristic search: New results. In ECP, 1999.
+
+[Boyan and Moore, 2000] J. Boyan and A. Moore. Learning evalu-
+ation functions to improve optimization by local search. Journal
+of Machine Learning Research, 1:77–112, 2000.
+
+[Buro, 1998] Michael Buro. From simple features to sophiscated
+evaluation functions. In International Conference on Computers
+and Games, 1998.
+
+[Collins, 2002] M. Collins. Discriminative training methods for
+hidden Markov models: Theory and experiments with the per-
+ceptron algorithm. In Conf. on Empirical Methods in NLP, 2002.
+
+[Daume III and Marcu, 2005] H. Daume III and Daniel Marcu.
+Learning as search optimization: Approximate large margin
+methods for structured prediction. In ICML, 2005.
+
+[Fern et al., 2003] Alan Fern, Sungwook Yoon, and Robert Givan.
+In
+
+Approximate policy iteration with a policy language bias.
+NIPS, 2003.
+
+[Hoffmann and Nebel, 2001] Jorg Hoffmann and Bernhard Nebel.
+The FF planning system: Fast plan generation through heuristic
+search. JAIR, 14:263–302, 2001.
+
+[Lafferty et al., 2001] J. Lafferty, A. McCallum, and F. Pereira.
+Conditional random ﬁelds: Probabilistic models for segmenting
+and labeling sequence data. In ICML, 2001.
+
+[Nguyen et al., 2002] XuanLong Nguyen, Subbarao Kambham-
+pati, and Romeo Sanchez Nigenda. Planning graph as the basis
+for deriving heuristics for plan synthesis by state space and CSP
+search. Artiﬁcial Intelligence, 135(1-2):73–123, 2002.
+
+[Slaney and Thi´ebaux, 2001] J. Slaney and S. Thi´ebaux. Blocks
+
+world revisited. Artiﬁcial Intelligence, 125:119–153, 2001.
+
+[Taskar et al., 2003] B. Taskar, C. Guestrin, and D. Koller. Max-
+
+margin markov networks. In NIPS, 2003.
+
+[Yoon et al., 2005] Sungwook Yoon, Alan Fern, and Robert Givan.
+Learning measures of progress for planning domains. In AAAI,
+2005.
+
+[Yoon et al., 2006] Sungwook Yoon, Alan Fern, and Robert Givan.
+Learning heuristic functions from relaxed plans. In ICAPS, 2006.
+
+[Yoon, 2006] Sungwook Yoon. Discrepancy search with reactive
+In AAAI-06 Workshop on Learning for
+
+policies for planning.
+Search, 2006.
+
+[Zhang and Dietterich, 1995] W. Zhang and T. G. Dietterich. A re-
+inforcement learning approach to job-shop scheduling. In IJCAI,
+1995.
+
+IJCAI-07
+
+2046
+
+

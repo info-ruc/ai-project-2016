@@ -1,0 +1,990 @@
+An MCMC Approach to Solving Hybrid Factored MDPs
+
+Branislav Kveton
+
+Intelligent Systems Program
+
+University of Pittsburgh
+
+bkveton@cs.pitt.edu
+
+Milos Hauskrecht
+
+Department of Computer Science
+
+University of Pittsburgh
+
+milos@cs.pitt.edu
+
+Abstract
+
+Hybrid approximate linear programming (HALP)
+has recently emerged as a promising framework for
+solving large factored Markov decision processes
+(MDPs) with discrete and continuous state and ac-
+tion variables. Our work addresses its major com-
+putational bottleneck – constraint satisfaction in
+large structured domains of discrete and continuous
+variables. We analyze this problem and propose a
+novel Markov chain Monte Carlo (MCMC) method
+for ﬁnding the most violated constraint of a relaxed
+HALP. This method does not require the discretiza-
+tion of continuous variables, searches the space of
+constraints intelligently based on the structure of
+factored MDPs, and its space complexity is linear
+in the number of variables. We test the method on a
+set of large control problems and demonstrate im-
+provements over alternative approaches.
+
+Introduction
+
+1
+Markov decision processes (MDPs) [Bellman, 1957; Puter-
+man, 1994] offer an elegant mathematical framework for
+solving sequential decision problems in the presence of un-
+certainty. However, traditional techniques for solving MDPs
+are computationally infeasible in real-world domains, which
+are factored and contain both discrete and continuous state
+and action variables. Recently, approximate linear program-
+ming (ALP) [Schweitzer and Seidmann, 1985] has emerged
+as a promising approach to solving large factored MDPs [de
+Farias and Roy, 2003; Guestrin et al., 2003]. This work fo-
+cuses on hybrid ALP (HALP) [Guestrin et al., 2004] and ad-
+dresses its major computational bottleneck – constraint satis-
+faction in the domains of discrete and continuous variables.
+
+If the state and action variables are discrete, HALP in-
+volves an exponential number of constraints, and if any of the
+variables are continuous, the number of constraints is inﬁnite.
+To approximate the constraint space in HALP, two techniques
+have been proposed: ε-HALP [Guestrin et al., 2004] and
+Monte Carlo constraint sampling [de Farias and Roy, 2004;
+Hauskrecht and Kveton, 2004]. The ε-HALP formulation re-
+laxes the continuous portion of the constraint space to an ε-
+grid, which can be compactly satisﬁed by the methods for
+discrete-state ALP [Guestrin et al., 2001; Schuurmans and
+
+Patrascu, 2002]. However, these methods are exponential in
+the treewidth of the discretized constraint space, which limits
+their application to real-world problems. In addition, the ε-
+grid discretization is done blindly and impacts the quality of
+the approximation. Monte Carlo methods [de Farias and Roy,
+2004; Hauskrecht and Kveton, 2004] offer an alternative to
+the ε-grid discretization and approximate the constraint space
+in HALP by its ﬁnite sample. Unfortunately, the efﬁciency of
+Monte Carlo methods is heavily dependent on an appropriate
+choice of sampling distributions. The ones that yield good ap-
+proximations and polynomial sample size bounds are closely
+related to the optimal solutions and rarely known a priori [de
+Farias and Roy, 2004].
+
+To overcome the limitations of the discussed constraint sat-
+isfaction techniques, we propose a novel Markov chain Monte
+Carlo (MCMC) method for ﬁnding the most violated con-
+straint of a relaxed HALP. The method directly operates in
+the domains of continuous variables, takes into account the
+structure of factored MDPs, and its space complexity is pro-
+portional to the number of variables. Such a separation ora-
+cle can be easily embedded into the ellipsoid or cutting plane
+method for solving linear programs, and therefore constitutes
+a key step towards solving HALP efﬁciently.
+
+The paper is structured as follows. First, we introduce hy-
+brid MDPs and HALP [Guestrin et al., 2004], which are our
+frameworks for modeling and solving large-scale stochastic
+decision problems. Second, we review existing approaches to
+solving HALP and discuss their limitations. Third, we com-
+pactly represent the constraint space in HALP and formulate
+an optimization problem for ﬁnding the most violated con-
+straint of a relaxed HALP. Fourth, we design a Markov chain
+to solve this optimization problem and embed it into the cut-
+ting plane method. Finally, we test our HALP solver on a
+set of large control problems and compare its performance to
+alternative approaches.
+
+2 Hybrid factored MDPs
+Factored MDPs [Boutilier et al., 1995] allow a compact rep-
+resentation of large stochastic planning problems by exploit-
+ing their structure. In this section, we review hybrid factored
+MDPs [Guestrin et al., 2004], which extend this formalism to
+the domains of discrete and continuous variables.
+
+A hybrid factored MDP with distributed actions (HMDP)
+[Guestrin et al., 2004] is a 4-tuple M = (X, A, P, R), where
+
+X = {X1, . . . , Xn} is a state space represented by a set of
+state variables, A = {A1, . . . , Am} is an action space repre-
+sented by a set of action variables, P (X′ | X, A) is a stochas-
+tic transition model of state dynamics conditioned on the pre-
+ceding state and action choice, and R is a reward model as-
+signing immediate payoffs to state-action conﬁgurations1.
+State variables: State variables are either discrete or contin-
+uous. Every discrete variable Xi takes on values from a ﬁnite
+domain Dom(Xi). Following Hauskrecht and Kveton 2004,
+we assume that every continuous variable is bounded to the
+[0, 1] subspace. The state is represented by a vector of value
+assignments x = (xD, xC) which partitions along its discrete
+and continuous components xD and xC.
+Action variables: The action space is distributed and repre-
+sented by action variables A. The composite action is deﬁned
+by a vector of individual action choices a = (aD, aC ) which
+partitions along its discrete and continuous components aD
+and aC.
+Transition model: The transition model is given by the con-
+ditional probability distribution P (X′ | X, A), where X and
+X′ denote the state variables at two successive time steps. We
+assume that the model factors along X′ as P (X′ | X, A) =
+i)) and can be compactly represented by
+a dynamic Bayesian network (DBN) [Dean and Kanazawa,
+1989]. Usually, the parent set Par(X ′
+i) ⊆ X ∪ A is a small
+subset of state and action variables which allows for a local
+parameterization of the model.
+Parameterization of transition model: One-step dynamics
+of every state variable is described by its conditional proba-
+i is a continuous
+bility distribution P (X ′
+variable, its transition function is represented by a mixture of
+beta distributions [Hauskrecht and Kveton, 2004]:
+
+i | Par(X ′
+
+i)). If X ′
+
+i | Par(X ′
+
+i=1 P (X ′
+
+Qn
+
+P (x | Par(X ′
+
+i)) =Xj
+
+πij
+
+Γ(αj + βj)
+Γ(αj)Γ(βj)
+
+xαj −1(1−x)βj −1,
+
+(1)
+
+ij(Par(X ′
+
+i)) and βj = φβ
+
+where πij is the weight assigned to the j-th component of
+the mixture, and αj = φα
+i))
+are arbitrary positive functions of the parent set. The mixture
+of beta distributions provides a very general class of transition
+functions and yet allows closed-form solutions to the integrals
+i is a discrete variable, its transition model is
+in HALP. If X ′
+parameterized by |Dom(X ′
+i)| nonnegative discriminant func-
+tions θj = φθ
+
+i)) [Guestrin et al., 2004]:
+
+ij(Par(X ′
+
+ij(Par(X ′
+
+P
+
+P (j | Par(X ′
+
+i)) =
+
+θj
+
+|Dom(X ′
+j=1
+
+i)|
+
+.
+
+θj
+
+(2)
+
+Reward model: The reward function is an additive function
+
+R(x, a) = Pj Rj(xj, aj) of local reward functions deﬁned
+E[P∞
+
+on the subsets of state and action variables Xj and Aj.
+Optimal value function and policy: The quality of a pol-
+icy is measured by the inﬁnite horizon discounted reward
+t=0 γtrt], where γ ∈ [0, 1) is a discount factor and rt
+is the reward obtained at the time step t. This optimality cri-
+terion guarantees that there always exists an optimal policy π∗
+
+1General state and action space MDP is an alternative name for
+a hybrid MDP. The term hybrid does not refer to the dynamics of the
+model, which is discrete-time.
+
+which is stationary and deterministic [Puterman, 1994]. The
+policy is greedy with respect to the optimal value function
+V ∗, which is a ﬁxed point of the Bellman equation [Bellman,
+1957; Bertsekas and Tsitsiklis, 1996]:
+
+V ∗(x) = sup
+
+P (x′ | x, a)V ∗(x′)dx′
+
+a 
+DZx′
+R(x, a)+γXx′
+
+C
+
+C
+. (3)
+
+3 Hybrid ALP
+Value iteration, policy iteration, and linear programming are
+the most fundamental dynamic programming (DP) methods
+for solving MDPs [Puterman, 1994; Bertsekas and Tsitsiklis,
+1996]. However, their computational complexity grows expo-
+nentially in the number of used variables, which makes them
+unsuitable for factored MDPs. Moreover, they are built on the
+assumption of ﬁnite support for the optimal value function
+and policy, which may not exist if continuous variables are
+present. Recently, Feng et al. 2004 showed how to solve gen-
+eral state-space MDPs by performing DP backups of piece-
+wise constant and piecewise linear value functions. This ap-
+proximate method has a lower scale-up potential than HALP,
+but does not require the design of basis functions.
+Linear value function: Value function approximation is a
+standard approach to solving large factored MDPs. Due to
+its favorable computational properties, linear value function
+approximation [Bellman et al., 1963; Roy, 1998]:
+
+V w(x) =Xi
+
+wifi(x)
+
+has become extremely popular in recent research [Guestrin et
+al., 2001; Schuurmans and Patrascu, 2002; de Farias and Roy,
+2003; Hauskrecht and Kveton, 2004; Guestrin et al., 2004].
+This approximation restricts the form of the value function
+V w to the linear combination of |w| basis functions fi(x),
+where w is a vector of tunable weights. Every basis function
+can be deﬁned over the complete state space X, but often is
+restricted to a subset of state variables Xi.
+3.1 HALP formulation
+Various methods for ﬁtting of the linear value function ap-
+proximation have been proposed and analyzed [Bertsekas and
+Tsitsiklis, 1996]. We adopt a variation on approximate linear
+programming (ALP) [Schweitzer and Seidmann, 1985], hy-
+brid ALP (HALP) [Guestrin et al., 2004], which extends this
+framework to the domains of discrete and continuous vari-
+ables. The HALP formulation is given by:
+
+minimizew Xi
+subject to: Xi
+
+wiαi
+
+wiFi(x, a) − R(x, a) ≥ 0 ∀ x, a;
+
+where αi denotes basis function relevance weight:
+
+αi =XxD ZxC
+
+ψ(x)fi(x) dxC ,
+
+(4)
+
+ψ(x) is a state relevance density function weighting the qual-
+ity of the approximation, and Fi(x, a) = fi(x) − γgi(x, a)
+
+is the difference between the basis function fi(x) and its dis-
+counted backprojection:
+
+D Zx′
+gi(x, a) =Xx′
+
+C
+
+P (x′ | x, a)fi(x′) dx′
+
+C .
+
+(5)
+
+We say that the HALP is relaxed if only a subset of the con-
+straints is satisﬁed.
+
+The HALP formulation reduces to the discrete-state ALP
+[Schweitzer and Seidmann, 1985; Schuurmans and Patrascu,
+2002; de Farias and Roy, 2003; Guestrin et al., 2003] if the
+state and action variables are discrete, and to the continuous-
+state ALP [Hauskrecht and Kveton, 2004] if the state vari-
+ables are continuous. The quality of this approximation
+was studied by Guestrin et al. 2004 and bounded with re-
+spect to minw kV ∗ − V wk∞,1/L, where k·k∞,1/L is a max-
+norm weighted by the reciprocal of the Lyapunov function
+i fi(x). The integrals in the objective function
+(Equation 4) and constraints (Equation 5) have closed-form
+solutions if the basis functions and state relevance densities
+are chosen appropriately [Hauskrecht and Kveton, 2004]. For
+example, the mixture of beta transition model (Equation 1)
+yields a closed-form solution to Equation 5 if the basis func-
+tion fi(x′) is a polynomial. Finally, we need an efﬁcient con-
+straint satisfaction procedure to solve HALP.
+
+L(x) =Pi wL
+
+3.2 Constraint satisfaction in HALP
+If the state and action variables are discrete, HALP involves
+an exponential number of constraints, and if any of the vari-
+ables are continuous, the number of constraints is inﬁnite.
+To approximate such a constraint space, two techniques have
+been proposed recently: ε-HALP [Guestrin et al., 2004] and
+Monte Carlo constraint sampling [de Farias and Roy, 2004;
+Hauskrecht and Kveton, 2004].
+ε-HALP: The ε-HALP formulation relaxes the continuous
+portion of the constraint space to an ε-grid by the discretiza-
+tion of continuous variables XC and AC. The new constraint
+space spans discrete variables only and can be compactly sat-
+isﬁed by the methods for discrete-state ALP [Guestrin et al.,
+2001; Schuurmans and Patrascu, 2002]. For example, Schu-
+urmans and Patrascu 2002 search for the most violated con-
+straint with respect to the solution w(t) of a relaxed ALP:
+
+arg min
+
+x,a "Xi
+
+w(t)
+
+i
+
+[fi(x) − γgi(x, a)] − R(x, a)#
+
+(6)
+
+and add it to the linear program. If no violated constraint is
+found, w(t) is an optimal solution to the ALP.
+
+The space complexity of both constraint satisfaction meth-
+ods [Guestrin et al., 2001; Schuurmans and Patrascu, 2002]
+is exponential in the treewidth of the constraint space. This
+is a serious limitation because the cardinality of discretized
+variables grows with the resolution of the ε-grid. Roughly, if
+the discretized variables are replaced by binary, the treewidth
+increases by a multiplicative factor of log2(1/ε + 1), where
+(1/ε + 1) is the number of discretization points in a single
+dimension. Therefore, even problems with a relatively small
+treewidth are intractable for small values of ε. In addition, the
+ε-grid discretization is done blindly and impacts the quality
+of the approximation.
+
+Monte Carlo constraint sampling: Monte Carlo methods
+approximate the constraint space in HALP by its ﬁnite sam-
+ple. De Farias and Van Roy 2004 analyzed constraint sam-
+pling for discrete-state ALP and bounded the sample size for
+achieving good approximations by a polynomial in the num-
+ber of basis functions and state variables. Hauskrecht and
+Kveton 2004 applied random constraint sampling to solve
+continuous-state factored MDPs and later reﬁned their sam-
+pler by heuristics [Kveton and Hauskrecht, 2004].
+
+Monte Carlo constraint sampling is easily applied in con-
+tinuous domains and can be implemented in a space propor-
+tional to the number of variables. However, proposing an efﬁ-
+cient sampling procedure that guarantees a polynomial bound
+on the sample size is as hard as knowing the optimal policy
+itself [de Farias and Roy, 2004]. To lower a high number of
+sampled constraints in a relaxed HALP, Monte Carlo sam-
+plers can be embedded into the cutting plane method. A tech-
+nique similar to Kveton and Hauskrecht 2004 yields signiﬁ-
+cant speedup with no drop in the quality of the approximation.
+
+4 MCMC constraint sampling
+To address the deﬁciencies of the discussed constraint satis-
+faction techniques, we propose a novel Markov chain Monte
+Carlo (MCMC) method for ﬁnding the most violated con-
+straint of a relaxed HALP. Before we proceed, we compactly
+represent the constraint space in HALP and formulate an op-
+timization problem for ﬁnding the most violated constraint in
+this representation.
+
+4.1 Compact representation of constraints
+Guestrin et al. 2001 and Schuurmans and Patrascu 2002
+showed that the compact representation of constraints is es-
+sential in solving ALP efﬁciently. Following their ideas, we
+deﬁne violation magnitude τ w(x, a):
+
+τ w(x, a) = −Xi
+
+wi[fi(x) − γgi(x, a)] + R(x, a)
+
+(7)
+
+to be the amount by which the solution w violates the con-
+straints of a relaxed HALP. We represent τ w(x, a) compactly
+by an inﬂuence diagram (ID), where X and A are decision
+nodes and X′ are random variables. The ID representation is
+built on the transition model P (X′ | X, A), which is already
+factored and contains dependencies among the variables X,
+X′, and A. We extend the diagram by three types of reward
+nodes, one for each term in Equation 7: Rj = Rj(xj, aj) for
+every local reward function, Hi = −wifi(x) for every basis
+function, and Gi = γwifi(x′) for every backprojection. The
+construction is completed by adding arcs that represent the
+dependencies of the reward nodes on the variables. Finally,
+
+we verify that τ w(x, a) = EP (x′|x,a)[Pi(Hi+Gi)+Pj Rj].
+
+Therefore, the decision that maximizes the expected utility in
+the ID corresponds to the most violated constraint.
+
+We conclude that any algorithm for solving IDs can be
+used to ﬁnd the most violated constraint. Moreover, special
+properties of the ID representation allow its further simpliﬁ-
+cation. If the basis functions are chosen conjugate to the tran-
+sition model (Section 3.1), we obtain a closed-form solution
+to EP (x′|x,a)[Gi] (Equation 5), and thus the random variables
+
+X′ can be marginalized out of the diagram. This new repre-
+sentation contains no random variables and is know as a cost
+network [Guestrin et al., 2001].
+
+4.2 Separation oracle
+To ﬁnd the most violated constraint in the cost network,
+we use the Metropolis-Hastings (MH) algorithm [Metropo-
+lis et al., 1953; Hastings, 1970] and construct a Markov
+chain whose invariant distribution converges to the vicinity
+of arg maxz τ w(z), where z = (x, a) and Z = X ∪ A
+is a joint set of state and action variables. The Metropolis-
+Hastings algorithm accepts the transition from a state z to a
+proposed state z∗ with the acceptance probability A(z, z∗) =
+
+minn1, p(z∗)q(z|z∗)
+
+p(z)q(z∗|z) o, where q(z∗ | z) is a proposal distribu-
+
+tion and p(z) is a target density. Under mild restrictions on
+p(z) and q(z∗ | z), the chain always converges to the target
+density p(z) [Andrieu et al., 2003]. In the rest of this sec-
+tion, we discuss the choice of p(z) and q(z∗ | z) to solve our
+optimization problem.
+Target density: The violation magnitude τ w(z) is turned
+into a density by the transformation p(z) = exp[τ w(z)]. Due
+to its monotonic character, p(z) retains the same set of global
+maxima as τ w(z), and thus the search for arg maxz τ w(z)
+can be performed on p(z). To prove that p(z) is a density, we
+p(z) dzC,
+where zD and zC are the discrete and continuous components
+of the vector z = (zD, zC). As the integrand zC is restricted
+to the ﬁnite space [0, 1]|ZC |, the integral is proper as long as
+p(z) is bounded, and therefore it is Riemann integrable and
+ﬁnite. To prove that p(z) is bounded, we bound τ w(z). Let
+Rmax denote the maximum one-step reward in the HMDP.
+If the basis functions are of unit magnitude, wi can be typi-
+cally bounded by |wi| ≤ γ(1 − γ)−1Rmax, and consequently
+|τ w(z)| ≤ (|w| γ(1 − γ)−1 + 1)Rmax. Therefore, p(z) is
+bounded and can be treated as a density function.
+
+show that it has a normalizing constant PzDRzC
+
+To ﬁnd the mode of p(z), we adopt the simulating an-
+nealing approach [Kirkpatrick et al., 1983] and simulate a
+non-homogeneous Markov chain whose invariant distribution
+equals to p1/Tt (z), where Tt is a decreasing cooling schedule
+with limt→∞ Tt = 0. Under weak regularity assumptions on
+p(z), p∞(z) is a probability density that concentrates on the
+set of global maxima of p(z) [Andrieu et al., 2003]. If the
+cooling schedule decreases such that Tt ≥ c/ log2(t + 2),
+where c is a problem-speciﬁc constant independent of t, the
+chain converges to the vicinity of arg maxz τ w(z) with the
+probability converging to 1 [Geman and Geman, 1984]. How-
+ever, this schedule can be too slow in practice, especially for
+a high initial temperature c. Following the suggestion of Ge-
+man and Geman 1984, we overcome this limitation by select-
+ing a smaller value of c than is required by the convergence
+criterion. As a result, convergence to the global optimum
+arg maxz τ w(z) is no longer guaranteed.
+Proposal distribution: We take advantage of the factored
+character of Z and adopt the following proposal distribution
+[Geman and Geman, 1984]:
+
+q(z∗ | z) =½ p(z∗
+
+0
+
+i | z−i)
+
+−i = z−i
+
+if z∗
+otherwise
+
+,
+
+P zi
+
+i ,zi+1,...,zn+m)
+
+i | z−i) = p(z1,...,zi−1,z∗
+
+where z−i and z∗
+−i are the assignments to all variables but Zi
+in the original and proposed states. If Zi is a discrete variable,
+its conditional p(z∗
+p(z1,...,zi−1,zi,zi+1,...,zn+m)
+can be derived in a closed form. If Zi is a continuous variable,
+a closed form of its cumulative density function is not likely
+to exist. To allow sampling from its conditional, we embed
+another MH step within the original chain. In the experimen-
+tal section, we use the Metropolis algorithm with the accep-
+tance probability A(zi, z∗
+and z∗
+i correspond to the original and proposed values of Zi.
+Note that sampling from both conditionals can be performed
+in the space of τ w(z) and locally.
+
+p(zi|z−i)o, where zi
+
+i ) = minn1, p(z∗
+
+i |z−i)
+
+Finally, we get a non-homogenous Markov chain with the
+
+acceptance probability A(z, z∗) = minn1, p1/Tt−1(z∗
+
+that converges to the vicinity of the most violated constraint.
+A similar chain was derived by Yuan et al. 2004 and applied
+to ﬁnd the maximum a posteriori (MAP) conﬁguration of ran-
+dom variables in Bayesian networks.
+
+p1/Tt−1(zi|z−i)o
+
+i |z−i)
+
+4.3 Constraint satisfaction
+If the MCMC oracle converges to a violated constraint (not
+necessarily the most violated) in a polynomial time, it guar-
+antees that the ellipsoid method can solve HALP in a poly-
+nomial time [Bertsimas and Tsitsiklis, 1997]. However, con-
+vergence of our chain within an arbitrary precision requires
+an exponential number of steps [Geman and Geman, 1984].
+Even if this bound is too weak to be of practical interest,
+it suggests that the time complexity of ﬁnding a violated
+constraint dominates the time complexity of solving HALP.
+Therefore, the search for violated constraints should be per-
+formed efﬁciently. Convergence speedups that directly ap-
+ply to our work include hybrid Monte Carlo (HMC) [Du-
+ane et al., 1987], slice sampling [Higdon, 1998], and Rao-
+Blackwellization [Casella and Robert, 1996].
+
+To evaluate the MCMC oracle, we embed it into the cutting
+plane method for solving linear programs, which results in a
+novel approach to solving HALP. As the oracle is not guar-
+anteed to converge to the most violated constraint, we run the
+cutting plane method for a ﬁxed number of iterations rather
+than having the same stopping criterion as Schuurmans and
+Patrascu 2002 (Section 3.2). Our MCMC solver differs from
+the Monte Carlo solver in that it samples constraints based on
+their potential to improve the existing solution, which sub-
+stitutes for an unknown problem-speciﬁc sampling distribu-
+tion. Comparing to the ε-HALP method, the MCMC oracle
+directly operates in the domains of continuous variables and
+its space complexity is linear in the number of variables.
+
+5 Experiments
+The performance of the MCMC solver is evaluated against
+two alternative constraint satisfaction techniques: ε-HALP
+and uniform Monte Carlo sampling. Due to space limitations,
+our comparison focuses on two irrigation-network problems
+[Guestrin et al., 2004], but our conclusions are likely to gen-
+eralize across a variety of control optimization tasks. The
+irrigation-network problems are challenging for state-of-the-
+art MDP solvers due to the factored state and action spaces
+
+Ring topology
+
+n = 12
+
+n = 6
+Reward Time
+11
+
+OV
+
+ε-HALP
+
+1/4 24.3 35.1 ± 2.3
+ε = 1/8 55.4 40.1 ± 2.4
+1/16 59.1 40.4 ± 2.6
+10 63.7 29.1 ± 2.9
+MCMC N = 50 69.7 41.1 ± 2.6
+
+OV
+Reward
+36.2 54.2 ± 3.0
+88.1 62.2 ± 3.4
+93.2 63.7 ± 2.8
+88.0 51.8 ± 3.6
+221 111.0 63.3 ± 3.4
+250 70.6 40.4 ± 2.6 1 043 112.1 63.0 ± 3.1
+66.6 60.0 ± 3.1
+
+51.2 39.2 ± 2.8 1 651
+
+331
+
+46
+
+43
+
+Time
+43
+
+OV
+48.0
+118 118.8
+709 126.1
+71 113.9
+419 149.0
+1 864 151.8
+81.7
+3 715
+
+n = 18
+
+Reward
+74.5 ± 3.4
+84.9 ± 3.8
+86.8 ± 3.8
+57.3 ± 4.6
+84.8 ± 4.2
+86.0 ± 3.9
+83.8 ± 4.3
+
+MC
+
+Ring-of-rings topology
+
+ε-HALP
+
+Time
+85
+
+193
+
+1 285
+
+101
+
+682
+
+2 954
+
+5 178
+
+Time
+861
+
+OV
+
+n = 6
+Reward Time
+82
+
+1/4 28.4 40.1 ± 2.7
+ε = 1/8 65.4 48.0 ± 2.7
+
+n = 12
+
+n = 18
+
+OV
+Reward
+44.1 66.7 ± 2.7
+581 107.9 76.1 ± 3.8
+
+Time
+345
+
+Reward
+93.1 ± 3.8
+2 367 148.8 104.5 ± 3.5
+
+OV
+59.8
+
+6 377
+1/16 68.9 47.1 ± 2.8 4 736 113.1 77.6 ± 3.7 22 699 156.9 107.8 ± 3.9 53 600
+173
+
+69
+
+10 68.5 45.0 ± 2.7
+MCMC N = 50 81.1 47.4 ± 2.9
+
+99.9 67.4 ± 3.8
+411 131.5 76.2 ± 3.7
+250 81.9 47.1 ± 2.5 1 732 134.0 78.2 ± 3.6
+73.7 74.8 ± 3.9
+
+55.6 43.6 ± 2.9 2 100
+
+MC
+
+121 109.1
+39.4 ± 4.1
+780 182.7 104.3 ± 4.1
+3 434 185.8 106.7 ± 4.1
+92.1 102.0 ± 4.2
+5 048
+
+1 209
+
+5 708
+
+6 897
+
+Figure 1: Comparison of HALP solvers on two irrigation-network topologies of varying sizes (n). The solvers are compared by
+the objective value of a relaxed HALP (OV), the expected discounted reward of a corresponding policy, and computation time
+(in seconds). The expected discounted reward is estimated by the Monte Carlo simulation of 100 trajectories. The ε-HALP and
+MCMC solvers are parameterized by the resolution of ε-grid (ε) and the number of iterations (N).
+
+(Figure 1). The goal of an irrigation network operator is to
+select discrete water-routing actions AD to optimize contin-
+uous water levels XC in multiple interconnected irrigation
+channels. The transition model is parameterized by beta dis-
+tributions and represents water ﬂows conditioned on the op-
+eration modes of regulation devices. The reward function is
+additive and given by a mixture of two normal distributions
+for each channel. The optimal value function is approximated
+by a linear combination of four univariate piecewise linear
+basis functions for each channel [Guestrin et al., 2004]. The
+state relevance density function ψ(x) is uniform. A compre-
+hensive description of the irrigation-network problems can be
+found in Guestrin et al. 2004.
+
+The ε-HALP solver is implemented with the method of
+Schuurmans and Patrascu 2002 as described in Section 3.2.
+The Monte Carlo solver uniformly generates one million con-
+straints and establishes a baseline for the comparison to an
+uninformatively behaving sampling method. The chain of
+the MCMC oracle is simulated for 500 steps from the ini-
+tial temperature c = 0.2, which yields a decreasing cooling
+schedule from T0 = 0.2 to T500 ≈ 0.02. These parameters
+were chosen empirically to demonstrate the characteristics of
+our approach rather than to maximize the performance of the
+MCMC oracle. All experiments were performed on a Dell
+Precision 340 workstation with 2GHz Pentium 4 CPU and
+1GB RAM. All linear programs were solved by the simplex
+method in the LP SOLVE package. The results of the exper-
+iments are reported in Figure 1.
+
+Based on our results, we draw the following conclusions.
+First, the MCMC solver (N = 250) achieves the highest ob-
+jective values on all problems. Higher objective values can be
+interpreted as closer approximations to the constraint space in
+HALP since the solvers operate on relaxed versions of HALP.
+Second, the quality of the MCMC policies (N = 250) sur-
+passes the Monte Carlo ones while both solvers consume ap-
+proximately the same computation time. This result is due to
+
+the informative search for violated constraints in the MCMC
+solver. Third, the quality of the MCMC policies (N = 250)
+is close to the ε-HALP ones (ε = 1/16), but does not surpass
+them signiﬁcantly. In the irrigation-network problems, the ε-
+HALP policies (ε = 1/16) are already close to optimal, and
+therefore hard to improve. Even if the MCMC solver reaches
+higher objective values than the ε-HALP solver, the policies
+may not improve due to the suggestive relationship between
+our true objective minw kV ∗ − V wk∞,1/L and the objective
+of HALP minw kV ∗ − V wk1,ψ [Guestrin et al., 2004].
+
+Finally, the computation time of the ε-HALP solver is se-
+riously affected by the topologies of tested networks, which
+can be explained as follows. For a small ε and large n, the
+time complexity of formulating cost networks grows approx-
+imately by the rates of (1/ε + 1)2 and (1/ε + 1)3 for the
+ring and ring-of-rings topologies, respectively. The ε-HALP
+solver spends a signiﬁcant amount of time by formulating
+cost networks, which makes its decent time complexity on
+the ring topology (quadratic in 1/ε + 1) deteriorate on the
+ring-of-rings topology (cubic in 1/ε + 1). A similar cross-
+topology comparison of the MCMC solver shows that its
+computation times differ only by a multiplicative factor of 2.
+This difference is due to the increased complexity of sampling
+| z−i), which is caused by more complex local depen-
+p(z∗
+i
+dencies, and not the treewidth of the ring-of-rings topology.
+
+6 Conclusions
+Development of scalable algorithms for solving large factored
+MDPs is a challenging task. The MCMC approach presented
+in this paper is a small but important step in this direction. In
+particular, our method overcomes the limitations of existing
+approaches to solving HALP and works directly with con-
+tinuous variables, generates constraints based on their poten-
+tial to improve the existing solution, and its space complexity
+is linear in the number of variables. Moreover, the MCMC
+
+solver seems to be less affected by larger treewidth than the
+ε-HALP method while delivering substantially better results
+than uniform Monte Carlo sampling. Empirical results on
+two large control problems conﬁrm the expected beneﬁts of
+the approach and its potential to tackle complex real-world
+optimization problems. The objective of our future research
+is to eliminate the assumptions placed on the transition model
+and basis functions, which would make the framework appli-
+cable to a broader class of problems.
+
+Acknowledgment
+This work was supported in part by National Science Founda-
+tion grants CMS-0416754 and ANI-0325353. The ﬁrst author
+was supported by an Andrew Mellon Predoctoral Fellowship
+for the academic year 2004-05. We thank anonymous review-
+ers for providing insightful comments that led to the improve-
+ment of the paper.
+
+References
+[Andrieu et al., 2003] Christophe Andrieu, Nando de Freitas, Ar-
+naud Doucet, and Michael Jordan. An introduction to MCMC
+for machine learning. Machine Learning, 50:5–43, 2003.
+
+[Bellman et al., 1963] Richard Bellman, Robert Kalaba, and Bella
+Kotkin. Polynomial approximation - a new computational tech-
+nique in dynamic programming. Mathematics of Computation,
+17(8):155–161, 1963.
+
+[Bellman, 1957] Richard Bellman. Dynamic Programming. Prince-
+
+ton University Press, Princeton, NJ, 1957.
+
+[Bertsekas and Tsitsiklis, 1996] Dimitri Bertsekas and John Tsit-
+siklis. Neuro-Dynamic Programming. Athena Scientiﬁc, Bel-
+mont, MA, 1996.
+
+[Bertsimas and Tsitsiklis, 1997] Dimitris Bertsimas and John Tsit-
+Introduction to Linear Optimization. Athena Scientiﬁc,
+
+siklis.
+Belmont, MA, 1997.
+
+[Boutilier et al., 1995] Craig Boutilier, Richard Dearden,
+
+and
+Mois´es Goldszmidt. Exploiting structure in policy construction.
+In Proceedings of the 14th International Joint Conference on Ar-
+tiﬁcial Intelligence, pages 1104–1111, 1995.
+
+[Casella and Robert, 1996] George Casella and Christian Robert.
+Rao-Blackwellisation of sampling schemes. Biometrika, 83(1):
+81–94, 1996.
+
+[de Farias and Roy, 2003] Daniela Pucci de Farias and Benja-
+min Van Roy. The linear programming approach to approximate
+dynamic programming. Operations Research, 51(6):850–856,
+2003.
+
+[de Farias and Roy, 2004] Daniela Pucci de Farias and Benja-
+min Van Roy. On constraint sampling for the linear programming
+approach to approximate dynamic programming. Mathematics of
+Operations Research, 29(3):462–478, 2004.
+
+[Dean and Kanazawa, 1989] Thomas Dean and Keiji Kanazawa. A
+model for reasoning about persistence and causation. Computa-
+tional Intelligence, 5:142–150, 1989.
+
+[Duane et al., 1987] Simon Duane, A. D. Kennedy, Brian Pendle-
+ton, and Duncan Roweth. Hybrid Monte Carlo. Physics Letters
+B, 195(2):216–222, 1987.
+
+[Feng et al., 2004] Zhengzhu Feng, Richard Dearden, Nicolas
+Meuleau, and Richard Washington. Dynamic programming for
+structured continuous Markov decision problems. In Proceedings
+
+of the 20th Conference on Uncertainty in Artiﬁcial Intelligence,
+pages 154–161, 2004.
+
+[Geman and Geman, 1984] Stuart Geman and Donald Geman.
+Stochastic relaxation, Gibbs distribution, and the Bayesian
+restoration of images.
+IEEE Transactions on Pattern Analysis
+and Machine Intelligence, 6(6):721–741, 1984.
+
+[Guestrin et al., 2001] Carlos Guestrin, Daphne Koller, and Ronald
+Parr. Max-norm projections for factored MDPs. In Proceedings
+of the 17th International Joint Conference on Artiﬁcial Intelli-
+gence, pages 673–682, 2001.
+
+[Guestrin et al., 2003] Carlos Guestrin, Daphne Koller, Ronald
+Parr, and Shobha Venkataraman. Efﬁcient solution algorithms
+for factored MDPs. Journal of Artiﬁcial Intelligence Research,
+19:399–468, 2003.
+
+[Guestrin et al., 2004] Carlos Guestrin, Milos Hauskrecht, and
+Branislav Kveton. Solving factored MDPs with continuous and
+discrete variables. In Proceedings of the 20th Conference on Un-
+certainty in Artiﬁcial Intelligence, pages 235–242, 2004.
+
+[Hastings, 1970] W. K. Hastings. Monte Carlo sampling methods
+using Markov chains and their application. Biometrika, 57:97–
+109, 1970.
+
+[Hauskrecht and Kveton, 2004] Milos Hauskrecht and Branislav
+Kveton. Linear program approximations for factored continuous-
+state Markov decision processes. In Advances in Neural Informa-
+tion Processing Systems 16, pages 895–902, 2004.
+
+[Higdon, 1998] David Higdon. Auxiliary variable methods for
+Journal of the
+
+Markov chain Monte Carlo with applications.
+American Statistical Association, 93(442):585–595, 1998.
+
+[Kirkpatrick et al., 1983] S. Kirkpatrick, C. D. Gelatt, and M. P.
+Vecchi. Optimization by simulated annealing. Science, 220
+(4598):671–680, 1983.
+
+[Kveton and Hauskrecht, 2004] Branislav Kveton and Milos Haus-
+krecht. Heuristic reﬁnements of approximate linear program-
+ming for factored continuous-state Markov decision processes. In
+Proceedings of the 14th International Conference on Automated
+Planning and Scheduling, pages 306–314, 2004.
+
+[Metropolis et al., 1953] Nicholas Metropolis, Arianna Rosen-
+bluth, Marshall Rosenbluth, Augusta Teller, and Edward Teller.
+Equation of state calculations by fast computing machines. Jour-
+nal of Chemical Physics, 21:1087–1092, 1953.
+
+[Puterman, 1994] Martin Puterman. Markov Decision Processes:
+Discrete Stochastic Dynamic Programming. John Wiley & Sons,
+New York, NY, 1994.
+
+[Roy, 1998] Benjamin Van Roy. Planning Under Uncertainty in
+Complex Structured Environments. PhD thesis, Massachusetts
+Institute of Technology, 1998.
+
+[Schuurmans and Patrascu, 2002] Dale Schuurmans and Relu Pa-
+trascu. Direct value-approximation for factored MDPs. In Ad-
+vances in Neural Information Processing Systems 14, 2002.
+
+[Schweitzer and Seidmann, 1985] Paul Schweitzer and Abraham
+Seidmann. Generalized polynomial approximations in Marko-
+vian decision processes. Journal of Mathematical Analysis and
+Applications, 110:568–582, 1985.
+
+[Yuan et al., 2004] Changhe Yuan, Tsai-Ching Lu, and Marek
+Druzdzel. Annealed MAP.
+In Proceedings of the 20th Con-
+ference on Uncertainty in Artiﬁcial Intelligence, pages 628–635,
+2004.
+
+

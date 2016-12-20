@@ -1,0 +1,911 @@
+Team Programming in Golog under Partial Observability
+
+Alessandro Farinelli
+
+Alberto Finzi
+
+∗
+
+DIS, Universit`a di Roma
+
+Institut f¨ur Informations-
+
+“La Sapienza”
+
+00198 Rome, Italy
+
+systeme, TU Wien
+
+1040 Vienna, Austria
+
+Thomas Lukasiewicz
+DIS, Universit`a di Roma
+
+†
+
+“La Sapienza”
+
+00198 Rome, Italy
+
+Abstract
+
+In this paper, we present the agent programming
+language TEAMGOLOG, which is a novel approach
+to programming a team of cooperative agents under
+partial observability. Every agent is associated with
+a partial control program in Golog, which is com-
+pleted by the TEAMGOLOG interpreter in an opti-
+mal way by assuming a decision-theoretic seman-
+tics. The approach is based on the key concepts of
+a synchronization state and a communication state,
+which allow the agents to passively resp. actively
+coordinate their behavior, while keeping their be-
+lief states, observations, and activities invisible to
+the other agents. We show the usefulness of the ap-
+proach in a rescue simulated domain.
+
+1 Introduction
+
+During the recent years, the development of controllers for
+autonomous agents has become increasingly important in AI.
+One way of designing such controllers is the programming
+approach, where a control program is speciﬁed through a lan-
+guage based on high-level actions as primitives. Another way
+is the planning approach, where goals or reward functions are
+speciﬁed and the agent is given a planning ability to achieve a
+goal or to maximize a reward function. An integration of both
+approaches has recently been proposed through the seminal
+language DTGolog [Boutilier et al., 2000], which integrates
+explicit agent programming in Golog [Reiter, 2001] with
+decision-theoretic planning in (fully observable) MDPs [Put-
+erman, 1994]. It allows for partially specifying a control pro-
+gram in a high-level language as well as for optimally ﬁlling
+in missing details through decision-theoretic planning, and it
+can thus be seen as a decision-theoretic extension to Golog,
+where choices left to the agent are made by maximizing ex-
+pected utility. From a different perspective, it can also be
+seen as a formalism that gives advice to a decision-theoretic
+planner, since it naturally constrains the search space.
+
+DTGolog has several other nice features, since it is closely
+related to ﬁrst-order extensions of decision-theoretic plan-
+ning (see especially [Boutilier et al., 2001; Yoon et al., 2002;
+
+∗
+
+†
+
+Alternate address: DIS, Universit`a di Roma “La Sapienza”.
+Alternate address: Institut f¨ur Informationssysteme, TU Wien.
+
+Guestrin et al., 2003]), which allow for (i) compactly repre-
+senting decision-theoretic planning problems without explic-
+itly referring to atomic states and state transitions, (ii) exploit-
+ing such compact representations for efﬁciently solving large-
+scale problems, and (iii) nice properties such as modularity
+(parts of the speciﬁcation can be easily added, removed, or
+modiﬁed) and elaboration tolerance (solutions can be easily
+reused for similar problems with few or no extra cost).
+
+However, DTGolog is designed only for the single-agent
+framework. That is, the model of the world essentially con-
+sists of a single agent that we control by a DTGolog program
+and the environment summarized in “nature”. But there are
+many applications where we encounter multiple agents that
+cooperate with each other. For example, in robotic rescue,
+mobile agents may be used in the emergency area to acquire
+new detailed information (such as the locations of injured
+people in the emergency area) or to perform certain rescue
+operations. In general, acquiring information as well as per-
+forming rescue operations involves several and different res-
+cue elements (agents and/or teams of agents), which cannot
+effectively handle the rescue situation on their own. Only the
+cooperative work among all the rescue elements may solve
+it. Since most of the rescue tasks involve a certain level of
+risk for humans (depending on the type of rescue situation),
+mobile agents can play a major role in rescue situations, es-
+pecially teams of cooperative heterogeneous mobile agents.
+
+Another crucial aspect of real-world environments is that
+they are typically only partially observable, due to noisy and
+inaccurate sensors, or because some relevant parts of the en-
+vironment simply cannot be sensed. For example, especially
+in the robotic rescue domain described above, every agent has
+generally only a very partial view on the environment.
+
+The practical importance of controlling a system of coop-
+erative agents under partial observability by a generalization
+of DTGolog has already been recognized in recent works
+by Ferrein et al. [2005] and Finzi and Lukasiewicz [2006].
+A drawback of these two works, however, is that they are
+implicitly centralized by the assumption of a global world
+model resp. the assumption that every agent knows the belief
+states, observations, and actions of all the other agents (and so
+[Ferrein et al., 2005; Finzi and Lukasiewicz, 2006] have no
+explicit communication between the agents), which is very
+often not possible or not desirable in realistic applications.
+
+In this paper, we present the agent programming language
+
+IJCAI-07
+
+2097
+
+TEAMGOLOG, which is a novel generalization of DTGolog
+for controlling a system of cooperative agents under partial
+observability, which does not have such centralization as-
+sumptions. It is thus guided by the idea of truly distributed
+acting in multi-agent systems with a minimal interaction be-
+tween the agents. The main contributions are as follows:
+• We introduce the agent programming language TEAM-
+GOLOG for controlling a system of cooperative (middle-size)
+agents under partial observability. We deﬁne a decision-the-
+oretic semantics of TEAMGOLOG, which are inspired by de-
+centralized partially observable MDPs (Dec-POMDPs) [Nair
+et al., 2003; Goldman and Zilberstein, 2004].
+• We introduce the concepts of a synchronization state and a
+communication state, which are used to coordinate the agents,
+taking inspiration from artiﬁcial social systems [Shoham and
+Tennenholtz, 1995]: The behavior of each agent is encoded
+in advance in its domain theory and program, and depends on
+the online trace of synchronization and communication states.
+• We deﬁne an interpreter for TEAMGOLOG, and provide a
+number of theoretical results around it. In particular, we show
+that the interpreter generates optimal policies.
+• We describe a ﬁrst prototype implementation of the TEAM-
+GOLOG interpreter. We also provide experimental results
+from the rescue simulation domain, which give evidence of
+the usefulness of our approach in realistic applications.
+
+Notice that detailed proofs of all results in this extended
+
+abstract are provided in the full version of this paper.
+
+2 The Situation Calculus and Golog
+
+The situation calculus [McCarthy and Hayes, 1969; Reiter,
+2001] is a ﬁrst-order language for representing dynamic do-
+mains. Its main ingredients are actions, situations, and ﬂu-
+ents. An action is a ﬁrst-order term of the form a((cid:2)u), where
+a is an action name, and (cid:2)u are its arguments. For example,
+moveTo(r, x, y) may represent the action of moving an agent
+r to the position (x, y). A situation is a ﬁrst-order term en-
+coding a sequence of actions. It is either a constant symbol or
+of the form do(a, s), where a is an action and s is a situation.
+The constant symbol S0 is the initial situation and represents
+the empty sequence, while do(a, s) encodes the sequence ob-
+tained from executing a after the sequence of s. For exam-
+ple, do(moveTo(r, 1, 2), do(moveTo(r, 3, 4), S0)) stands for
+executing moveTo(r, 1, 2) after executing moveTo(r, 3, 4)
+in S0. A ﬂuent represents a world or agent property that
+may change when executing an action. It is a predicate sym-
+bol whose most right argument is a situation. For example,
+at (r, x, y, s) may express that the agent r is at the position
+(x, y) in the situation s. In the situation calculus, a dynamic
+,
+domain is encoded as a basic action theory AT = (Σ, DS0
+Dssa, Duna, Dap), where:
+• Σ is the set of foundational axioms for situations.
+• Duna is the set of unique name axioms for actions, saying
+that different action terms stand for different actions.
+• DS0 is a set of ﬁrst-order formulas describing the initial
+state of the domain (represented by S0). E.g., at(r, 1, 2, S0)
+may express that the agent r is initially at the position (1, 2).
+
+• Dssa is the set of successor state axioms [Reiter, 2001].
+For each ﬂuent F ((cid:2)x, s), it contains an axiom F ((cid:2)x, do(a,
+s)) ≡ ΦF ((cid:2)x, a, s), where ΦF ((cid:2)x, a, s) is a formula with free
+variables among (cid:2)x, a, and s. These axioms specify the truth
+of the ﬂuent F in the next situation do(a, s) in terms of the
+current situation s, and are a solution to the frame problem
+(for deterministic actions). For example,
+
+at (o, x, y, do(a, s)) ≡ a = moveTo(o, x, y) ∨
+
+at(o, x, y, s) ∧ ¬∃x(cid:2), y(cid:2) (a = moveTo(o, x(cid:2), y(cid:2)))
+
+may express that the object o is at (x, y) in do(a, s) iff it is
+moved there in s, or already there and not moved away in s.
+• Dap is the set of action precondition axioms. For each
+action a,
+it contains an axiom P oss(a((cid:2)x), s) ≡ Π((cid:2)x, s),
+which characterizes the preconditions of a. For example,
+P oss(moveT o(o, x, y), s) ≡ ¬∃o(cid:2) (at(o(cid:2), x, y, s)) may ex-
+press that it is possible to move the object o to (x, y) in s iff
+no other object o(cid:2) is at (x, y) in s.
+
+Golog is an agent programming language that is based on
+the situation calculus. It allows for constructing complex ac-
+tions from the primitive actions deﬁned in a basic action the-
+ory AT , where standard (and not so standard) Algol-like con-
+structs can be used, in particular, (i) action sequences: p1; p2;
+(ii) tests: φ?; (iii) nondeterministic action choices: p1|p2;
+(iv) nondeterministic choices of action argument: πx (p(x));
+and (v) conditionals, while-loops, and procedures.
+
+3 Team Golog under Partial Observability
+
+We now introduce the agent programming language TEAM-
+GOLOG, which is a generalization of Golog for programming
+teams of cooperative agent under partial observability.
+
+Our approach is based on the key concepts of a synchro-
+nization state and a communication state, which allow the
+agents to passively resp. actively coordinate their behavior,
+while keeping their belief states, observations, and activities
+invisible to the other agents. Here, the synchronization state
+is fully observable by all the agents, but outside their con-
+trol. The communication state is a multi-dimensional state,
+containing one dimension for each agent, which is also fully
+observable by all the agents. But every agent may change its
+part of the communication state whenever necessary, which
+encodes its explicit communication to all the other agents.
+
+Since both the synchronization state S and the commu-
+nication state C are fully observable by all the agents, they
+can be used to condition and coordinate the behavior of the
+agents. At the same time, each agent can keep its belief state,
+observations, and actions invisible to the other agents. We
+thus realize a maximally distributed acting of the agents. The
+TEAMGOLOG program of each agent encodes the agent’s be-
+havior conditioned on S and C, and thus on the current situa-
+tion. Hence, TEAMGOLOG programs bear close similarity to
+social laws in artiﬁcial social systems [Shoham and Tennen-
+holtz, 1995]. The basic idea behind such systems is to formu-
+late a mechanism, called social law, that minimizes the need
+for both centralized control and online resolution of conﬂicts.
+There are many real-world situations where we encounter
+such a form of coordination. E.g., the trafﬁc law “right has
+precedence over left” regulates the order in which cars can
+
+IJCAI-07
+
+2098
+
+pass a street cross.
+In most cases, this law is sufﬁcient to
+make the cars pass the street cross without any further inter-
+action between the car drivers. Only in exceptional cases,
+such as the one where on each street a car is approaching the
+cross or when a car has a technical defect, some additional
+communication between the car drivers is necessary. Sim-
+ilarly, a soccer team can ﬁx in advance the behavior of its
+team members in certain game situations (such as defense or
+attack), thus minimizing the explicit communication between
+the members during the game (which may be observed by
+the adversary). In these two examples, the synchronization
+state encodes the situation at the street cross resp. the game
+situation, while the communication state encodes the explicit
+communication. The correct behavior of the car drivers resp.
+soccer players is encoded by trafﬁc laws resp. the strategy
+ﬁxed by the team in their training units and before the game.
+In the rest of this section, we ﬁrst deﬁne a variant of Dec-
+POMDPs, which underlies the decision-theoretic semantics
+of TEAMGOLOG programs. We then deﬁne the domain the-
+ory and the syntax of TEAMGOLOG programs.
+
+3.1 Weakly Correlated Dec-POMDPs
+We consider the following variant of Dec-POMDPs for n ≥ 2
+agents, which essentially consist of a transition function be-
+tween global states (where every global state consists of
+a communication state for each agent and a synchroniza-
+tion state) and a POMDP for each agent and each global
+state, where every agent can also send a message to the oth-
+ers by changing its communication state. A weakly cor-
+related Dec-POMDP (I, S, (Ci)i∈I , P, (Si)i∈I , (Ai)i∈I ,
+(Oi)i∈I , (Pi)i∈I , (Ri)i∈I ) consists of a set of n ≥ 2 agents
+I = {1, . . . , n}, a nonempty ﬁnite set of synchronization
+states S, a nonempty ﬁnite set of communication states Ci
+for every agent i ∈ I, a transition function P : C × S →
+PD (C × S), which associates with every global state, con-
+sisting of a joint communication state c ∈ C = ×i∈I Ci and
+a synchronization state s ∈ S, a probability distribution over
+C × S, and for every agent i ∈ I: (i) a nonempty ﬁnite set of
+local states Si, a nonempty ﬁnite set of actions Ai, (ii) a non-
+empty ﬁnite set of observations Oi, (iii) a transition function
+Pi: C × S × Si × Ai → PD (Ci × Si × Oi), which associates
+with every global state (c, s) ∈ (C, S), local state si ∈ Si, and
+action ai ∈ Ai a probability distribution over Ci × Si × Oi,
+and (iv) a reward function Ri: C × S × Si × Ai → R, which
+associates with every global state (c, s) ∈ C × S, local state
+si ∈ Si, and action ai ∈ Ai a reward Ri(c, s, si, ai) to agent i.
+The q- and v-functions for agent i ∈ I of a ﬁnite-horizon
+value iteration are deﬁned in Fig. 1 for n > 0 and m ≥ 0,
+where Pc(cid:2)
+i, and
+c(cid:2)
+i. That is, an optimal action of agent i
+−i denotes c(cid:2) without c(cid:2)
+in the global state (c, s) and the local state si when there are n
+i (c, s, si, ai). Notice
+steps to go is given by argminai∈Ai
+that these are the standard deﬁnitions of q- and v-functions,
+adapted to our framework of local and global states.
+
+i ( · |c, s) is the conditioning of P ( · |c, s) on c(cid:2)
+
+Qn
+
+3.2 Domain Theory
+TEAMGOLOG programs are interpreted relative to a domain
+theory, which extends a basic action theory by stochastic
+actions, reward functions, and utility functions. Formally,
+
+Q0
+
+Qn
+
+i (c, s, si, ai) = Ri(c, s, si, ai)
+i (c, s, si, ai) = Ri(c, s, si, ai) +
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+Pi(c(cid:4)
+
+i, s(cid:4)
+
+i, oi|c, s, si, ai) ·
+
+c(cid:2)∈C
+
+s(cid:2)∈S
+(c(cid:4)
+
+Pc(cid:2)
+
+i
+
+s(cid:2)
+i
+
+∈Si
+
+oi∈Oi
+
+−i, s(cid:4)|c, s) · V n−1
+
+V m
+
+i (c, s, si) = min
+ai∈Ai
+
+i
+
+(c(cid:4), s(cid:4), s(cid:4)
+i)
+i (c, s, si, ai) ,
+
+Qm
+
+Figure 1: Q- and V -Functions
+
+a domain theory DT i = (AT i, ST i, OT i) consists of n ≥ 2
+agents I = {1, . . . , n}, and for each agent i ∈ I: a basic action
+theory AT i, a stochastic theory ST i, and an optimization the-
+ory OT i, where the latter two are deﬁned below.
+
+The ﬁnite nonempty set of primitive actions A is parti-
+tioned into nonempty sets of primitive actions A1, . . . , An of
+agents 1, . . . , n, respectively. We assume a ﬁnite nonempty
+set of observations O, which is partitioned into nonempty sets
+of observations O1, . . . , On of agents 1, . . . , n, respectively.
+A stochastic theory ST i for agent i ∈ I is a set of ax-
+ioms that deﬁne stochastic actions for agent i. We represent
+stochastic actions through a ﬁnite set of deterministic actions,
+as usual [Finzi and Pirri, 2001; Boutilier et al., 2000]. When
+a stochastic action is executed, then with a certain proba-
+bility, “nature” executes exactly one of its deterministic ac-
+tions and produces exactly one possible observation. As un-
+derlying decision-theoretic semantics, we assume the weakly
+correlated Dec-POMDPs of Section 3.1, along with the re-
+lational ﬂuents that associate with every situation s a com-
+munication state cj of agent j ∈ I, a synchronization state z,
+and a local state si of agent i, respectively. The communi-
+cation and synchronization properties are visible by all the
+agents, the others are private and hidden. We use the pred-
+icate stochastic(a, s, n, o, μ) to encode that when executing
+the stochastic action a in the situation s, “nature” chooses the
+deterministic action n producing the observation o with the
+probability μ. Here, for every stochastic action a and situa-
+tion s, the set of all (n, o, μ) such that stochastic(a, s, n, o, μ)
+is a probability function on the set of all deterministic com-
+ponents n and observations o of a in s. We also use the no-
+tation prob(a, s, n, o) to denote the probability μ such that
+stochastic(a, s, n, o, μ). We assume that a and all its nature
+choices n have the same preconditions. A stochastic action a
+is indirectly represented by providing a successor state ax-
+iom for every associated nature choice n. The stochastic ac-
+tion a is executable in a situation s with observation o, de-
+noted Poss(ao, s), iff prob(a, s, n, o) > 0 for some n. The
+optimization theory OT i for agent i ∈ I speciﬁes a reward
+and a utility function for agent i. The former associates with
+every situation s and action a, a reward to agent i ∈ I, denoted
+reward (i, a, s). The utility function maps every reward and
+success probability to a real-valued utility utility(v, pr ). We
+assume utility(v, 1) = v and utility(v, 0) = 0 for all v. An
+example is utility(v, pr ) = v · pr . The utility function suit-
+ably mediates between the agent reward and the failure of
+actions due to unsatisﬁed preconditions.
+
+Example 3.1 (Rescue Domain) We consider a rescue domain
+where several autonomous mobile agents have to localize
+some victims in the environment and report their positions
+
+IJCAI-07
+
+2099
+
+to a remote operator. We assume a team of three heteroge-
+neous agents a1, a2, and a3 endowed with shape recognition
+(SH), infrared (IF), and CO2 sensors, respectively. A vic-
+tim position is communicated to the operator once sensed
+and analyzed by all the three sensing devices. Each agent
+ai can execute one of the actions goTo i(pos), analyze i(pos,
+type i), and reportToOpi(pos). The action theory AT i is de-
+scribed by the ﬂuents at i(pos, s), analyzed i(pos, type i, s),
+and reported i(x, s), which are accessible only by agent ai.
+E.g., the successor state axiom for at i(pos, s) is
+
+at i(pos, do(a, s)) ≡ a = goTo i(pos) ∨ at i(pos, s) ∧
+
+(cid:4)))
+
+¬∃pos
+
+(cid:4) (a = goTo i(pos
+
+and the precondition axiom for the action analyze i is given
+by Poss(analyze i(pos, type i), s) ≡ at i(pos, s). As for the
+global state, the communication state is deﬁned by the ﬂuent
+cs i(data, s), where i is the agent, and data is the shared info,
+e.g., cs 1(atVictim((2, 2), IF ), s) means that a1 detected a
+victim in position (2, 2) through the IF sensor. Other global
+data are repVictim(p) (victim reported in position p) and
+noVictim(p) (position p was inspected and there is no vic-
+tim). Some synchronization states are start (s) and reset(s)
+standing for starting resp. resetting the rescue session.
+In
+ST i, we deﬁne the stochastic versions of the actions in AT i,
+e.g., goToS i(pos) and analyzeS i(pos, type i). Each of these
+can fail resulting in an empty action, e.g.,
+
+prob(goToS i(pos), s, goTo i(pos), obs(succ)) = 0.9,
+prob(goToS i(pos), s, nop, obs(fail)) = 0.7 .
+
+In OT i, we provide a high reward for a fully analyzed victim
+correctly reported to the operator, a low reward for the analy-
+sis of a detected victim, and a (distance-dependent) cost is as-
+sociated with the action goTo. Since two agents can obstacle
+each other when operating in the same location, we penalize
+the agents analyzing the same victim at the same time. More
+precisely, we employ the following reward:
+reward (i, a, s) = r =def ∃p, t (a = analyze i(p, t) ∧
+
+(detVictim(p, s) ∧ (¬conﬂicts i(a, s) ∧ r = 50 ∨
+conﬂicts i(a, s) ∧ r = 10) ∨ ¬detVictim (p, s) ∧ r = − 10) ∨
+a = reportToOp i(p) ∧ fullyAnalyzed (p, s) ∧ r = 200 ∨
+a = goTo i(p) ∧ ∃p(cid:4)(at i(p(cid:4), s) ∧ r = − dist(p(cid:4), p))) ,
+
+where conﬂicts i is true if another agent communicates the
+analysis of the same location in the global state; detVic-
+tim(p, s) is true if at least one agent has discovered a vic-
+tim in p, i.e., cs i(atVictim(p, t), s) for some i and t; and
+fullyAnalyzed (p, s) means that all the analysis has been
+performed, i.e., cs 1(atVictim(p, SH ), s) ∧ cs 2(atVictim(p,
+IF ), s) ∧ cs3(atVictim(p, CO 2), s). Notice that the action
+goTo i(p) has a cost depending on the distance between start-
+ing point and destination, hence, in a greedy policy, the agent
+should go towards the closest non-analyzed victim and ana-
+lyze it. However, given the penalty on the conﬂicts, the agents
+are encouraged to distribute their analysis on different victims
+taking into account the decisions of the other agents.
+
+3.3 Belief States
+We next introduce belief states over situations for single
+agents, and deﬁne the semantics of actions in terms of transi-
+tions between belief states. A belief state b of agent i ∈ I is a
+
+set of pairs (s, μ) consisting of an ordinary situation s and a
+real μ ∈ (0, 1] such that (i) all μ sum up to 1, and (ii) all situa-
+tions s in b are associated with the same joint communication
+state and the same synchronization state. Informally, every b
+represents the local belief of agent i ∈ I expressed as a proba-
+bility distribution over its local states, along with unique joint
+communication and synchronization states. The probability
+of a ﬂuent formula φ(s) (uniform in s) in the belief state b,
+denoted φ(b), is the sum of all μ such that φ(s) is true and
+(s, μ) ∈ b. In particular, Poss(a, b), where a is an action, is
+deﬁned as the sum of all μ such that Poss(a, s) is true and
+(s, μ) ∈ b, and reward (i, a, b) is deﬁned in a similar way.
+
+Given a deterministic action a and a belief state b of agent
+i ∈ I, the successor belief state after executing a in b, de-
+noted do(a, b), is the belief state b(cid:2) = {(do(a, s), μ/Poss(a,
+b)) | (s, μ) ∈ b, Poss(a, s)}. Furthermore, given a stochas-
+tic action a, an observation o of a, and a belief state b of
+agent i ∈ I, the successor belief state after executing a in b
+and observing o, denoted do(ao, b), is the belief state b(cid:2),
+where b(cid:2) is obtained from all pairs (do(n, s), μ · μ(cid:2)) such that
+(s, μ) ∈ b, Poss(a, s), and μ(cid:2) = prob(a, s, n, o) > 0 by nor-
+malizing the probabilities to sum up to 1.
+
+The probability of making the observation o after executing
+the stochastic action a in the local belief state b of agent i ∈ I,
+denoted prob(a, b, o), is deﬁned as the sum of all μ · μ(cid:2) such
+that (s, μ) ∈ b and μ(cid:2) = prob(a, s, n, o) > 0.
+
+Example 3.2 (Rescue Domain cont’d) Suppose that agent a1
+is aware of its initial situation, and thus has the initial be-
+lief state {(S0, 1)}. After executing the stochastic action
+goToS 1(1, 1) and observing its success obs(succ), the be-
+lief state of a1 then changes to {(S0, 0.1), (do(goTo 1(1,
+1), S0), 0.9)} (here, prob(goToS 1(pos), s, goTo 1(pos),
+obs(succ)) = 0.9, and goToS 1(pos) is always executable).
+
+3.4 Syntax
+
+Given the actions speciﬁed by a domain theory DT i, a pro-
+gram p in TEAMGOLOG for agent i ∈ I has one of the fol-
+lowing forms (where φ is a condition, p, p1, p2 are programs,
+and a, a1, . . . , an are actions of agent i):
+
+1. Deterministic or stochastic action: a. Do a.
+2. Nondeterministic action choice: choice(i: a1| · · · |an).
+
+Do an optimal action among a1, . . . , an.
+
+3. Test action: φ?. Test φ in the current situation.
+4. Action sequence: p1; p2. Do p1 followed by p2.
+5. Nondeterministic choice of two programs: (p1 | p2).
+
+Do p1 or p2.
+
+6. Nondeterministic choice of an argument: πx (p(x)).
+
+Do any p(x).
+
+7. Nondeterministic iteration: p(cid:2)
+8. Conditional: if φ then p1 else p2.
+9. While-loop: while φ do p.
+
+. Do p zero or more times.
+
+10. Procedures, including recursion.
+
+IJCAI-07
+
+2100
+
+Example 3.3 (Rescue Domain cont’d) The following code
+represents an incomplete procedure explore i of agent i:
+
+proc(explore i,
+
+πx (gotoS i(x);
+
+if obs(succ) then [analyzeS i(x, type i);
+if obs(succ) ∧ fullyAnalyzed (x) then
+
+reportToOp i(repVictim(x))]);
+
+explore i) .
+
+Here, agent i ﬁrst has to decide where to go. Once the posi-
+tion is reached, agent i analyzes the current location deploy-
+ing one of its sensing devices. If a victim is detected, then the
+position of the victim is communicated to the operator.
+
+4 TEAMGOLOG Interpreter
+In this section, we ﬁrst specify the decision-theoretic seman-
+tics of TEAMGOLOG programs in terms of an interpreter. We
+then provide theoretical results about the interpreter.
+
+4.1 Formal Speciﬁcation
+We now deﬁne the formal semantics of a TEAMGOLOG pro-
+gram p for agent i ∈ I relative to a domain theory DT . We
+associate with every TEAMGOLOG program p, belief state b,
+and horizon H ≥ 0, an optimal H-step policy π along with its
+expected utility U to agent i ∈ I. Intuitively, this H-step pol-
+icy π is obtained from the H-horizon part of p by replacing
+every nondeterministic action choice by an optimal action.
+
+Formally, given a TEAMGOLOG program p for agent i ∈ I
+relative to a domain theory DT , a horizon H ≥ 0, and a start
+belief state b of agent i, we say that π is an H-step pol-
+icy of p in b with expected H-step utility U to agent i iff
+DT |= G(p, b, H, π, (cid:9)v, pr (cid:10)) and U = utility(v, pr ), where
+the macro G(p, b, h, π, (cid:9)v, pr (cid:10)) is deﬁned by induction on the
+different constructs of TEAMGOLOG. The deﬁnition of G for
+some of the constructs is given as follows (the complete deﬁ-
+nition is given in the full version of this paper):
+• Null program (p = nil ) or zero horizon (h = 0):
+
+G(p, b, h, π, (cid:6)v, pr (cid:7)) =def π = stop ∧ (cid:6)v, pr (cid:7) = (cid:6)0, 1(cid:7) .
+Intuitively, p ends when it is null or at the horizon end.
+• Stochastic ﬁrst program action with observation and h > 0:
+
+G([ao ; p(cid:4)], b, h, π, (cid:6)v, pr (cid:7)) =def (Poss(ao, b) = 0 ∧
+π = stop ∧ (cid:6)v, pr (cid:7) = (cid:6)0, 1(cid:7)) ∨ (Poss(ao, b) > 0 ∧
+∃ (
+
+G(p(cid:4), do(ao, b), h−1, πq, (cid:6)vq, prq(cid:7)) ∧
+
+(cid:3)l
+
+q=1
+
+π = ao ; for q = 1 to l do if oq then πq ∧
+v = reward (i, ao, b) +
+(cid:2)l
+pr = Poss(ao, b) ·
+
+(cid:2)l
+
+q=1
+
+q=1 pr q · prob(ao, b, oq))) .
+
+vq · prob(ao, b, oq) ∧
+
+Here, ∃(F ) is obtained from F by existentially quantifying
+all free variables in F . Moreover, o1, . . . , ol are the different
+pairs of a joint communication state and a synchronization
+state that are compatible with ao, and prob(ao, b, oq) is the
+probability of arriving in such oq after executing ao in b. In-
+formally, suppose p = [ao ; p(cid:2)], where ao is a stochastic action
+with observation. If ao is not executable in b, then p has only
+the policy π = stop along with the expected reward v = 0 and
+the success probability pr = 0. Otherwise, the optimal exe-
+cution of [ao ; p(cid:2)] in b depends on that one of p in do(ao, b).
+
+• Stochastic ﬁrst program action and h > 0:
+
+G([a ; p(cid:4)], b, h, π, (cid:6)v, pr (cid:7)) =def
+
+(cid:3)l
+
+∃ (
+
+q=1
+
+G([aoq ; p(cid:4)], b, h, aoq ; πq, (cid:6)vq, pr q(cid:7)) ∧
+(cid:2)l
+(cid:2)l
+
+π = aoq ; for q = 1 to l do if oq then πq ∧
+v =
+pr =
+
+q=1 pr q · prob(a, b, oq)) .
+
+vq · prob(a, b, oq) ∧
+
+q=1
+
+Here, o1, . . . , ol are the possible observations of the sto-
+chastic action a. The generated policy is a conditional plan in
+which every such observation oq is considered.
+• Nondeterministic ﬁrst program action and h > 0:
+
+G([choice(i: a1| · · · |an) ; p(cid:4)], b, h, π, (cid:6)v, pr (cid:7)) =def
+
+G([aq ; p(cid:4)], b, h, aq ; πq, (cid:6)vq, prq(cid:7)) ∧
+
+(cid:3)n
+
+∃ (
+
+q=1
+
+k = argmax q∈{1,...,n} utility(vq, prq) ∧
+π = πk ∧ v = vk ∧ pr = pr k) .
+
+4.2 Theoretical Results
+
+The following result shows that the TEAMGOLOG interpreter
+indeed generates an optimal H-step policy π along with its
+expected utility U to agent i ∈ I for a given TEAMGOLOG
+program p, belief state b, and horizon H ≥ 0.
+Theorem 4.1 Let p be a TEAMGOLOG program for agent
+i ∈ I w.r.t. a domain theory DT i, let b be a belief state, and
+let H ≥ 0 be a horizon. Then, the optimal H-step policy π of
+p in b along with its expected utility U to agent i ∈ I is given
+by DT i |= G(p, b, H, π, (cid:9)v, pr (cid:10)) and U = utility(v, pr ).
+
+The next result gives an upper bound for the number of
+leaves in the evaluation tree, which is polynomial when the
+horizon is bounded by a constant. Here, n is the maximum
+among the maximum number of actions in nondeterministic
+action choices, the maximum number of observations after
+actions, the maximum number of arguments in nondetermin-
+istic choices of an argument, and the number of pairs consist-
+ing of a synchronization state and a communication state.
+Theorem 4.2 Let p be a TEAMGOLOG program for agent
+i ∈ I w.r.t. a domain theory DT i, let b be a belief state, and
+let H ≥ 0 be a horizon. Then, computing the H-step policy π
+of p in b along with its expected utility U to agent i ∈ I via G
+generates O(n3H ) leaves in the evaluation tree.
+
+5 Rescue Scenario
+
+Consider the rescue scenario in Fig. 2. We assume that three
+victims have already been detected in the environment, but
+not completely analyzed: in position (3, 7), the presence of
+Alice was detected by a1 through the SH sensor; in position
+(7, 7), agent a2 discovered Bob through IF, and a3 analyzed
+him through the CO2 sensor; ﬁnally, in position (4, 2), victim
+Carol was detected by a2 with IF. We assume that this infor-
+mation is available in the global state, that is, the properties
+cs 1(atVictim((3, 7), SH ), s), cs 3(atVictim((7, 7), IF ), s),
+cs 2(atVictim((7, 7), CO 2), s), and cs 2(atVictim((4, 2),
+IF ), s) hold in the communication state of the agents. As for
+the local state, we assume the belief states b1 = {(s1,1, 0.8),
+(s1,2, 0.2)}, b2 = {(s2, 1)}, and b3 = {(s3, 1)}, with at 1(3,
+6, s1,1), at 1(3, 5, s1,2), at 2(7, 7, s2), and at 3(3, 7, s3).
+
+IJCAI-07
+
+2101
+
+a3: CO 2
+
+a1: SH
+
+a2: IF
+
+Alice: SH
+
+Bob: IF , CO 2
+
+Carol : IF
+
+Figure 2: Rescue Scenario
+
+Given this situation, the task of the team of agents is to fully
+analyze the discovered victims and report their positions to
+the operator once the victim analysis is completed. This task
+can be encoded by the following procedure:
+
+proc(explore i,
+
+πx ∈ {(3, 7), (7, 7), (4, 2)} (gotoS i(x);
+
+if obs(succ) then [analyzeS i(x, type i);
+if obs(succ) ∧ fullyAnalyzed (x) then
+
+reportToOp i(repVictim(x))]);
+
+explore i) ,
+
+where type 1 = SH , type 2 = IF , and type 3 = CO 2. Every
+agent ai with i ∈ {1, 2, 3} has to separately compile the pro-
+cedure explore i using its global and local information. As-
+suming the horizon H = 5 and the initial belief state bi, the
+optimal 5-step policy πi for agent ai, produced by the TEAM-
+GOLOG interpreter, is such that DT i |= G([explore i; nil ], bi,
+5, πi, (cid:9)vi, pr i(cid:10)). Here, π1, π2, and π3 are complex conditional
+plans branching over all possible observations and global
+states. E.g., the beginning of π1 is as follows:
+
+(7, 7);
+
+gotoS 1
+if obs(succ) then [analyzeS 1
+
+((7, 7), SH );
+if obs(succ) ∧ fullyAnalyzed(7, 7) then
+
+reportToOp 1
+(4, 2); . . .
+
+goToS 1
+
+(repVictim(7, 7))];
+
+This scenario has been realized in an abstract simulator. The
+simulator captures the key features of the environment and al-
+lows to execute agent actions computing associated rewards.
+A greedy control strategy has been devised as a comparison
+with the derived policies πi. In the greedy strategy, at each
+time step, each agent searches for the best victim to ana-
+lyze, based on the current distance to the victim. Whenever a
+victim has been completely analyzed, the agent reports the
+victim state to the operator. Both the greedy strategy and
+the policies πi were able to correctly report all victims to
+the operator, however, the policies πi revealed to be supe-
+rior with respect to the greedy strategy gaining more reward.
+The greedy gain is around 30% of the policies πi, because
+these were able to minimize conﬂicts among team members.
+Notice that, information available to the two strategies are the
+same, and that the better performance of the policies πi are
+achieved using planning over the global and local states.
+
+6 Summary and Outlook
+We have presented the agent programming language TEAM-
+GOLOG for programming a team of cooperative agents under
+partial observability. The approach is based on a decision-
+theoretic semantics and the key concepts of a synchroniza-
+tion state and a communication state, which allow the agents
+to passively resp. actively coordinate their behavior, while
+keeping their belief states, observations, and activities invisi-
+ble to the other agents. We have also provided experimental
+results from the rescue simulation domain.
+
+An interesting topic for future research is to develop an
+adaptive version of this approach. Another topic for future
+work is to explore whether the approach can be generalized
+to multi-agent systems with competitive agents.
+
+Acknowledgments. This work has been partially supported
+by the Austrian Science Fund Project P18146-N04 and by
+a Heisenberg Professorship of the German Research Foun-
+dation (DFG). We thank the reviewers for their constructive
+comments, which helped to improve this work.
+
+References
+[Boutilier et al., 2000] C. Boutilier, R. Reiter, M. Soutchanski, and
+S. Thrun. Decision-theoretic, high-level agent programming in
+the situation calculus. In Proc. AAAI-2000, pp. 355–362, 2000.
+
+[Boutilier et al., 2001] C. Boutilier, R. Reiter, and B. Price. Sym-
+In Proc.
+
+bolic dynamic programming for ﬁrst-order MDPs.
+IJCAI-2001, pp. 690–700, 2001.
+
+[Ferrein et al., 2005] A. Ferrein, C. Fritz, and G. Lakemeyer. Using
+Golog for deliberation and team coordination in robotic soccer.
+K¨unstliche Intelligenz, 1:24–43, 2005.
+
+[Finzi and Lukasiewicz, 2006] A. Finzi and T. Lukasiewicz. Game-
+theoretic agent programming in Golog under partial observabil-
+ity. In Proc. KI-2006, LNCS / LNAI, 2006.
+
+[Finzi and Pirri, 2001] A. Finzi and F. Pirri. Combining probabil-
+ities, failures and safety in robot control. In Proc. IJCAI-2001,
+pp. 1331–1336, 2001.
+
+[Goldman and Zilberstein, 2004] C. V. Goldman and S. Zilberstein.
+Decentralized control of cooperative systems: Categorization and
+complexity analysis. J. Artif. Intell. Res., 22:143–174, 2004.
+
+[Guestrin et al., 2003] C. Guestrin, D. Koller, C. Gearhart, and
+N. Kanodia. Generalizing plans to new environments in rela-
+tional MDPs. In Proc. IJCAI-2003, pp. 1003–1010, 2003.
+
+[McCarthy and Hayes, 1969] J. McCarthy and P. J. Hayes. Some
+philosophical problems from the standpoint of Artiﬁcial Intelli-
+gence. In Machine Intelligence, volume 4, pp. 463–502. 1969.
+
+[Nair et al., 2003] R. Nair, M. Tambe, M. Yokoo, D. V. Pynadath,
+and S. Marsella. Taming decentralized POMDPs: Towards efﬁ-
+cient policy computation for multiagent settings. In Proc. IJCAI-
+2003, pp. 705–711, 2003.
+
+[Puterman, 1994] M. L. Puterman. Markov Decision Processes:
+
+Discrete Stochastic Dynamic Programming. Wiley, 1994.
+
+[Reiter, 2001] R. Reiter. Knowledge in Action: Logical Founda-
+tions for Specifying and Implementing Dynamical Systems. 2001.
+[Shoham and Tennenholtz, 1995] Y. Shoham and M. Tennenholtz.
+On social laws for artiﬁcial agent societies: Off-line design. Ar-
+tif. Intell., 73(1–2):231–252, 1995.
+
+[Yoon et al., 2002] S. W. Yoon, A. Fern, and R. Givan. Inductive
+In Proc. UAI-2002, pp.
+
+policy selection for ﬁrst-order MDPs.
+568–576, 2002.
+
+IJCAI-07
+
+2102
+
+

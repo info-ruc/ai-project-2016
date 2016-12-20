@@ -1,0 +1,899 @@
+Location-Based Activity Recognition using Relational Markov Networks
+
+Lin Liao and Dieter Fox and Henry Kautz
+Department of Computer Science & Engineering
+
+University of Washington
+
+Seattle, WA 98195
+
+Abstract
+
+In this paper we deﬁne a general framework for ac-
+tivity recognition by building upon and extending
+Relational Markov Networks. Using the example
+of activity recognition from location data, we show
+that our model can represent a variety of features
+including temporal information such as time of day,
+spatial information extracted from geographic data-
+bases, and global constraints such as the number
+of homes or workplaces of a person. We develop
+an efﬁcient inference and learning technique based
+on MCMC. Using GPS location data collected by
+multiple people we show that the technique can ac-
+curately label a person’s activity locations. Further-
+more, we show that it is possible to learn good mod-
+els from less data by using priors extracted from
+other people’s data.
+
+Introduction
+
+1
+Activity recognition and context-aware computing are gain-
+ing increasing interest in the AI and ubiquitous computing
+communities. Most existing systems have been focused on
+relatively low level activities within small environments or
+during short periods of time.
+In this paper, we describe a
+system that can recognize high level activities (e.g., work-
+ing, shopping, and dining out) over many weeks. Our system
+uses data from a wearable GPS location sensor, and is able to
+identify a user’s signiﬁcant places, and learn to discriminate
+between the activities performed at these locations — includ-
+ing novel locations. Such activity information can be used in
+many applications. For example, it could be used to automat-
+ically instruct a user’s cell phone not to ring when dining at a
+restaurant, or it could support home rehabilitation of people
+suffering from traumatic brain injuries [Salazar et al., 2000]
+by providing automatic activity monitoring. Beyond estimat-
+ing high-level activity categories, our system can be expanded
+to incorporate additional sensor information, thereby recog-
+nizing ﬁne-grained indoor household tasks, such as those de-
+scribed in [Philipose et al., 2004].
+
+Because behavior patterns can be highly variable, a reliable
+discrimination between activities must take several sources
+of evidence into account. Our system considers (1) tempo-
+ral information such as time of day; (2) spatial information
+
+extracted from geographic databases, including information
+about the kinds of businesses in various locations; (3) sequen-
+tial information such as which activity follows which activ-
+ity; and (4) global constraints such as the number of different
+homes or workplaces. Additionally, it uses data collected by
+other users so as to improve the classiﬁcation of a speciﬁc
+user’s activities. All these constraints are soft: for example,
+on some days a person may do something unusual, such as go
+to a movie in the middle of a workday. Furthermore, the norm
+for some individuals may be different than our general com-
+monsense prior: for example, some people work two jobs, or
+shuttle between two different homes. It is necessary to use a
+rich and ﬂexible language to robustly integrate such a wide
+variety of both local and global probabilistic constraints.
+
+Our system builds upon previous work on extracting
+places from traces of users’ movements, gathered by GPS or
+other localization technologies [Ashbrook and Starner, 2003;
+Hariharan and Toyama, 2004; Liao et al., 2004]. Our work
+goes beyond theirs in that our system also recognizes the
+activities associated with the places. Moreover, previous
+approaches to modeling personal movements and place
+patterns require a large amount of training data from each
+user, and cannot be generalized to new places or new users.
+By contrast, our relational approach requires less individual
+training data by leveraging data collected by others.
+In
+summary, the contributions of this paper are:
+
+1. A general
+
+framework
+
+activity
+recognition based on Relational Markov Networks
+(RMNs) [Taskar et al., 2002], which are both highly
+expressive and well-suited for discriminative learning;
+
+sensor-based
+
+for
+
+2. An extension of RMNs to incorporate complex, global
+
+features using aggregations and label-speciﬁc cliques;
+
+3. Efﬁcient Markov-chain Monte-Carlo (MCMC) algo-
+rithms for inference and learning in extended RMNs,
+and in particular, an MCMC algorithm to simultaneously
+evaluate a likelihood function and its gradient;
+
+4. Positive experimental results on real data from multiple
+subjects, including evidence that we can improve accu-
+racy by extracting priors from others’ data.
+
+This paper is organized as follows. We will introduce our
+relational activity model in Section 2. Inference and learning
+will be discussed in Section 3, followed by experimental eval-
+uations. Conclusions and future work are given in Section 5.
+
+2 The Relational Activity Model
+In this section we ﬁrst discuss RMNs and our extensions.
+Then we show how to use them for modeling activities.
+
+2.1 Relational Markov Networks
+RMNs are extensions of Conditional Random Fields (CRFs),
+which are undirected graphical models that were developed
+for labeling sequence data [Lafferty et al., 2001]. CRFs are
+discriminative models that have been shown to out-perform
+generative approaches such as HMMs and Markov random
+ﬁelds in areas such as natural language processing [Lafferty
+et al., 2001] and computer vision [Kumar and Hebert, 2003].
+RMNs extend CRFs by providing a relational language for
+describing clique structures and enforcing parameter sharing
+at the template level. Thereby RMNs are an extremely ﬂex-
+ible and concise framework for deﬁning features that can be
+used in the activity recognition context.
+An RMN consists of three parts: a schema E for the do-
+main, a set of relational clique templates C, and correspond-
+ing potentials Φ. The schema E speciﬁes the set of classes
+(i.e., entity types) and attributes in each class. An attribute
+could be a content attribute, a label attribute, or a reference
+attribute that speciﬁes reference relation among the classes.
+An instantiation I of a schema speciﬁes the set of entities
+for each class and the values of all attributes for each entity.
+In our context an instantiation consists of the sequence of all
+signiﬁcant locations visited by a user along with the temporal
+and spatial attributes.
+A relational clique template C ∈ C is similar to a relational
+database query (e.g., SQL) in that it selects tuples from an in-
+stantiation I; the query result is denoted as C(I). We extend
+the deﬁnition of such templates in two ways. First, we allow
+a template to select aggregations of tuples. For example, we
+can group tuples and deﬁne potentials over counts or other
+statistics of the groups. Second, we introduce label-speciﬁc
+cliques, whose structures depend on values of the labels. For
+example, our model can construct a clique over all activities
+labeled as “AtHome.” Because labels are hidden during in-
+ference, such cliques potentially involve all the labels. Label-
+speciﬁc cliques can be speciﬁed by allowing label attributes
+to be used in the “Where” clause of an SQL query.
+
+Each clique template C is associated with a potential func-
+tion φC(vC) that maps a tuple (values of variables or aggre-
+gations) to a non-negative real number. Using a log-linear
+combination of feature functions, we get the following repre-
+C ·fC(vC)}, where fC() deﬁnes
+sentation: φC(vC) = exp{wT
+a feature vector for C and wT
+C is the transpose of the corre-
+sponding weight vector. For instance, a feature could be the
+number of different homes deﬁned using aggregations.
+For a speciﬁc instantiation I, an RMN deﬁnes a condi-
+tional distribution p(y|x) over labels y given the observed
+attributes x. To compute such a conditional distribution, the
+RMN generates an unrolled Markov network, in which the
+nodes correspond to the content attributes and the label at-
+tributes. The cliques of the unrolled network are built by ap-
+plying each clique template C ∈ C to the instantiation, which
+can result in several cliques per template (see Fig. 1(b) for
+an example). All cliques that originate from the same tem-
+
+p(y | x) =
+
+Y
+Y
+
+C∈C
+
+Y
+Y
+
+vC∈C
+
+vC∈C
+
+C∈C
+exp{wT · f},
+
+1
+
+Z(x)
+
+1
+
+Z(x)
+
+1
+
+Z(x)
+
+=
+
+=
+
+φC(vC)
+
+(1)
+
+exp{wT
+
+C · fC(vC)} (2)
+
+plate must share the same weights wC. The resulting cliques
+factorize the conditional distribution as
+
+P
+y0Q
+
+where
+
+C∈CQ
+
+the normalizing partition function Z(x) =
+(3) follows by moving the
+products into the exponent and combining all summations
+into w and f.
+
+C∈C φC(v0
+v0
+
+C).
+
+(3)
+
+2.2 Relational Activity Models
+We will now describe our relational activity models. Even
+though we illustrate the concepts using the example of
+location-based activity recognition, our model is very ﬂexible
+and can be applied to a variety of activity recognition tasks.
+
+The schema for activity recognition based on temporal and
+spatial patterns is shown in Fig. 1(a). It includes three classes:
+Activity, Place, and Transition.
+Activity: Activity is the central class in the domain. Its at-
+tribute Label is the only hidden variable. The set of possible
+labels in our experiments is {’AtHome’, ’AtWork’, ’Shop-
+ping’, ’DiningOut’, ’Visiting’, ’Others’}. Attribute Id serves
+as the primary key. The class also contains temporal infor-
+mation associated with an activity, such as TimeOfDay, Day-
+OfWeek, and Duration, whose values are discretized when
+necessary. Finally, Place is a reference attribute that points
+to a Place entity where the activity has been performed.
+Place: The class Place includes two boolean attributes: Near-
+Restaurant and NearStore, which indicate whether there are
+restaurants or stores nearby.
+Transition: Transition captures temporal succession relation-
+ship among activities. The reference attributes From and To
+refer to a pair of consecutive activities.
+
+Based on the schema, we deﬁne the following relational
+clique templates. Each of them takes into account a number
+of discriminative features.
+
+1. Temporal patterns: Different activities often have differ-
+ent temporal patterns, such as their duration or time of
+day. Such local patterns are modeled by clique templates
+that connect each attribute with the activity label.
+
+2. Geographic evidence: Information about the types of
+businesses close to a location can be extremely useful
+to determine a user’s activity. Such information can be
+extracted from geographic databases, such as Microsoft
+MapPoint [Hariharan et al., 2005] used in our experi-
+ments. Since location information in such databases is
+not accurate enough, we consider such information by
+checking whether, for example, a restaurant is within a
+certain range from the location.
+
+3. Transition relations: The ﬁrst-order transitions between
+activities can also be informative. For example, stay-
+ing at home followed by being at work is very common
+
+(b)
+Figure 1: (a) The schema of the relational activity model. Dashed lines indicate reference relations among classes. (b) An example of an
+unrolled Markov network with six activity locations. Solid straight lines indicate cliques generated by the templates of temporal, geographic,
+and transition features; bold solid curves represent spatial constraints (activity 1 and 4 are associated with the same place and so are 2 and 5);
+dashed curves stand for global features, which generate label-speciﬁc cliques (e.g., activity 1 and 4 are both labeled ’AtHome’).
+
+(a)
+
+while dining out immediately followed by another din-
+ing out is rare. The SQL query for this clique template
+is:
+SELECT a1.Label, a2.Label
+FROM Activity a1, Activity a2, Transition t
+WHERE t.From=a1.Id AND t.To=a2.Id
+
+4. Spatial constraints: Activities at the same place are often
+similar. In other words, the number of different types of
+activities in a place is often limited. We can express such
+a constraint using an aggregation function Count():
+SELECT COUNT(DISTINCT Label)
+FROM Activity
+GROUP BY Place
+
+5. Global features: Such features model global, soft con-
+straints on activities of a person. The number of differ-
+ent home locations is an example of global constraints.
+Such a constraint is modeled by a clique template that
+selects all places labeled as home and returns how many
+of them are different:
+SELECT COUNT(DISTINCT Place)
+FROM Activity
+WHERE Label=’AtHome’
+Note that the label variable appears in the “Where”
+clause, so this is an example of label-speciﬁc clique. In
+a different activity recognition context, global features
+could also model information such as “the number of
+times a person has lunch per day.”
+
+In the ﬁrst three templates, the feature functions fC() are
+just indicator functions that return binary values. They can
+also return numbers, such as in the last two templates.
+
+Inference and Learning
+
+3
+3.1 Labeling Activities
+In our application, the task of inference is to estimate the la-
+bels of activities given a sequence of locations visited by a
+person. To do so, our RMN converts a location sequence into
+unrolled Markov networks, as illustrated in Fig. 1(b). Infer-
+ence in our relational activity model is complicated by the fact
+that the structure of the unrolled Markov network can change
+during inference because of the label-speciﬁc cliques. Using
+standard belief propagation in such networks would require
+the construction of cliques over all labels, which is obviously
+inefﬁcient [Taskar et al., 2002]. We overcome this problem
+
+by using MCMC for inference [Gilks et al., 1996]. In a nut-
+shell, whenever the label of an object is changed during sam-
+pling, we determine all cliques that could be affected by this
+change and re-compute their potentials.
+
+We ﬁrst implemented MCMC using basic Gibbs sampling.
+Unfortunately, this technique performs poorly in our model
+because of the strong dependencies among labels. To make
+MCMC mix faster, we ﬁrst make an additional spatial con-
+straint that all activities occurring in the same place must have
+the same label (the relaxation of this constraint will be ad-
+dressed in future work). This hard constraint allows us to
+put all activities occurring in the same place into a so-called
+block. We then develop a mixture of two transition kernels
+that converges to the correct posterior.
+
+The ﬁrst kernel is a block Gibbs sampler. At each step we
+update the labels in a block simultaneously by sampling from
+the full conditional distribution
+
+P (yk | y−k, x, w) ∝ exp{wT · f(x, y−k ∪ yk)} (4)
+where k is the index of the block, yk is the label of block k,
+y−k are the labels for blocks other than k. The second kernel
+is a Metropolis-Hasting (MH) sampler. To update the label
+for block k, the MH sampler randomly picks a block j and
+proposes to exchange label yk and yj. The acceptance rate of
+the proposal follows as
+
+a(y, y0) = min
+
+exp{wT · f(x, y0)}
+exp{wT · f(x, y)}
+
+1,
+
+(5)
+
+(cid:18)
+
+(cid:19)
+
+where y and y0 are the labels before and after the exchange,
+respectively.
+
+The numbers of different homes and workplaces are stored
+in the chains as global variables. This allows us to compute
+the global features locally in both kernels: in the Gibbs kernel
+we increase or decrease the numbers depending on the labels
+of the given block and in the MH kernel the numbers remain
+intact. At each time step, we choose the Gibbs sampler with
+probability γ, and the MH sampler with probability 1 − γ.
+3.2 Supervised Learning
+We show how to learn generic activity models from labeled
+activity sequences of N different users. Learning a cus-
+tomized model for an individual user is a special case when
+N = 1. The parameters to be learned are the feature weights
+w that deﬁne clique potentials in (3). To avoid overﬁtting,
+we perform maximum a posterior (MAP) parameter estima-
+tion and impose an independent Gaussian prior with constant
+
+Transition   From   To   IdActivity   Label   TimeOfDay   DayOfWeek   Duration   Place   NearRestaurantPlace   Id   NearStore123456TimeOfDay,DayOfWeek,DurationNearRestaurant,NearStoreLabelvariance for each component of w, i.e., p(w) ∝ exp{−(w −
+µ)T · (w − µ)/2σ2}, where µ is the mean and σ2 is the vari-
+ance . We deﬁne the MAP objective function as the negative
+log-likelihood of training data from N subjects plus the prior:
+
+L(w) ≡
+
+{− log P (yj | xj, w)} − log p(w)
+
+j=1
+
+{−wT· f (xj, yj) + log Z(xj, w)} +
+
+(w−µ)T· (w−µ)
+
+2σ2
+
+(6)
+
+NX
+
+NX
+
+j=1
+
+=
+
+where j ranges over different users and yj are the activity
+labels for each user. Since (6) is convex, the global minimum
+can be found using standard optimization algorithms [Taskar
+et al., 2002]. We apply the quasi-Newton technique to ﬁnd
+the optimal weights [Sha and Pereira, 2003]. Each iteration of
+this technique requires the value and gradient of (6) computed
+at the weights returned in the previous iteration.
+Evaluating the objective function
+It can be intractable to compute exact objective values in (6)
+for all but the simplest cases. This is due to the fact that,
+for a speciﬁc w, it is necessary to evaluate the partition func-
+tion Z(xj, w), which requires summation over all possible la-
+bel conﬁgurations. We approximate the objective value using
+Monte-Carlo methods [Geyer and Thompson, 1992]. Sup-
+pose we already know the value of L( ˜w) for a weight vector
+˜w. Then for each subject j, we use our MCMC inference to
+j (1 ≤ i ≤ M), from the distri-
+get M random samples, ˜y(i)
+MX
+bution P (y | xj, ˜w). Then L(w) can be approximated as:
+L(w) ≈ L( ˜w) +
+j })}
+
+exp{(w − ˜w)T · ∆˜f (i)
+
+NX
+
+{log(
+
+1
+M
+
+j=1
+
+i=1
+
+(w − µ)T · (w − µ) − ( ˜w − µ)T · ( ˜w − µ)
+
++
+
+2σ2
+
+(7)
+j ) − f(xj, yj) is the difference be-
+where ∆˜f (i)
+tween sampled feature counts using ˜w and the empirical fea-
+ture counts in the labeled data.
+
+j = f(xj, ˜y(i)
+
+Eq. (7) can only be used to estimate values of L(w) relative
+to L( ˜w). Fortunately, such relative values are sufﬁcient for
+the purpose of optimization. It can be shown that the best ap-
+proximation in (7) is obtained when ˜w is close to the optimal
+w. Therefore, during optimization, our algorithm updates ˜w
+with better weight estimates whenever possible.
+Evaluating the gradient
+The gradient of the objective function, ∇L(w), equals to the
+difference between the sampled feature counts and the em-
+pirical feature counts, plus a prior term. To generate the
+sampled feature counts under w, we again run MCMC in-
+ference. Suppose we have obtained M random samples,
+j (1 ≤ i ≤ M), from the distribution P (y | xj, w). We
+y(i)
+can compute the gradient as:
+w − µ
+∇L(w) =
+σ2
+
+{Ew[f(xj, y)] − f(xj, yj)} +
+
+NX
+≈ NX
+
+j=1
+
+MX
+
+{ 1
+M
+
+j=1
+
+i=1
+
+∆f (i)
+
+j } +
+
+w − µ
+σ2
+
+(8)
+
+input : the weights w provided by the optimizer
+output: L(w) and ∇L(w)
+//Evaluate the gradient ∇L(w)
+foreach subject j do
+
+Run MCMC with w and get M samples;
+Get feature count difference ∆f (i)
+
+(1 ≤ i ≤ M) ;
+
+j
+
+end
+Compute the gradient ∇L(w) using Eq. (8) ;
+//Evaluate the objective value L(w)
+if First time calling this function then
+
+L( ˜w) = L(w) = 0; ˜w = w ;
+∆˜f (i)
+
+for 1 ≤ j ≤ N,1 ≤ i ≤ M ;
+
+j = ∆f (i)
+
+j
+
+else
+
+Compute L(w) using Eq. (7) ;
+if L(w) < L( ˜w) then
+
+L( ˜w) = L(w); ˜w = w ;
+∆˜f (i)
+
+j = ∆f (i)
+
+j
+
+for 1 ≤ j ≤ N,1 ≤ i ≤ M ;
+
+end
+
+end
+Algorithm 1: MCMC-based algorithm for simultaneously
+evaluating objective function and its gradient.
+
+j = f(xj, y(i)
+
+j ) − f(xj, yj) is the difference be-
+
+where ∆f (i)
+tween the sampled and the empirical feature counts.
+Algorithm
+If we compare (7) and (8), we see both require the difference
+between the sampled and the empirical feature counts. While
+samples in (7) are based on the weights ˜w, those in (8) are
+based on w. Therefore, if we always keep the best weight
+estimate as ˜w, we can reuse the sampled feature counts from
+gradient estimation, thereby making objective value evalua-
+tion very efﬁcient.
+
+Our algorithm simultaneously estimates at each iteration
+the value and the gradient of the negative log-likelihood (6)
+for given weights w. These estimates are used by the quasi-
+Newton approach to compute new weights, and then the esti-
+mation is repeated. As shown in Alg. 1, both L( ˜w) and L(w)
+are initialized as 0 and thus all the objective values are evalu-
+ated relative to the objective value of initial weights. In later
+iterations, when we ﬁnd a better weight estimate that makes
+L(w) less than L( ˜w), we update ˜w with the new w and also
+j (1 ≤ j ≤ N, 1 ≤ i ≤ M). By
+keep the new L( ˜w) and ∆˜f (i)
+doing that, we not only evaluate objective values very efﬁ-
+ciently, but are also able to get more accurate approximations
+as ˜w approaches closer to the optimal weights.
+
+4 Experiments
+To evaluate our location-based activity recognition technique,
+we collected two sets of location data using wearable GPS
+units. The ﬁrst data set (called “single”) contains location
+traces from a single person over a time period of four months
+(see Fig. 2). It includes about 400 visits to 50 different places.
+The second data set (called “multiple”) was collected by ﬁve
+different people, about one week for each. Each person’s data
+include 25 to 35 visits and 10 to 15 different places. We ex-
+tracted places / visits from the GPS logs by detecting loca-
+tions at which a person spends more than 10 minutes [Hariha-
+
+ran and Toyama, 2004]. Each instance corresponds to an ac-
+tivity. We then clustered nearby activity locations into places.
+For training and evaluation, we let the subjects manually label
+the types of activities. Then, we trained the models and tested
+their accuracy. Accuracy was determined by the activities for
+which the most likely labeling was correct.
+
+Applying learned models to other people
+In practice, it is of great value to learn a generic activity
+model that can be immediately applied to new users without
+additional training.
+In this experiment, we used the “mul-
+tiple” data set and performed leave-one-subject-out cross-
+validation: we trained using data from four subjects, and
+tested on the remaining one. The average error rates are indi-
+cated by the white bars in Fig. 3(a). By using all the features,
+the generic models achieved an average error rate of 18%. It
+can be seen that global features and spatial constraints signif-
+icantly improve classiﬁcation. To gage the impact of different
+habits on the results, we also performed the same evaluation
+using the “single” data set. In this case, we used one-month
+data for training and the other three-month data for test, and
+we repeated the validation process for each month. The re-
+sults are shown by the gray bars in Fig. 3(a). In this case, the
+models achieved an error rate of only 7% by using all the fea-
+tures. This experiment shows that it is possible to learn good
+activity models from groups of people. It also demonstrates
+that models learned from more “similar” people can achieve
+higher accuracy. This indicates that models can be improved
+by grouping people based on their activity patterns.
+
+Table 1 shows the confusion matrix of one experiment on
+generic models (rightmost white bar in Fig. 3(a)). As can be
+seen, our approach is able to perfectly label homes and work-
+places. The technique performs surprisingly well on the other
+activities, given that they are extremely difﬁcult to distinguish
+based on location information alone. The confusion matrix
+also shows that simply labeling places by the most frequent
+activity (home) would result in an error rate of 62%.
+
+Home Work
+
+Inferred labels
+Shop Dining Visit Other
+
+Truth
+Home
+Work
+Shop
+Dining
+Visit
+Other
+
+57
+0
+0
+0
+0
+0
+
+0
+0
+4
+4
+3
+15
+Table 1: Confusion matrix of cross-validation on generic models
+with all features.
+
+0
+0
+2
+6
+0
+1
+
+0
+34
+0
+0
+0
+0
+
+0
+0
+8
+3
+1
+6
+
+0
+0
+0
+0
+4
+2
+
+To evaluate the impact of number of people available for
+model learning, we trained our model using data from dif-
+ferent numbers of subjects and tested on the remaining one
+(all features were used). The average error rates of the cross-
+validation are shown in Fig. 3(b). When trained using only
+one subject, the system does not perform well (error rate of
+35%), mainly because many patterns speciﬁc to that person
+are applied onto others. When more subjects are used for
+training, the patterns being learned are more generic and the
+models achieve signiﬁcantly higher accuracy.
+
+Figure 2: Part of the locations contained in the “single” data set,
+collected over a period of four months (x-axis is 8 miles long).
+Improved learning through priors extracted from others
+When estimating the weights of RMNs, a prior is imposed
+in order to avoid overﬁtting. Without additional information,
+a zero mean Gaussian is typically used as the prior [Taskar
+et al., 2002]. [Peng and McCallum, 2004] demonstrated that
+better accuracy can been achieved if feature-dependent vari-
+ances are used. Our experiment shows that performance can
+also be improved by estimating the prior means of the weights
+(µ in Eq. (6)) using data collected from other people.
+
+In this experiment, we compared the models of a spe-
+ciﬁc person trained using a zero-mean prior with the models
+trained using an estimated prior. In the latter case, we ﬁrst
+learned the feature weights from other people and used those
+as the mean of the Gaussian prior. We evaluated the perfor-
+mance for different amounts of training data available for the
+test person. The results are shown in Fig. 3(c), in which the
+error rates are counted only on the novel places, i.e., places
+that were not visited in the training data and thus often very
+irregular. We can see that using data from others to generate a
+prior boosts the accuracy signiﬁcantly, especially when only
+small amounts of training data are available.
+
+The Bayesian prior allows the model to smoothly shift
+from generic to customized: On one end, when no data
+from the given subject are available, the approach returns the
+generic (prior) model; on the other end, as more labeled data
+become available, the model adjusts more and more to the
+speciﬁc patterns of the user.
+
+Additional experiments
+For comparison, we also built basic HMMs in which the hid-
+den states are the labels and all the observations are inde-
+pendent given the states. Parameter estimation in HMMs
+with labeled data is done via frequency counting. The most
+likely labels can be found using the Viterbi algorithm. In the
+one-month-training cross-validation on the “single” data set,
+the HMM produced an average error rate of 21.1% by using
+the temporal, geographic, and transition features. 1 Because
+of the advantages of discriminative learning, even using the
+same features, RMNs performed better than HMMs and re-
+duced the relative error rate by about 10%.
+
+In a separate set of experiments, we tested the performance
+of our MCMC sampler. By visualizing the standard Gelman-
+Rubin statistics [Gilks et al., 1996] generated from parallel
+
+1Spatial constraints and global features do not satisfy the ﬁrst-
+order Markov assumption and thus are difﬁcult to model as HMMs.
+
+AtHomeAtWorkShoppingDiningOutVisitingOthers(a)
+
+(b)
+
+(c)
+
+(d)
+
+Figure 3:
+(a) Error rates of models using different features: White bars represent errors of models learned from data collected by other
+people, and gray bars are for models learned and tested using data collected by the same person (“Previous” means all previous features
+are also used). (b) Error rates of generic models with respect to different numbers of training subjects. (c) Error rates of zero-mean prior
+vs. priors learned from other people. (d) Convergence comparison of MCMC using different γ’s: G-R statistics approaching 1 indicates good
+convergence (γ = 0 corresponds to using only MH sampler and γ = 1 corresponds to the block Gibbs sampler).
+
+chains, we observed that by combining the Gibbs and the
+MH kernels, MCMC converged much faster than using only
+one of them (see Fig. 3(d)). All results reported here were
+achieved with a mixing parameter γ = 0.5 (see Section 3).
+
+5 Conclusions and Future Work
+In this paper, we presented a discriminative relational ap-
+proach for activity recognition based on the framework of
+RMNs, which are well-suited to model constraints for activity
+recognition. We showed how to perform efﬁcient inference
+and learning using MCMC with a mixture of kernels.
+
+Using our relational approach, we developed and tested a
+speciﬁc model for location-based activity recognition. The
+results are very promising: the system is able to learn mod-
+els that can accurately label human activities solely based on
+GPS data. We demonstrated that spatial and global features
+are very important to achieve good recognition rates. We also
+showed how to obtain good priors using data from other peo-
+ple so as to learn an improved model for a speciﬁc person that
+requires less labeled data.
+
+We plan to extend our model in a number of ways. First,
+by collecting data from more subjects, we can learn a set of
+generic models by clustering the subjects based on their sim-
+ilarities; then we can use a mixture of these models to bet-
+ter recognize activities of a new person. Second, we will
+relax the hard spatial constraint of one activity per location
+and thus recognize different activities performed at the same
+place. Third, we will integrate information from other wear-
+able sensors (e.g., microphones or accelerometers) into our
+general framework, thereby enabling much ﬁner-grained ac-
+tivity recognition. We will also apply the model to the prob-
+lem of estimating a person’s indoor activities from RFID sen-
+sor data. By incorporating constraints such as “a person typi-
+cally has lunch once per day,” we expect strong improvements
+over the results reported in [Philipose et al., 2004].
+
+Acknowledgments
+We thank Anthony LaMarca, Don J. Patterson, and Xiaolin
+Sun for collecting data used in our experiments. We would
+also like to thank John Krumm for suggesting the use of geo-
+graphic databases such as Microsoft MapPoint. This research
+is based on the work that has been supported by DARPA’s
+CALO project and NSF.
+
+References
+[Ashbrook and Starner, 2003] D. Ashbrook and T. Starner. Using
+GPS to learn signiﬁcant locations and predict movement across
+multiple users. In Personal and Ubiquitous Computing, 2003.
+
+[Geyer and Thompson, 1992] C. J. Geyer and E. A. Thompson.
+Constrained Monte Carlo Maximum Likelihood for dependent
+data. Journal of Royal Statistical Society, 1992.
+
+[Gilks et al., 1996] W.R. Gilks, S. Richardson, and D.J. Spiegel-
+halter. Markov Chain Monte Carlo in Practice. Chapman and
+Hall/CRC, 1996.
+
+[Hariharan and Toyama, 2004] R. Hariharan and K. Toyama.
+In
+
+Project Lachesis: parsing and modeling location histories.
+Geographic Information Science, 2004.
+
+[Hariharan et al., 2005] R. Hariharan, J. Krumm, and E. Horvitz.
+In International Workshop on Location-
+
+Web-enhanced GPS.
+and Context-Awareness, 2005.
+
+[Kumar and Hebert, 2003] S. Kumar and M. Hebert. Discrimina-
+tive random ﬁelds: A discriminative framework for contextual
+interaction in classiﬁcation. In Proc. of the International Confer-
+ence on Computer Vision (ICCV), 2003.
+
+[Lafferty et al., 2001] J. Lafferty, A. McCallum, and F. Pereira.
+Conditional random ﬁelds: Probabilistic models for segmenting
+and labeling sequence data. In Proc. of the International Confer-
+ence on Machine Learning (ICML), 2001.
+
+[Liao et al., 2004] L. Liao, D. Fox, and H. Kautz. Learning and
+inferring transportation routines. In Proc. of the National Con-
+ference on Artiﬁcial Intelligence (AAAI), 2004.
+
+[Peng and McCallum, 2004] F. Peng and A. McCallum. Accurate
+information extraction from research papers using conditional
+random ﬁelds. In HLT-NAACL, 2004.
+
+[Philipose et al., 2004] M. Philipose, K.P. Fishkin, M. Perkowitz,
+D.J. Patterson, D. Hhnel, D. Fox, and H. Kautz. Inferring ADLs
+from interactions with objects. IEEE Pervasive Computing, 3(4),
+2004.
+
+[Salazar et al., 2000] A. Salazar, D. Warden, K. Schwab, J. Spec-
+tor, S. Braverman, J. Walter, R. Cole, M. Rosner, E. Martin, and
+R. Ellenbogen. Cognitive rehabilitation for traumatic brain in-
+jury. Journal of American Medical Association, 283(23), 2000.
+[Sha and Pereira, 2003] Fei Sha and Fernando Pereira. Shallow
+parsing with conditional random ﬁelds. In Proceedings of Hu-
+man Language Technology-NAACL, 2003.
+
+[Taskar et al., 2002] B. Taskar, P. Abbeel, and D. Koller. Discrim-
+inative probabilistic models for relational data. In Proc. of the
+Conference on Uncertainty in Artiﬁcial Intelligence (UAI), 2002.
+
+00.10.20.30.40.50.60.7Error rateTemporal &TransitionPrevious &GeographicPrevious &SpatialPrevious &GlobalLeave−one−subject−outSame subject 1234 00.10.20.30.40.50.60.7Error rateNumber of training subjects   0.51  2  3  00.10.20.30.40.50.60.7Training data [week]Error rateZero−mean priorLearned prior0   1000200030004000500011.21.41.61.82MCMC IterationG−R Statisticg=0g=0.25g=0.5g=0.75g=1

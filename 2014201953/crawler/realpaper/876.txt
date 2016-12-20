@@ -1,0 +1,889 @@
+Automatic Gait Optimization with Gaussian Process Regression
+
+Daniel Lizotte, Tao Wang, Michael Bowling, Dale Schuurmans
+
+Department of Computing Science
+
+{dlizotte,trysi,bowling,dale}@cs.ualberta.ca
+
+University of Alberta
+
+Abstract
+
+Gait optimization is a basic yet challenging prob-
+lem for both quadrupedal and bipedal robots. Al-
+though techniques for automating the process ex-
+ist, most involve local function optimization pro-
+cedures that suffer from three key drawbacks. Lo-
+cal optimization techniques are naturally plagued
+by local optima, make no use of the expensive gait
+evaluations once a local step is taken, and do not
+explicitly model noise in gait evaluation. These
+drawbacks increase the need for a large number
+of gait evaluations, making optimization slow, data
+inefﬁcient, and manually intensive. We present
+a Bayesian approach based on Gaussian process
+regression that addresses all three drawbacks.
+It
+uses a global search strategy based on a poste-
+rior model inferred from all of the individual noisy
+evaluations. We demonstrate the technique on a
+quadruped robot, using it to optimize two different
+criteria: speed and smoothness. We show in both
+cases our technique requires dramatically fewer
+gait evaluations than state-of-the-art local gradient
+approaches.
+
+1 Introduction
+
+Legged robot platforms offer many advantages over tradi-
+tional wheeled robots. In addition to their ability to traverse
+a wide variety of terrain, walking robots are basically a re-
+quirement for performing useful tasks in our human-centric
+world. Despite these advantages, walking is also one of the
+fundamental challenges for legged robots.
+
+Optimizing a robot’s gait is not a simple control problem.
+An open loop gait consists of a sequence of joint values for
+an already high degree of freedom system of leg joints. Sim-
+pliﬁed parametric representations of leg trajectories can re-
+sult in a manageable number of parameters. However, these
+parameters will likely have complicated interactions making
+manual tuning of gait parameters time-consuming for simple
+robots and nearly impossible for the increasing complexity of
+humanoid platforms.
+
+Even worse, no single gait will be effective in all circum-
+stances. The walking surface is critical and can vary in terms
+
+of friction, softness, and height variation (e.g., compare con-
+crete, linoleum, carpet, and grass). Robot platforms them-
+selves also vary due to manufacturing imperfections and gen-
+eral joint and motor wear. Lastly, even the criterion for de-
+termining an effective gait is likely to be situation speciﬁc.
+Although velocity may seem like the obvious choice, relative
+stability of the robot’s sensor hardware can also be important.
+Although tailoring a robot’s gait to the environmental, robot,
+and task speciﬁc circumstances would be ideal, constant man-
+ual re-tuning is impractical. Automatic gait optimization is an
+attractive alternative to this laborious manual process.
+
+Although walk learning is not a new idea, existing tech-
+niques are based on the common approach of local func-
+tion optimization. Hence, existing algorithms also share key
+drawbacks including local minima and inefﬁcient use of gait
+evaluations. These drawbacks combine to increase the num-
+ber of gait evaluations required to ﬁnd effective parameters.
+In this work, we propose a different approach based on Gaus-
+sian process regression. Not only does the approach not suf-
+fer drawbacks inherent in local methods, but it has the ad-
+ditional advantages of providing conﬁdence estimates on the
+gait’s performance, which is useful for exploration, and al-
+lows for a natural inclusion of prior knowledge. We demon-
+strate the effectiveness of the approach on the Sony AIBO
+quadruped robot. We show that under two separate criteria
+the Gaussian process regression not only ﬁnds effective gait
+parameters, but also does so with an order of magnitude fewer
+evaluations than a local gradient competitor.
+
+We begin in Section 2 by examining some of the recent
+approaches to gait optimization. We note the common draw-
+backs in these approaches as motivation for our proposed
+technique. In Section 3 we present relevant background ma-
+terial on Gaussian process regression. We then, in Section 4
+describe how we apply Gaussian processes to the problem
+of gait optimization.
+In Section 5 we show results of our
+technique applied to two different gait optimization scenar-
+ios, demonstrating dramatically more efﬁcient learning than
+both simple and state-of-the-art gait optimization techniques.
+Finally, we discuss some future extensions of our approach.
+
+2 Motivation
+The Sony AIBO, a commercially available quadruped robot,
+has spurred recent interest in gait optimization.
+Its use in
+robot soccer within the RoboCup Legged League gives an
+
+IJCAI-07
+
+944
+
+immediate application where gait velocity and uncertain com-
+petition conditions reward well tuned walks. Since the AIBO
+is our evaluation platform as well, we will examine a number
+of recent approaches pioneered on this robot.
+
+A common foundation for all of these approaches, includ-
+ing ours as well, is the notion of a “walk engine”, or param-
+eterized gait generation system. Since the number of degrees
+of freedom in legged robots is large, optimizing the angle of
+each joint at a ﬁnely discretized time scale would involve
+searching over a thousand parameters. The walk engine re-
+duces the number of parameters by focusing on leg trajecto-
+ries that are both physically possible and intuitively plausible.
+These parameters usually deﬁne properties of each leg’s tra-
+jectory such as the “distance the foot is lifted off the ground”
+and “the period of the walk”. The space of parameterized
+walks obviously has a large impact on the ﬁnal quality of any
+automatic gait optimization, but the optimization problem it-
+self is the same regardless of the walk engine. Optimization
+in all cases requires ﬁnding a point in parameter space, rang-
+ing from eight to ﬁfty parameters, that results in an effective
+gait. All of the cited work below are based on different walk
+engines. Hence, because of the variation in walk engine, sur-
+faces, and robots themselves, reported walk speeds are largely
+incomparable.1
+
+A second common feature of the approaches is the exper-
+imental setup. All of the approaches involve evaluating spe-
+ciﬁc parameter settings by having the AIBO walk in a struc-
+tured arena using the parameters to be evaluated. Local sen-
+sor readings on the AIBO–either camera images of visual
+landmarks or the IR sensor readings of walls–are then used
+to compute a noisy estimate of the gait’s average speed. The
+procedure may be replicated and each estimate averaged to
+compute a more accurate evaluation.
+
+2.1 Evolutionary Approaches
+
+An evolutionary approach was the ﬁrst proposed method
+for gait optimization on the AIBO. Hornby et al. [1999;
+2000] used a fairly standard evolutionary search on an early
+prototype AIBO. A population of parameters were main-
+tained at each evolutionary generation. A new population was
+formed through mutation and crossover of individuals from
+the previous generation, replacing parameters in the popula-
+tion that evaluated poorly. Their procedure showed slow gait
+improvement over 500 generations, requiring approximately
+twenty-ﬁve robot-hours of learning.
+
+The evolutionary approach was revisited by Chernova and
+Veloso [Chernova and Veloso, 2004]. They used similar mu-
+tation and crossover operations to generate candidate gaits.
+Unlike the work of Hornby, their parametric space of walks
+included a measurement of the possibility that the AIBO
+could physically perform the gait. This allowed them to throw
+out poor gait parameters without requiring an empirical eval-
+uation. In addition, they used a “radiation” procedure to dis-
+perse clusters of similar parameters in the population, forcing
+further search. They demonstrated that the technique learned
+
+competitive walks using only 4,000 evaluations and a total
+running time of approximately ﬁve hours distributed across
+four robots for a total of twenty robot-hours.
+
+As evaluations are noisy, both approaches must deal with
+the possibility that an inaccurate evaluation will cause poor
+gait parameters to incorrectly remain in the population. Both
+used targeted reevaluation to reduce this possibility, reevalu-
+ating either the parameters that remained for multiple gener-
+ations or the ones that performed disproportionately well.
+
+2.2 Function Optimization
+
+The second family of approaches that has been explored
+involves adapting techniques for multidimensional function
+optimization to the gait optimization problem. Kim and
+Uther [2003] used Powell’s method [Press et al., 1992],
+which performs line search along a chosen search direction
+based on the effectiveness of previously chosen search direc-
+tions. Kohl and Stone [2004] used a hill climbing approach.
+Although the gradient is not known, a set of random pertur-
+bations are evaluated empirically, and these evaluations are
+used to approximate the gradient. The parameters are then
+adjusted by a ﬁxed step size in the direction of this estimated
+gradient. Kohl and Stone reported the fastest learning re-
+sult in the literature, requiring only three hours distributed
+across three robots for a total of nine robot-hours. It is im-
+portant to note that the reported experiments for both tech-
+niques involved initializing the optimization with a known set
+of reasonable parameters. This differs from evolutionary ap-
+proaches, which begin with a random initial population.
+
+2.3 Drawbacks
+
+All of the previous approaches share three key drawbacks.
+First, they can get stuck at local optima. Kim and Uther re-
+ported actual experiences of local optima and Kohl and Stone
+noted the importance of starting from good initial parame-
+ters, having found considerably poorer performance under
+different starting conditions. There are techniques to deal
+with local optima, such as random restarts for local func-
+tion optimization approaches and radiation for evolutionary
+approaches. However, both involve a considerable increase
+in the required number of gait evaluations. Furthermore, the
+approaches forget previously evaluated gaits once they either
+die out of the population or after the gradient step is taken.
+Not only is this an inefﬁcient use of expensive gait evalu-
+ations, but certain parameter settings may be unnecessarily
+reevaluated. Finally, none of the approaches explicitly model
+the noise in the evaluation process. Hence they all involve
+long evaluations or even repeated evaluations that are aver-
+aged to compute a less noisy estimate. In summary, if the
+goal is to reduce the total number of robot-hours these draw-
+backs severely hurt the usefulness of the approaches. Our
+approach addresses these disadvantages and consequently re-
+quires considerably fewer gait evaluations.
+
+3 Background
+
+1Despite the lack of basis for comparison, the three most recent
+techniques discussed below all achieve a similar walk speed in the
+range of 0.27–0.29 m/s.
+
+At the core of our proposed method is a Gaussian process re-
+gression model that describes our knowledge about the func-
+tion we are optimizing. Before discussing its use for gait opti-
+
+IJCAI-07
+
+945
+
+mization we give a brief overview of Gaussian processes and
+Gaussian process regression.
+
+3.1 Gaussian Processes
+
+, Fx2
+
+[Williams, 1999; Rasmussen,
+A Gaussian process (GP)
+2004; Rasmussen and Williams, 2006] is a collection F of
+random variables Fx1
+, ... for which any ﬁnite subset of
+the variables has a joint multivariate Gaussian distribution.
+The variables are indexed by elements x of a set X . For any ﬁ-
+nite length vector of indices x = [x1, x2, ..., xn]T
+, we have a
+corresponding vector F x = [Fx1
+, ..., Fxn ]T
+of variables
+that has a multivariate Gaussian (or normal) distribution,
+
+, Fx2
+
+F x ∼ N {μ(x), k(x, x)} ,
+
+(1)
+
+where the elements of μ(x) are given by a prior mean func-
+tion μ(xi), and k is the kernel function. The kernel takes two
+indices xi and xj , and gives the covariance between their cor-
+responding variables Fxi and Fxj . Given vectors of indices
+xi and xj, k returns the matrix of covariances between all
+pairs of variables where the ﬁrst in the pair comes from Fxi
+and the second from Fxj . Note that each Fxi is marginally
+Gaussian, with mean μ(xi) and variance k(xi, xi).
+
+3.2 Gaussian Process Regression
+Suppose we have a function f (x) that we would like to op-
+timize. Further, suppose that we cannot observe f directly,
+but that we can observe a random variable Fx that is indexed
+by the same domain as f and whose expected value is f , i.e.,
+∀x ∈ X , E[Fx] = f (x). In particular, we assume that our
+prior belief about the function f conforms to a Gaussian pro-
+cess with prior mean μ and kernel k, as described above. Sup-
+pose that Fx is an observation of f (x) that has been corrupted
+by zero-mean, i.i.d. Gaussian noise, i.e., Fx = f (x) + ,
+where  ∼ N (0, σ2
+ ). Hence, f (x) is a hidden variable whose
+posterior distribution we can infer after observing samples of
+Fx at various locations in the domain. The resulting inference
+is called Gaussian process regression.
+
+Let x be the set of observations points and Fx be the result-
+ing real-valued observations. We want to compute the poste-
+rior distribution of some new point ˆx ∈ X . The distribution
+will be Gaussian with mean and variance,
+
+μ(ˆx|x) = μ(ˆx) + k(ˆx, x)k(x, x)−1
+(ˆx|x) = k(ˆx, ˆx) − k(ˆx, x)k(x, x)−1k(x, ˆx).
+σ2
+
+(Fx − μ(x)) (2)
+(3)
+
+Note that the inverse applies to the kernel matrix of observed
+domain points, and so can be computed once and used to eval-
+uate the posterior at many points in the domain.
+
+Since the problem is to ﬁnd an optimum of the unknown
+function, the ﬁnal step is to compute the optimum of the re-
+sulting posterior mean xR = argmaxˆx∈X μ(ˆx|x). This, in
+general, cannot be computed in closed form, and requires the
+application of some technique for function optimization. Al-
+though not optimal, another technique is to simply return the
+xi from x with the largest observed value Fxi . This has the
+practical side-effect that the technique will not return a point
+that has never been evaluated, adding some protection from
+an incorrect prior.
+
+3.3 Observation Selection
+Given a Gaussian process model and a set of observations we
+have shown how to incorporate the observations to create the
+function posterior and then ﬁnd the expected optimum. The
+remaining challenge, then, is to decide for which points xi
+to receive observations. This is, in fact, a sequential decision
+making task, as each observation gives additional information
+that can be used when selecting future points.
+
+Optimal Selection. Assume we have a ﬁxed horizon, i.e.,
+a limited number of remaining observations, the optimal ac-
+tion given our model can theoretically be computed. This re-
+quires considering all possible points in the domain, all possi-
+ble real-valued outcomes of this function evaluation, and then
+taking expectations and maximizations for all possible future
+observation sequences out to the the horizon. We then make
+the next observation at the point which maximizes the even-
+tual posterior maximum assuming future optimal decisions.
+This enumeration for exploration is discussed in our previ-
+ous work [Wang et al., 2005], but in domains with signiﬁcant
+size, it is impractical. Instead, we will focus on myopic search
+strategies.
+
+Most Probable Improvement. Consider our proposal to
+return the domain point with the largest observed value. If we
+want to maximize the largest observed value, one approach
+would be to search for points that are likely to be better than
+our current best observation. Let Fx+ be the maximum ob-
+served value. Choose xmpi
+to maximize the posterior proba-
+bility P (Fxmpi > Fx+ ). We call this the most probable im-
+provement (MPI) criterion.
+
+Computing the posterior probability of improvement at a
+point ˆx in the domain is a simple computation since the pos-
+terior distribution of Fˆx is Gaussian as given in Equations 2
+and 3. Finding the point xmpi
+then requires a search through
+the domain to maximize the probability of improvement. This
+is equivalent to maximizing,
+
+φ(ˆx) = σ(ˆx|x)/(Fx+ − μ(ˆx|x)).
+
+(4)
+
+This criterion for deciding where to evaluate next was sug-
+gested by Mockus [1989]. Fortunately, the posterior mean
+and standard deviation in this ratio are continuous and dif-
+ferentiable functions, so we can apply function optimization
+techniques in the model to ﬁnd xmpi
+
+.
+
+4 Gait Optimization
+Our proposed approach to gait optimization is basically the
+application of the above described Gaussian process opti-
+mization procedure. Like previous approaches, we assume
+that we already have some parameterized walk engine with k
+parameters. In addition, we can empirically take noisy evalu-
+ations of a gait’s velocity (or other feature of the gait). Unlike
+previous approaches, we model the stochastic velocity func-
+tion, f : Rk → R, which maps walk parameters to velocity,
+as a Gaussian process. The exact mean and kernel function
+of the Gaussian process are chosen based on prior domain
+knowledge. We use the most probable improvement selec-
+tion rule to decide which parameters to empirically evaluate
+
+IJCAI-07
+
+946
+
+based on the previous observations. After some number of
+gait evaluations, the parameters that generated the fastest ob-
+served walk are returned.
+
+In place of choosing mutation and crossover rates or initial
+parameters and step sizes, our approach requires the speciﬁ-
+cation of the mean and kernel of the Gaussian process. This
+provides a very natural way to encode domain knowledge, if
+it exists, or one can just use “generic” priors. We ﬁrst describe
+our walk engine and then detail exactly how priors were cho-
+sen for our AIBO experiments.
+
+4.1 Walk Engine
+As discussed earlier, a complete joint trajectory for a gait
+could have thousands of parameters. All gait optimization
+techniques parameterize this walk space using a walk engine.
+For this work, we have used Carnegie Mellon University’s
+Tekkotsu2 software to control the AIBO, which includes a
+walk parameterization (as of release 2.4.1) originating from
+the Carnegie Mellon CMPack 2002 robot soccer team. This
+is an early version of the CMWalk engine used in the work
+by Chernova et al. [2004].
+In consultation with a domain
+expert, we identiﬁed 15 walk parameters along with reason-
+able bounds on each parameter to deﬁne our domain, i.e.,
+X ⊂ R
+
+15
+
+.
+
+4.2 Priors
+Deﬁning the prior for the Gaussian process means deﬁning a
+mean function μ : X → R and kernel function k : X × X →
+R. We also need to specify the variance σ2
+ of the noise that is
+believed to be added to the observation Fx. The priors that we
+use have a very simple form. For the mean, we use a constant
+function μ(x) = μf , which means we have no a priori belief
+about any speciﬁc parameters’ velocities. For the covariance
+function, it is hypothesized that, in general, parameter vec-
+tors that are close in terms of Euclidean distance are likely
+to have similar walk velocities, and therefore a large posi-
+tive covariance. Furthermore, we expect that some parame-
+ters may have wide-reaching consequences, and so parame-
+ters far apart should still have some small positive correlation.
+We therefore chose to use the radial basis function kernel,
+
+k(xi, xj ) = σ2
+
+f · e− 1
+
+(xi−xj)T S(xi−xj ),
+
+2
+
+(5)
+where S is a scaling matrix that has along its diagonal the in-
+verse of the range of each dimension, i.e., the distance from
+one end to the other of one dimension’s range is scaled to
+equal one. We now need to simply choose the constants σ2
+ ,
+μf , and σ2
+f . Setting these to appropriate values depends on
+the feature of the gait to be optimized.
+In Section 5, we
+present results both for optimizing the gait’s velocity and its
+smoothness. So we examine each of these cases in turn.
+
+Prior for Velocity. Gait velocity has been studied relatively
+extensively both on the AIBO and with our particular walk
+In consulting with our domain expert, we easily
+engine.
+solicited useful prior information.
+In particular, we chose
+μf = 0.15 and σ2
+f = 0.066, which correspond to the in-
+tuition, “For some random gait parameters, we expect the
+
+2http://www.tekkotsu.org
+
+observed velocity to be 0.15 meters per second and within
+about 0.2 meters per second 99% of the time.” For observa-
+tion noise, our domain expert was not familiar with our par-
+ticular experimental setup. Instead, we computed the sample
+variance of a small number of observations of one particu-
+lar setting of the walk parameters. This gave us a value of
+σ2
+ = 0.01, which seemed to work well in practice.
+As an interesting test of the stability of our method with
+respect to the model parameters, we also ran the velocity op-
+timization with a prior variance parameter of σ2
+f = 0.66 (ten
+times larger).
+
+Prior for Smoothness. Since smoothness had not been
+evaluated before, we had no domain expert to consult. In-
+stead, we took a small number of samples (about 30) and used
+sample means and variances to estimate the parameters of the
+prior μf = −30, σ2
+ = 2.25. As we will show
+in the next section, even this simple uninformed method for
+specifying the Gaussian process model can be very effective.
+
+f = 100, σ2
+
+4.3
+
+Implementation Details
+
+In order to compute the most probable improvement point as
+described in Section 3.3, we used the generic constrained hill
+climber in MATLAB (fmincon) supplied with the function
+and gradient of φ(ˆx) from Equation 4. We used as default
+starting points the two best parameters found so far, and 13
+drawn uniformly random within the bounded domain for a
+total of 15 starting points.
+In addition, we forced the ﬁrst
+gait evaluation selection by choosing the center point of the
+domain. Since the Gaussian process model starts with a uni-
+form belief over the domain, all function points are equally
+good to the most expected probable rule.
+
+5 Results
+
+We have applied our Gaussian process approach to two gait
+optimization tasks on the Sony AIBO ERS-7. We ﬁrst look
+at the standard problem of maximizing walk velocity, and we
+also examine the problem of optimizing a gait’s smoothness.
+The goal of any gait optimization technique is to ﬁnd a near-
+optimal gait in as few evaluations as possible. Therefore,
+we’ll want to compare techniques using this criterion.
+
+Since previous gait learning has not involved the same walk
+engine, experimental setup, or robots, comparing directly
+with previously reported results can be somewhat problem-
+atic. For a more direct comparison, we have implemented the
+hill climbing method of Kohl and Stone [2004] as described
+in Section 2.2 and applied it in identical circumstances as our
+approach. The Kohl and Stone algorithm is the most data efﬁ-
+cient technique for the AIBO from the literature, demonstrat-
+ing effective walks with only nine robot-hours of training. We
+replicated their experimental setup, using 15 random evalua-
+tions to approximate the gradient at each “iteration” and using
+a step size of 2. The empirical epsilon used in estimating the
+gradient was 1/15 of the parameters’ range, which seemed to
+be an adequate change in performance. As with the Gaussian
+process model, we started the hill climber from the point in
+the center of the space.
+
+IJCAI-07
+
+947
+
+5.1 Physical Setup
+
+To evaluate each parameter choice, we had the robot walk be-
+tween two visual landmarks while focusing the head on the
+center of the landmark. The robot determined its distance
+from a landmark as it walked toward it based on the land-
+mark’s apparent width in the camera’s ﬁeld of view, and that
+change is used to estimate velocity. To determine a gait’s
+smoothness, we measured the time-averaged distance from
+the center of the landmark to the center of the robot’s ﬁeld
+of view, and negated this. Unstable walks that result in a
+large amount of head movement yield negative smoothness
+values, since it is difﬁcult for the robot to keep the head and
+the camera aimed at the target. More ﬂuid walks allow the
+robot to aim the camera more directly at the target, resulting
+in a smoothness much nearer to zero.
+
+Each observed measurement is the result of three “traver-
+sals” from one landmark to the other. The average time for
+three traversals, including time to turn around, was approx-
+imately one minute. This was chosen to be consistent with
+Kohl and Stone’s hill climbing experiments. We could have
+easily only used a single traversal and compensated by in-
+creasing the observation variance used in the model.
+
+5.2 Gait Velocity
+
+A graph showing the result of 321 observations is shown in
+Figure 1(a). We chose this number of observations a priori
+to allow the hill climber 20 “steps” or iterations with 15 test
+points for each. Both our Gaussian process technique and the
+Kohl and Stone hill climbing technique are shown, as well as
+the simple baseline of choosing gaits uniformly at random.
+The solid lines represent the maximum achieved walk speed
+over the accumulating observations, and the corresponding
+isolated markers show the maximum velocity achieved over
+the most recent 15 observations.
+
+We found that both the Gaussian process and hill climbing
+methods performed appreciably better than random evalua-
+tions. The best walk velocity found was 0.285 m/s, which
+was found by the Gaussian process with the over-estimated
+prior variance, σ2
+f = 0.66, although the walk found by the
+Gaussian process with the “sensibly” initialized variance is
+nearly as fast. Despite having already warned of the difﬁcul-
+ties in comparing walk speeds, note that this speed is com-
+parable to other learned gaits. More impressively, though, is
+the fact this speed was attained after only 120 observations,
+which took approximately two robot-hours. This is nearly a
+ﬁve-fold improvement in the required number of robot-hours3
+It is interesting that the best walks found by the two Gaus-
+sian process models are in widely separated parts of the space.
+The walk found by the sensible setting of σ2
+f = 0.066 has a
+low period and shorter stride, with a parameter vector far from
+the center of the space. On the other hand, the experiment at
+σ2
+f = 0.66 found a similarly fast walk near the center of the
+space with longer, slower strides that cover a similar distance.
+
+3Although the work of Kohl and Stone used multiple AIBOs in
+parallel to reduce their total time to three hours, our approach could
+also easily beneﬁt by evaluating multiple sample points simultane-
+ously.
+
+Although the results of the hill climbing approach were not
+poor, we were somewhat surprised that the performance was
+not better. The method tended to take very poor steps once
+it reached a value of about 0.230 m/s. There are two natu-
+ral explanations. One may simply be local optima, which is
+in line with Kohl and Stone’s noted importance of the initial
+parameter vector. Alternatively, based on the frequency of
+taking poor gradient steps, the step size may have been too
+large along certain dimensions. Random restarts and a vari-
+able step size for each dimension could mitigate these unim-
+pressive results.
+
+5.3 Gait Smoothness
+
+A similar graph for gait smoothness is shown in Figure 1(b).
+The Gaussian process optimization found the smoothest walk
+of all three methods and did so within the ﬁrst 20 observa-
+tions, or only twenty minutes of robot time. Later improve-
+ment was only incremental. In a post-mortem analysis, the
+gait smoothness task is apparently much simpler. The impact
+of parameters on our measure of smoothness ended up be-
+ing quite simple as a wide range of walks with a short period
+(below about 310 ms) and a moderate requested walk speed
+(between 210 and 240 m/s) resulted in a smooth gait mea-
+surement. Scores of such walks were typically greater than
+-10. Due to the independence of this pair of parameters from
+the rest, it is not unlikely that even random search would ﬁnd
+a smooth gait as choosing parameters in this range will occur
+on average every 250 gait evaluations. Our random search
+trial did happen to ﬁnd one such point, giving it a moderate
+win over the hill climbing technique. Again, we suspect the
+unimpressive hill climbing result to be due to initial condi-
+tions and local maxima.
+
+6 Conclusion
+
+We proposed a new approach to gait learning based on Gaus-
+sian process optimization. The approach overcomes many
+drawbacks of previous techniques, effectively avoiding local
+optima, efﬁciently using all gait evaluations, and explicitly
+modelling noisy observations. Even with all of the caveats
+associated with comparing gait velocities and training time,
+we have demonstrated that the approach is not only effec-
+tive in our high dimensional, noisy, non-convex, optimization
+problem, but also requires drastically fewer evaluations. This
+was also accomplished with a minimum of parameter tun-
+ing, demonstrating effective performance when using prior
+settings from a domain expert, incorrect settings, and even
+data derived settings.
+
+There are three main directions we still feel should be ex-
+plored from this point. First, our model is quite simple in
+comparison to Gaussian process models in the recent ma-
+chine learning literature. Many interesting innovations in-
+volving kernel optimization, hyper-parameter models, and di-
+mensionality reduction seem well suited to this problem and
+are worth investigating. It would also be compelling to build
+models that incorporate knowledge from previous gait op-
+timization runs with similar robots or surfaces. Second, it
+would be interesting to explore how knowledge of an imposed
+budget on the number of samples or compute time could be
+
+IJCAI-07
+
+948
+
+0.3
+
+0.25
+
+0.2
+
+)
+s
+/
+m
+
+(
+ 
+y
+t
+i
+c
+o
+e
+V
+
+l
+
+0.15
+0
+
+50
+
+100
+
+150
+
+200
+
+Observations
+
+0
+
+−5
+
+−10
+
+−15
+
+−20
+
+−25
+
+s
+s
+e
+n
+h
+o
+o
+m
+S
+
+t
+
+250
+
+300
+
+−30
+0
+
+50
+
+100
+
+150
+
+200
+
+Observations
+
+250
+
+300
+
+(•) GP w/MPI
+
+(∗) GP w/MPI
+
+(×) H.Clmb
+
+0.281 m/s
+f = 0.06
+
+2
+
+σ
+
+0.285 m/s
+f = 0.6
+
+σ
+
+2
+
+0.248 m/s
+
+(a)
+
+(◦) U.Rand
+0.230 m/s
+
+(∗) GP w/MPI
+
+(×) H.Clmb
+
+(◦) U.Rand
+
+-4.53
+
+-9.80
+
+-7.07
+
+(b)
+
+Figure 1: Results for (a) gait velocity and (b) gait smoothness. Solid lines represent cumulative maximum, and the small
+markers indicate the maximum observation from the last 15 observations.
+
+efﬁciently incorporated into this approach. Third, because of
+the generality of the method, it could also easily be applied in
+other application areas. We are currently investigating its use
+in the problem of “graph-cut stereo matching” [Kolmogorov,
+2004], which has a number of continuous parameters that
+must be tuned. Initial reports from our colleagues in vision
+are that Gaussian process regression with the most probable
+improvement rule is also working very well on this problem.
+
+Acknowledgments
+
+We would like to sincerely thank our domain expert So-
+nia Chernova, and our team of programmers: Nelson Loy-
+ola, Eric Coulthard, Wesley Loh, James Neufeld, and Sam
+Vincent. This research is supported by Alberta Ingenuity,
+iCORE, and NSERC. Daniel Lizotte is supported by the
+Killam Trusts.
+
+References
+
+[Chernova and Veloso, 2004] Sonia Chernova and Manuela
+Veloso. An evolutionary approach to gait learning for four-
+legged robots. In Intelligent Robots and Systems, 2004.
+
+[Hornby et al., 1999] G. S. Hornby, M. Fujita, S. Takamura,
+T. Yamamoto, and O. Hanagata. Autonomous evolution of
+gaits with the Sony quadruped robot. In Proceedings of the
+Genetic and Evolutionary Computation Conference, pages
+1297–1304, 1999.
+
+[Hornby et al., 2000] G. Hornby, S. Takamura, J. Yokono,
+O. Hanagata, T. Yamamoto, and M. Fujita. Evolving ro-
+bust gaits with AIBO. In IEEE International Conference
+on Robotics and Automation, pages 3040–3045, 2000.
+
+[Kim and Uther, 2003] M. S. Kim and W. Uther. Automatic
+In Australasian
+
+gait optimisation for quadruped robots.
+Conference on Robotics and Automation, 2003.
+
+[Kohl and Stone, 2004] Nate Kohl and Peter Stone. Ma-
+chine learning for fast quadrupedal locomotion.
+In The
+Nineteenth National Conference on Artiﬁcial Intelligence,
+pages 611–616, July 2004.
+
+[Kolmogorov, 2004] Vladimir Kolmogorov. Graph Based
+Algorithms for Scene Reconstruction From Two or More
+Views. PhD thesis, Cornell University, January 2004.
+
+[Mockus, 1989] Jonas Mockus.
+
+Bayesian Approach to
+Global Optimization. Kluwer Academic Publishers, The
+Netherlands, 1989.
+
+[Press et al., 1992] William H. Press, Saul A. Teukolsky,
+William T. Vetterling, and Brian P. Flannery. Numerical
+Recipes in C: The Art of Scientiﬁc Computing. Cambridge
+University Press, New York, NY, USA, 1992.
+
+[Rasmussen and Williams, 2006] Carl Edward Rasmussen
+and Christopher K. I. Williams. Gaussian Processes for
+Machine Learning. MIT Press, 2006.
+
+[Rasmussen, 2004] C. E. Rasmussen. Advanced Lectures
+in Machine Learning: ML Summer Schools 2003, chap-
+ter Gaussian Processes in Machine Learning. Springer-
+Verlag, 2004.
+
+[Wang et al., 2005] Tao Wang, Daniel Lizotte, Michael
+Bowling, and Dale Schuurmans. Bayesian sparse sampling
+for on-line reward optimization.
+In ICML 2005, Bonn,
+2005.
+
+[Williams, 1999] C. Williams. Prediction with Gaussian pro-
+
+cesses. In Learning in Graphical Models. MIT, 1999.
+
+IJCAI-07
+
+949
+
+

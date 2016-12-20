@@ -1,0 +1,1118 @@
+Compiling Bayesian Networks by Symbolic Probability Calculation
+
+Based on Zero-suppressed BDDs
+
+Shin-ichi Minato
+
+Ken Satoh
+
+Taisuke Sato
+
+Div. of Computer Science
+
+National Institute of Informatics
+
+Dept. of Computer Science
+
+Hokkaido University
+
+Sokendai
+
+Tokyo Institute of Technology
+
+Sapporo 060–0814, Japan
+
+Tokyo 101–8430, Japan
+
+Tokyo 152–8552, Japan
+
+Abstract
+
+Compiling Bayesian networks (BNs) is a hot topic
+within probabilistic modeling and processing.
+In
+this paper, we propose a new method for compiling
+BNs into Multi-Linear Functions (MLFs) based on
+Zero-suppressed Binary Decision Diagrams (ZB-
+DDs), which are a graph-based representation of
+combinatorial item sets. Our method differs from
+the original approach of Darwiche et al., which en-
+codes BNs into Conjunctive Normal Forms (CNFs)
+and then translates CNFs into factored MLFs. Our
+approach directly translates a BN into a set of fac-
+tored MLFs using a ZBDD-based symbolic proba-
+bility calculation. The MLF may have exponential
+computational complexity, but our ZBDD-based
+data structure provides a compact factored form
+of the MLF, and arithmetic operations can be ex-
+ecuted in a time almost linear with the ZBDD size.
+In our method, it is not necessary to generate the
+MLF for the whole network, as we can extract
+MLFs for only part of the network related to the
+query, avoiding unnecessary calculation of redun-
+dant MLF terms. We present experimental results
+for some typical benchmark examples. Although
+our algorithm is simply based on the mathematical
+deﬁnition of probability calculation, performance is
+competitive to existing state-of-the-art methods.
+
+1 Introduction
+Compiling Bayesian Networks (BNs) is a hot topic within
+probabilistic modeling and processing. Recently, data struc-
+tures of decision diagrams[9; 4; 5; 6; 2; 10] were effectively
+used for accelerating probability computations for BNs. Dar-
+wiche et al.[6; 2] have shown an efﬁcient method for com-
+piling BNs into factored forms of Multi-Linear Functions
+(MLFs), whose evaluation and differentiation solves the ex-
+act inference problem. In their method, at ﬁrst a given BN
+structure is encoded to a Conjunctive Normal Form (CNF) to
+be processed in the Boolean domain, and then the CNFs are
+factored according to Boolean algebra. The compilation pro-
+cedure generates a kind of decision diagram representing a
+compact Arithmetic Circuit (AC) with symbolic parameters.
+In this paper, we propose a new method of compiling BNs
+into factored MLFs based on Zero-suppressed Binary Deci-
+sion Diagrams (ZBDDs)[7], which are the graph-based rep-
+resentation ﬁrst used for VLSI logic design applications. Our
+method is based on a similar MLF modeling with symbolic
+parameters as well as Darwiche’s approach. However, our
+
+method does not use the CNF representation but directly
+translates a BN into a set of factored MLFs. Our ZBDD
+manipulator can generate a new ZBDD as the result of addi-
+tion/multiplication operations between pairs of ZBDDs. Us-
+ing such inter-ZBDD operations in a bottom-up manner ac-
+cording to the BN structure, we can produce a set of ZBDDs
+each of which represents the MLF of each BN node. An im-
+portant property of our method is that the total product of the
+ZBDDs for all BN nodes corresponds to the factored MLF,
+which is basically equivalent to Darwiche’s result. Addition-
+ally, in our method it is not necessary to calculate the MLF
+for the whole network, as we can extract MLFs for only the
+part of the network related to the query, to avoid unnecessary
+calculation of redundant terms in the MLFs.
+
+In this paper, we show experimental results for some typ-
+ical benchmark examples. Although our algorithm is simply
+based on the mathematical deﬁnition of probability calcula-
+tions, performance is competitive to existing state-of-the-art
+methods.
+
+Our ZBDD-based method can also be compared with re-
+cent work by Sanner and McAllester[10], computing BN
+probabilities using Afﬁne Algebraic DDs (AADDs). Their
+method generates AADDs as the result of inter-AADD oper-
+ations for a given BN and an inference query. This is a similar
+approach to ours, but the semantics of the decision diagrams
+are quite different. We will discuss this difference in a later
+section.
+
+We describe the basic concept of BN compilation and ex-
+isting methods in Section 2. We then describe the ZBDD data
+structure for representing MLFs in Section 3. In Section 4, we
+describe the procedure of ZBDD generation and online infer-
+ence. Experimental results are given in Section 5, followed
+by the conclusion.
+
+2 Preliminary
+
+Here we brieﬂy review the method for compiling BNs.
+
+2.1 Bayesian networks and MLFs
+
+A Bayesian network (BN) is a directed acyclic graph. Each
+BN node has a network variable X whose domain is a discrete
+set of values. Each BN node also has a Conditional Proba-
+bility Table (CPT) to describe the conditional probabilities of
+the value of X given the values of the parent nodes of the par-
+ent BN nodes. Figure 1 shows a small example of a BN with
+its CPTs.
+
+A Multi-Linear Function (MLF)[5] consists of two types of
+variables, an indicator variable λx for each value X = x, and
+a parameter variable θx|u for each CPT parameter Prb(x|u).
+
+IJCAI-07
+
+2550
+
+A
+a1
+a2
+A B
+a1b1
+a1b2
+a2b1
+a2b2
+A C
+a1c1
+a1c2
+a2c1
+a2c2
+
+Prb(A)
+= 0.4
+θa1
+= 0.6
+θa2
+Prb(B|A)
+= 0.2
+θb1|a1
+= 0.8
+θb2|a1
+= 0.8
+θb1|a2
+= 0.2
+θb2|a2
+Prb(C|A)
+= 0.5
+θc1|a1
+= 0.5
+θc2|a1
+= 0.5
+θc1|a2
+= 0.5
+θc2|a2
+
+B C D Prb(D|B, C)
+= 0.0
+b1c1d1
+= 0.5
+b1c1d2
+= 0.5
+b1c1d3
+= 0.2
+b1c2d1
+= 0.3
+b1c2d2
+= 0.5
+b1c2d3
+= 0.0
+b2c1d1
+= 0.0
+b2c1d2
+= 1.0
+b2c1d3
+= 0.2
+b2c2d1
+= 0.3
+b2c2d2
+= 0.5
+b2c2d3
+
+θd1|b1c1
+θd2|b1c1
+θd3|b1c1
+θd1|b1c2
+θd2|b1c2
+θd3|b1c2
+θd1|b2c1
+θd2|b2c1
+θd3|b2c1
+θd1|b2c2
+θd2|b2c2
+θd3|b2c2
+
+Figure 1: An example Bayesian network.
+
+The MLF contains a term for each instantiation of the BN
+variables, and the term is the product of all indicators and
+parameters that are consistent with the instantiation. For the
+example in Fig. 1, the MLF has the following forms:
+
+λa1
++ λa1
++ λa1
++ λa1
++ . . .
++ λa2
+
+λb1
+λb1
+λb1
+λb1
+
+λc1
+λc1
+λc1
+λc2
+
+λd1
+λd2
+λd3
+λd1
+
+θa1
+θa1
+θa1
+θa1
+
+θb1|a1
+θb1|a1
+θb1|a1
+θb1|a1
+
+θc1|a1
+θc1|a1
+θc1|a1
+θc2|a1
+
+θd1|b1c1
+θd2|b1c1
+θd3|b1c1
+θd3|b1c2
+
+λb2
+
+λc2
+
+λd3
+
+θa2
+
+θb2|a2
+
+θc2|a2
+
+θd3|b2c2
+
+.
+
+Once we have generated the MLF for a given BN, the prob-
+ability of evidence e can be calculated by setting indicators
+that contradict e to 0 and other indicators to 1. Namely, we
+can calculate the probability in a linear time to the size of
+MLF. Obviously, the MLF has an exponential time and space
+complexity. The MLF can be factored into an Arithmetic Cir-
+cuit (AC) whose size may not be exponential. If we can gen-
+erate a compact AC for a given BN, the probability calcula-
+tion can be greatly accelerated. This means compiling BNs
+based on MLFs.
+
+2.2 Compiling BNs based on CNFs
+Darwiche et al.[6] have found an efﬁcient method for gener-
+ating compact ACs without processing an exponential sized
+MLF. In their method, at ﬁrst a given BN structure is encoded
+to a Conjunctive Normal Form (CNF) to be processed in the
+Boolean domain. The CNF is factored based on Boolean al-
+gebra, and a kind of decision diagram is obtained. The re-
+sulting diagram has a special property called smooth deter-
+ministic Decomposable Negational Normal Form (smooth d-
+DNNF)[4], so it can be directly converted to the AC for prob-
+ability calculations.
+
+In addition, the following two techniques are used in vari-
+
+able encoding:
+
+• If a parameter is deterministic (θx|u
+
+= 1 or 0), we do
+
+F 1 = a ∧ b
+F 2 = a ⊕ b
+F 3 = b
+F 4 = a ∨ b
+
+Figure 2: Shared multiple BDDs.
+
+not assign a corresponding parameter variable and just
+reduce the CNF.
+
+• Different parameter variables related to the same BN
+node do not coexist in the same term of the MLF. There-
+fore, if a CPT contains a number of parameters with the
+same probability, we do not have to distinguish them
+and may assign only one parameter variable to repre-
+sent all those CPT parameters. This technique some-
+times greatly reduces the size of the CNF.
+
+Darwiche reported that their method succeeded in compil-
+ing large-scale benchmark networks, such as “pathﬁnder” and
+“Diabetes,” with a practical usage of computational time and
+space. The BN compilation method is a hot topic in proba-
+bilistic modeling and inference for practical problems.
+
+3 Zero-suppressed BDDs
+In this paper, we present a new method of manipulating MLFs
+using Zero-suppressed Binary Decision Diagrams (ZBDDs).
+Here we describe our data structure.
+
+3.1 ZBDDs and combinatorial item sets
+A Reduced Ordered Binary Decision Diagram (ROBDD)[1]
+is a compact graph representation of the Boolean function.
+It is derived by reducing a binary tree graph representing
+the recursive Shannon expansion. ROBDDs provide canon-
+ical forms for Boolean functions when the variable order is
+ﬁxed.
+(In the following sections, we basically omit “RO”
+from BDDs.) As shown in Fig. 2, a set of multiple BDDs
+can be shared with each other under the same ﬁxed variable
+ordering. In this way, we can handle a number of Boolean
+functions simultaneously in a monolithic memory space.
+
+A conventional BDD package supports a set of basic logic
+operations (i.e., AND, OR, XOR) for given a pair of operand
+BDDs. Those operation algorithms are based on hash table
+techniques, and the computation time is almost linear with
+data size unless the data overﬂows main memory. By using
+those inter-BDD operations, we can generate BDDs for given
+Boolean expressions or logic circuits.
+
+BDDs were originally developed for handling Boolean
+function data, however, they can also be used for implicit rep-
+resentation of combinatorial item sets. A combinatorial item
+set consists of elements each of which is a combination of a
+number of items. There are 2n
+combinations chosen from n
+items, so we have 22n
+variations of combinatorial item sets.
+For example, for a domain of ﬁve items a, b, c, d, and e, ex-
+amples of combinatorial item sets are:
+
+{ab, e}, {abc, cde, bd, acde, e}, {1, cd}, ∅.
+
+Here “1” denotes a combination of no items, and ∅ means an
+empty set. Combinatorial item sets are one of the basic data
+structures for various problems in computer science.
+
+IJCAI-07
+
+2551
+
+“∅”
+“1”
+
+P .top
+P .factor0(v)
+
+the
+
+set with
+
+Returns empty set. (0-terminal node)
+Returns
+combination. (1-terminal node)
+Returns the item-ID at the root node of P .
+Subset of combinations not
+including
+item v.
+
+null-
+
+the
+
+Table 1: Primitive ZBDD operations.
+
+P .factor1(v) Gets P − P .factor0(v) and then deletes v
+
+Figure 3: A Boolean function and a combinatorial item set.
+
+Figure 4: An example of
+a ZBDD.
+
+Figure 5: ZBDD reduction rule.
+
+A combinatorial item set can be mapped into Boolean
+space of n input variables. For example, Fig. 3 shows the
+truth table of the Boolean function F = (a b c) ∨ (b c), but
+also represents the combinatorial item set S = {ab, ac, c},
+which is the set of input combinations for which F is 1. Us-
+ing BDDs for the corresponding Boolean functions, we can
+implicitly represent and manipulate combinatorial item sets.
+Zero-suppressed BDD (ZBDD)[7] is a variant of BDDs for
+efﬁcient manipulation of combinatorial item sets. An exam-
+ple of a ZBDD is shown in Fig. 4. ZBDDs are based on the
+following special reduction rules.
+
+• Delete all nodes whose 1-edge directly points to a 0-
+terminal node, and jump through to the 0-edge’s desti-
+nation, as shown in Fig. 5.
+
+• Share equivalent nodes as well as ordinary BDDs.
+
+The zero-suppressed deletion rule is asymmetric for the two
+edges, as we do not delete the nodes whose 0-edge points to
+a terminal node. It has been proved that ZBDDs also give
+canonical forms as well as ordinary BDDs under a ﬁxed vari-
+able ordering. Here we summarize the properties of ZBDDs.
+• Nodes of irrelevant items (never chosen in any combina-
+tion) are automatically deleted by ZBDD reduction rule.
+• Each path from the root node to the 1-terminal node cor-
+responds to each combination in the set. Namely, the
+number of such paths in the ZBDD equals the number
+of combinations in the set.
+
+• When many similar ZBDDs are generated, their ZBDD
+nodes are effectively shared into a monolithic multi-
+rooted graph, so the memory requirement is much less
+than storing each ZBDD separately.
+
+Table 1 shows most of the primitive operations of ZBDDs.
+In these operations, ∅, 1, P .top are executed in a constant
+time, and the others are almost linear to the size of the graph.
+We can describe various processing on sets of combinations
+by composing these primitive operations.
+
+P .attach(v)
+P ∪ Q
+P ∩ Q
+P − Q
+P .count
+
+from each combination.
+Attaches v to all combinations in P .
+Returns union of P and Q.
+Returns intersection of P and Q.
+Returns difference sets. (in P but not in Q.)
+Counts the number of combinations.
+
+3.2 MLF representation using ZBDDs
+
+An MLF is a polynomial formula of indicator and parameter
+variables. It can be regarded as a combinatorial item set, since
+each term is simply a combination of variables. For example,
+the MLF at Node B in Fig. 1 can be written as follows:
+
+MLF(B) = λa1
++ λa2
+
+λb1
+λb1
+
+θa1
+θa2
+
+θb1|a1
+θb1|a2
+
++ λa1
++ λa2
+
+λb2
+λb2
+
+θa1
+θa2
+
+θb2|a1
+θb2|a2
+
+.
+
+Here, we rename the parameter variables so that equal param-
+eters share the same variable.
+MLF(B) = λa1
++ λa2
+
+θa(0.4)θb(0.2) + λa1
+θa(0.6)θb(0.8) + λa2
+
+θa(0.4)θb(0.8)
+θa(0.6)θb(0.2).
+
+λb1
+λb1
+
+λb2
+λb2
+
+An example of the ZBDD for MLF(B) is shown in Fig. 6. In
+this example, there are four paths from the root node to the
+1-terminal node, each of which corresponds to a term of the
+MLF. It is an implicit representation of the MLF. At the same
+time, the structure of ZBDD also represents a compact fac-
+tored form of MLF. As shown in Fig. 7, each ZBDD decision
+node can be interpreted as a few AC nodes with the simple
+mapping rule. This means that a compact AC is quite easily
+obtained after generating a ZBDD for an MLF.
+
+Our ZBDD representation for an MLF has the important
+property of being basically equivalent to a smooth d-DNNF,
+obtained by Darwiche’s CNF-based method[6; 2]. In the fol-
+lowing sections, we show our new method for generating ACs
+without CNFs but only using ZBDD operations.
+
+3.3 Comparison with AADDs
+Sanner and McAllester[10] presented Afﬁne Algebraic Deci-
+sion Diagrams (AADDs), another variant of a decision di-
+agram, for computing BN probabilities. An AADD is a
+factored form of ADD, which contains indicator variables
+for splitting conditions, and the results of respective condi-
+tional probabilities are written in the leaves of the graph.
+This is somewhat similar to our approach since they gener-
+ate AADDs as the result of algebraic operations of AADDs.
+The greatest difference to our method is that they numerically
+calculate the probability values with a ﬂoating-point data for-
+mat, not by using symbolic probability parameters as in our
+MLFs. It is an interesting open problem whether it is more ef-
+ﬁcient to handle probabilities in symbolic or numerical form.
+It may well depend on the probability value instances for the
+speciﬁc problem at hand.
+
+IJCAI-07
+
+2552
+
+Figure 6: An example of a ZBDD for the MLF(B).
+
+Figure 7: Mapping from a ZBDD node to an AC node.
+
+4 ZBDD-based MLF calculation
+
+4.1 ZBDD construction procedure
+BDDs were originally developed for VLSI logic circuit
+design[1], and the basic technique of BDD construction is
+shown in Fig. 8. First we make trivial BDDs for the primary
+inputs F1 and F2, and then we apply the inter-BDD logic op-
+erations according to the data ﬂow, to generate BDDs for F3
+to F7. After that, all BDDs are shared in a monolithic multi-
+rooted graph. This procedure is called symbolic simulation
+for the logic circuit.
+
+Our ZBDD construction procedure for the MLF is similar
+to the symbolic simulation of logic circuits. The differences
+are:
+
+• BNs do not only assume binary values. The MLF uses
+
+multiple variables at each node for respective values.
+
+• The BN node is not a logic gate. The dependence of
+
+each node on its ancestors is speciﬁed by a CPT.
+
+As shown in Fig. 9, we ﬁrst make MLF(A), and then we gen-
+erate MLF(B) and MLF(C) using MLF(A). Finally, we gen-
+erate MLF(D) using MLF(B) and MLF(C). After the con-
+struction procedure, all MLFs for respective nodes are com-
+pactly represented by the shared ZBDDs.
+
+For each BN node X, the MLF is calculated by the follow-
+
+ing operations using the MLFs at the parent nodes of X.
+
+(cid:2)
+
+(cid:3)
+
+(cid:4)
+
+(cid:5)
+MLF(Yv)
+
+MLF(Xi) = λxi
+
+·
+
+θx(Pu) ·
+
+u∈CPT(X)
+
+Yv ∈u
+
+Figure 8: Conventional BDD construction procedure.
+
+Figure 9: ZBDD construction procedure for BN.
+
+(cid:6)
+
+Here MLF(Xi) denotes the value of MLF for the node X
+i MLF(Xi).
+when X has the value xi. Namely, MLF(X) =
+When calculating this expression using ZBDD operations,
+we have to be mindful of the differences between conven-
+tional arithmetic algebra and combinatorial set algebra. In-
+stead of the usual arithmetic sum, we may use union oper-
+ations to perform the sum of MLFs, because MLFs cannot
+contain the same term more than once. We need to be more
+careful for the product operation. The product of two MLFs
+produces all possible combinations of two terms from the re-
+spective MLFs. However, no term can contain the same vari-
+able more than once, so instead of x2
+for duplicate variables,
+simply x will appear in the result. In addition, λxi and λxj
+(variables representing different values of the same node vari-
+able) cannot coexist in the same term as they are mutually
+exclusive.
+
+4.2 Multi-valued multiplication algorithm
+
+The multiplication algorithm is a key technique in our com-
+piling method. The conventional algorithm for the product of
+two ZBDDs was developed by Minato[8]. A sketch of this
+algorithm is shown in Fig. 10. This algorithm is based on a
+divide-and-conquer approach, with two recursive calls for the
+subgraphs obtained by assigning 0 and 1 to the top variable.
+It also uses a hash-based cache technique to avoid duplicated
+recursive calls. The computation cost is almost linear with
+the ZBDD size.
+
+Unfortunately, the conventional algorithm does not con-
+sider multi-valued variable encoding, so the result of ZBDD
+may contain redundant terms, such as the coexistence of both
+λxi and λxj . While such redundant MLFs are still correct
+
+IJCAI-07
+
+2553
+
+procedure(F · G)
+{ if (F.top < G.top) return (G · F ) ;
+
+if (G = ∅) return ∅ ;
+if (G = 1) return F ;
+H ← cache(“F · G”) ;
+if (H exists) return H ;
+v ← F.top ; /* the highest item in F */
+(F0, F1) ← factors of F by v ;
+(G0, G1) ← factors of G by v ;
+H ← ((F1 · G1) ∪ (F1 · G0) ∪ (F0 · G1)).attach(v)
+
+∪(F0 · G0) ;
+
+cache(“F · G”) ← H ;
+return H ;
+
+}
+
+Figure 10: Conventional multiplication algorithm.
+
+procedure(F · G)
+{ if (F.top < G.top) return (G · F ) ;
+
+if (G = ∅) return ∅ ;
+if (G = 1) return F ;
+H ← cache(“F · G”) ;
+if (H exists) return H ;
+v ← F.top ; /* the highest item in F */
+(F0, F1) ← factors of F by v ;
+(G0, G1) ← factors of G by v ;
+FZ ← F0 ; GZ ← G0 ;
+while(FZ .top and v conﬂict) FZ ← FZ .factor0(FZ .top) ;
+while(GZ .top and v conﬂict) GZ ← GZ .factor0(GZ .top) ;
+H ← ((F1 · G1) ∪ (F1 · GZ ) ∪ (FZ · G1)).attach(v)
+
+∪(F0 · G0) ;
+
+cache(“F · G”) ← H ;
+return H ;
+
+}
+
+Figure 11: Improved multiplication algorithm.
+
+expressions for probability calculation, such redundant terms
+increase the computation time unnecessarily. For example,
+we analyzed our MLF construction for a BN in the bench-
+mark set. It is a typical case that we have the two ZBDDs
+F and G, each of which has about 1,000 decision nodes, and
+the product (F · G) grows to have as many as 200,000 nodes
+of ZBDD, but can be reduced to only 400 nodes after elimi-
+nating redundant terms. To address this problem, we imple-
+mented an improved multiplication algorithm devoted to the
+multi-valued variable encoding. Figure 11 shows a sketch of
+the new algorithm. Here we assume that the indicator vari-
+ables for the same BN node have consecutive positions in
+the ZBDD variable ordering. This algorithm does not pro-
+duce any additional redundant terms in the recursive proce-
+dure, and we can calculate MLFs without any overhead due
+to multi-valued encoding.
+
+4.3 Online inference based on ZBDDs
+After the compilation procedure, each BN node has its own
+ZBDD for the MLF. The MLF(X) for node X contains only
+the variables of X’s ancestor nodes, since no other variable is
+relevant to X’s value.
+
+Here we describe the online inference method based on
+ZBDDs. To obtain the joint probability for evidence e, we
+ﬁrst compute the product of MLF(Xv) for all Xv ∈ e by the
+ZBDD multiplication operation. Contradicting terms are au-
+tomatically eliminated by our multiplication algorithm, so the
+result of ZBDD contains only the variables related to the joint
+probability computation. We then set all indicators to 1 and
+
+calculate the AC directly from the ZBDD.
+
+For example, to compute Prb(b1, c2) for the BN of Fig. 1,
+
+λb1
+λc2
+
+the two MLFs are the follows:
+MLF(B1) = λa1
+MLF(C2) = λa1
+and then
+MLF(B1) · MLF(C2) = λa1
++λa2
+
+θa(0.4)θb(0.2) + λa2
+θa(0.4)θc(0.5) + λa2
+
+λb1
+λc2
+
+θa(0.6)θb(0.8),
+θa(0.6)θc(0.5),
+
+λb1
+λb1
+
+λc2
+λc2
+
+θa(0.4)θb(0.2)θc(0.5)
+θa(0.6)θb(0.8)θc(0.5).
+
+Finally, we can obtain the probability as: 0.4 × 0.2 × 0.5 +
+0.6 × 0.8 × 0.5 = 0.28.
+
+In our method, each multiplication requires a time almost
+linear in ZBDD size. However, the ZBDD size need not
+increase in repeating multiplications for the inference, be-
+cause many of the terms contradict the evidence and are elim-
+inated. Therefore, the computation cost for the inference will
+be much smaller than the cost for compilation.
+
+An interesting point is that the above MLF for Prb(b1, c2)
+does not contain the variables for node D since they are ir-
+relevant to the joint probability. In other words, our inference
+method provides dependency checking for a given query.
+
+As another strategy, we can generate the MLF for the
+whole network by performing the product of all MLF(X).
+Such a global MLF is basically equivalent to the result of Dar-
+wiche’s compilation[2]. After generating the global MLF, we
+no longer have to perform the product of MLFs. However,
+the MLF contains the parameters of all the BN nodes, and
+we should sum the parameters even if they are irrelevant to
+the query. Having a set of local MLFs will be more efﬁcient
+than a global set since we can avoid unnecessary calculation
+of parameters not related to the query.
+
+Finally, we note that our method can save the result of the
+partial product of MLFs in the shared ZBDD environment, so
+we do not have to recompute ZBDDs for the same evidence
+set.
+
+5 Experimental results
+For evaluating our method, we implemented a BN com-
+piler based on our own ZBDD package. We used a
+Pentium-4 PC, 800 MHz, 1.5 GB of main memory, with
+SuSE Linux 9 and GNU C++ compiler. On this plat-
+form, we can manipulate up to 40,000,000 nodes of ZB-
+DDs with up to 65,000 different variables. We applied our
+method to the practically sized BN examples provided at
+http://www.cs.huji.ac.il/labs/compbio/Repository.
+
+The experimental results are shown in Table 2. In this ta-
+ble, the ﬁrst four columns show the network speciﬁcations,
+such as BN name, the number of BN nodes, the indicator
+variables, and the parameter variables to be used in the MLF.
+The next three columns present the results of our compila-
+tion method. “|ZBDDs|(total)” shows the number of decision
+nodes in the multi-rooted shared ZBDDs representing the set
+of MLFs. “|ZBDD|(a node)” is the average size of ZBDD
+on each BN node. Notice that the total ZBDD size is usu-
+ally much less than the numerical product of each ZBDD size
+because their sub-graphs are shared with each other.
+
+After compilation, we evaluated the performance of on-
+line inference.
+In our experiment, we randomly select a
+pair of BN nodes with random values (xi, yj), then gener-
+ate a ZBDD as the product of the two ZBDDs (MLF(Xi) ·
+MLF(Yj)). After that we counted the number of decision
+nodes “|ZBDD|(product)” and the number of the MLF terms.
+We repeated this process one hundred times and show the
+
+IJCAI-07
+
+2554
+
+Table 2: Experimental results.
+
+BN name
+
+alarm
+hailﬁnder
+mildew
+pathﬁnder(pf1)
+pathﬁnder(pf23)
+pigs
+water
+diabetes
+munin1
+munin2
+munin3
+munin4
+
+BN
+nodes
+
+37
+56
+35
+109
+135
+441
+32
+413
+189
+1,003
+1,044
+1,041
+
+indi-
+cator
+vars.
+105
+223
+616
+448
+520
+1,323
+116
+4,682
+995
+5,376
+5,604
+5,648
+
+para-
+meter
+vars.
+187
+835
+6,709
+1,839
+2,304
+1,474
+3,578
+17,622
+4,249
+22,866
+24,116
+24,242
+
+|ZBDDs|
+(total)
+34,299
+294,605
+
+ofﬂine compile
+|ZBDD|
+(a node)
+1,863
+4,427
+
+time
+(sec)
+0.2
+3.0
+15,310,511 2,684,245 8019.4
+20.1
+19.6
+2.9
+6.1
+− (>36k)
+− (>36k)
+86,267 1,247.8
+777.7
+46,989 4,951.1
+
+16,808
+17,557
+73,543
+25,629
+−
+−
+9,936,191
+11,191,778
+5,724,468
+
+155
+135
+237
+611
+
+100,640
+
+time
+(sec)
+0.04
+0.19
+
+inference (ave. for 100 cases)
+|ZBDD|
+MLF
+terms
+(product)
+3.70 × 108
+4,139
+9,799 1.00 × 1017
+593,469 6.60 × 1016
+667
+212
+3.27 × 107
+6,295
+−
+−
+− (>360)
+− (>360)
+− (>360)
+
+CNF-based[2](*)
+inf.
+comp.
+time
+time
+0.01
+0.52
+0.06
+0.86
+43.43 7,483.80
+3.35
+0.07
+0.01
+20.36
+(no data)
+0.01 (no data)
+1.60
+17.84
+0.01
+0.21
+4.83
+0.02
+− 2,269.05
+16.27
+− 1,534.97
+44.91
+6.59
+225.46
+3.65
+151.72
+677.92
+7.70
+(*) using a computer twice as fast as ours.
+
+337
+188
+993
+974
+−
+−
+−
+−
+−
+
+average time and space. The inference time shown here
+is the total time of ZBDD multiplication and traversing ev-
+ery decision node once in the ZBDD for calculating proba-
+bility. From the experimental results, we can observe that
+the size of “|ZBDD|(product)” is dramatically smaller than
+“|ZBDDs|(total).” This indicates that we can avoid calculat-
+ing many redundant terms of MLFs by using a product of
+local MLFs instead of the global MLF.
+
+In the last two columns, we referred to the results of the
+CNF-based method[2]. For some examples, our results are
+competitive or better than theirs. Notice that we cannot di-
+rectly compare our results to theirs because (1) the experi-
+mental setting of online inference would be different, (2) we
+may use a different variable ordering since it is not described
+in [2], and (3) for the larger examples, they applied another
+technique called decomposition tree(dtree)[3], to reduce the
+original network of CPTs.
+
+Currently, our simple variable ordering strategy is that a
+variable appearing at an earlier stage of the calculation will
+get a lower position (nearer to the leaf) in ZBDDs. The
+ZBDD size is sometimes very sensitive to the variable or-
+dering. For example, we have observed that the ZBDDs for
+“munin2” can be easily reduced by half using ad-hoc ex-
+change of variable ordering. We expect that a good variable
+ordering will bring a signiﬁcant improvement to the current
+results.
+
+Our method is too time consuming for larger examples,
+such as “diabetes” and “munins”. This could be because
+we have not applied the dtree-based CPT network reduction.
+This technique is independent of our ZBDD-based data struc-
+ture, so we hope it will be effective as well as for the CNF-
+based method.
+
+6 Conclusion
+We have presented a new method of compiling BNs, not us-
+ing CNF encoding but by directly calculating MLFs using
+ZBDDs. In our method, it is not necessary to generate MLFs
+for whole networks. We can extract MLFs for only those BN
+nodes related to the query, avoiding unnecessary calculation
+of redundant terms of MLFs. Our algorithm is quite sim-
+ple and is based on the mathematical deﬁnition of probability
+calculation, but it still efﬁciently calculates exponential-sized
+MLFs using a compact ZBDD representation. Our method
+will be improved when combined with other state-of-the-art
+techniques developed in BN processing.
+
+In this paper, we have shown that the BN compilation pro-
+cess is similar to the symbolic simulation of VLSI logic cir-
+cuits. There have been many heuristic techniques on BDDs in
+the VLSI logic design area, and some of them would be use-
+ful for probabilistic inference on BNs or Markov Decision
+Processes.
+
+References
+[1] R. E. Bryant, “Graph-based algorithms for Boolean
+function manipulation,” IEEE Trans. Comput., C-35, 8
+(1986), 677–691.
+
+[2] M. Chavira and A. Darwiche, “Compiling Bayesian
+Networks with Local Structure,” In Proc. 19th In-
+ternational Joint Conference on Artiﬁcial Intelligence
+(IJCAI-2005), pp. 1306–1312, Aug. 2005.
+
+[3] A. Darwiche, “Recursive conditioning,” Artiﬁcial Intel-
+
+ligence, vol. 126, No. 1–2, pp. 5–41, 2001.
+
+[4] A. Darwiche, “A logical approach to factoring belief
+
+networks,” In Proc. KR, pp. 409–420, 2002.
+
+[5] A. Darwiche, “A differential approach to inference in
+Bayesian networks,” JACM, Vol. 50, No. 3, pp. 280–
+305, 2003.
+
+[6] A. Darwiche, “New advances in compiling CNF to de-
+composable negational normal form,” In Proc. Euro-
+pean Conference on Artiﬁcial Intelligence (ECAI-2004),
+pp. 328–332, 2004.
+
+[7] S. Minato, “Zero-suppressed BDDs for set manipula-
+tion in combinatorial problems,” In Proc. 30th Design
+Automation Conf. (DAC-93), pp. 272–277, Jun. 1993.
+
+[8] S. Minato, “Zero-Suppressed BDDs and Their Ap-
+plications,” International Journal on Software Tools
+for Technology Transfer, Vol. 3, No. 2, pp. 156–170,
+Springer, May 2001.
+
+[9] T. Nielsen, P. Wuillemin, F. Jensen, and U. Kjaerulff,
+“Using ROBDDs for inference in Bayesian networks
+with troubleshooting as an example,” In Proc. the 16th
+Conference on Uncertainty in Artiﬁcial Intelligence
+(UAI), pages 426–435, 2000.
+
+[10] S. Sanner and D. McAllester, “Afﬁne Algebraic De-
+cision Diagrams (AADDs) and their Application to
+Structured Probabilistic Inference,” In Proc. 19th In-
+ternational Joint Conference on Artiﬁcial Intelligence
+(IJCAI-2005), Aug. 2005.
+
+IJCAI-07
+
+2555
+
+

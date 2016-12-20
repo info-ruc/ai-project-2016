@@ -1,0 +1,1198 @@
+∗
+Information-theoretic Approaches to Branching in Search
+
+Andrew Gilpin
+
+Computer Science Department
+
+Carnegie Mellon University
+
+Pittsburgh, PA 15213
+
+Tuomas Sandholm
+
+Computer Science Department
+
+Carnegie Mellon University
+
+Pittsburgh, PA 15213
+
+Abstract
+
+Deciding what question to branch on at each node
+is a key element of search algorithms. We introduce
+the information-theoretic paradigm for branching
+question selection. The idea is to drive the search
+to reduce uncertainty (entropy) in the current sub-
+problem. We present four families of methods that
+fall within this paradigm.
+In the ﬁrst, a variable
+to branch on is selected based on lookahead. This
+method performs comparably to strong branch-
+ing on MIPLIB, and better than strong branching
+on hard real-world procurement optimization in-
+stances on which CPLEX’s default strong branch-
+ing outperforms CPLEX’s default branching strat-
+egy. The second family combines this idea with
+strong branching. The third family does not use
+lookahead, but instead exploits the tie between in-
+dicator variables and the other variables they gov-
+ern. This signiﬁcantly outperforms the state-of-
+the-art branching strategies. The fourth family is
+about branching using carefully constructed linear
+inequality constraints over sets of variables.
+
+1 Introduction
+Search is a fundamental technique for problem solving in AI
+and operations research (OR). At a node of the search tree,
+the search algorithm poses a question, and then tries out the
+different answers (which correspond to the branches emanat-
+ing from that node). Many different ways of deciding which
+question to pose (branching strategies) have been studied.
+
+We introduce a new paradigm for developing branching
+strategies, employing information theory as the principle that
+guides the development. The strategies aim to reduce the un-
+certainty (entropy) in the current subtree. In the context of
+solving integer programs, we develop four high-level fami-
+lies of strategies that fall within this paradigm, and show that
+some of them signiﬁcantly improve speed over existing strate-
+gies. The rest of this section covers the needed background.
+
+Integer programming
+
+1.1
+One of the most important computational problems in CS and
+OR is integer programming. Applications of integer program-
+
+∗
+
+This was work was funded by, and conducted at, CombineNet,
+
+Inc., Fifteen 27th St., Pittsburgh, PA 15222.
+
+ming include scheduling, routing, VLSI circuit design, and
+facility location [Nemhauser and Wolsey, 1999]. Integer pro-
+gramming is the problem of optimizing a linear function sub-
+ject to linear constraints and integrality constraints on some
+of the variables. Formally:
+
+Deﬁnition 1 (0-1 integer programming)
+Given an n-tuple c of rationals, an m-tuple b of rationals,
+and an m × n matrix A of rationals, the 0-1 integer pro-
+gramming problem is to ﬁnd the n-tuple x such that Ax ≤ b,
+x ∈ {0, 1}n
+
+, and c · x is minimized.
+
+If some variables are constrained to be integers (not neces-
+sarily binary), then the problem is simply called integer pro-
+gramming. If not all variables are constrained to be integral
+(they can be real), then the problem is called mixed integer
+programming (MIP). Otherwise, the problem is called pure
+integer programming.
+
+While (the decision version of) MIP is N P-complete
+[Karp, 1972], there are many sophisticated techniques that
+can solve very large instances in practice. We now review the
+existing techniques upon which we build our methods.
+
+Branch-and-bound
+
+In branch-and-bound search, the best solution found so far
+(the incumbent) is kept in memory. Once a node in the search
+tree is generated, a lower bound (aka. an f -estimate) on the
+solution value is computed by solving a relaxed version of
+the problem, while honoring the commitments made on the
+search path so far. The most common method for doing this
+is to solve the problem while relaxing only the integrality con-
+straints of all undecided variables; that linear program (LP)
+can be solved fast in practice, for example using the simplex
+algorithm (and in polynomial worst-case time using interior-
+point methods). A path terminates when the lower bound is
+at least the value of the incumbent. Once all paths have ter-
+minated, the incumbent is a provably optimal solution.
+
+There are several ways to decide which leaf node of the
+search tree to expand next. For example,
+in depth-ﬁrst
+branch-and-bound, the most recent node is expanded next. In
+A* search [Hart et al., 1968], the leaf with the lowest lower
+bound is expanded next. A* is desirable in the sense that, for
+any given branch question ordering, no tree search algorithm
+that ﬁnds a provably optimal solution can guarantee expand-
+ing fewer nodes [Dechter and Pearl, 1985]. (An almost iden-
+tical node-selection strategy, best-bound search, is often used
+
+IJCAI-07
+
+2286
+
+in MIP [Wolsey, 1998].1) Therefore, in the experiments we
+will use best-bound search in all of the algorithms.
+
+Branch-and-cut
+A more modern algorithm for solving MIPs is branch-and-
+cut, which ﬁrst achieved success in solving large instances of
+the traveling salesman problem [Padberg and Rinaldi, 1987;
+1991], and is now the core of the fastest commercial general-
+purpose integer programming packages. It is like branch-and-
+bound, except that in addition, the algorithm may generate
+cutting planes [Nemhauser and Wolsey, 1999]. They are con-
+straints that, when added to the problem at a search node,
+result in a tighter LP polytope (while not cutting off the op-
+timal integer solution) and thus a higher lower bound. The
+higher lower bound in turn can cause earlier termination of
+the search path, and thus yields smaller search trees.
+
+CPLEX [ILOG Inc, 2005] is the leading commercial soft-
+ware product for solving MIPs.
+It uses branch-and-cut. It
+can be conﬁgured to support many different branching algo-
+rithms, and it makes available low-level interfaces for control-
+ling the search. We developed our branching methods in the
+framework of CPLEX, allowing us to take advantage of the
+many components already in CPLEX (such as the presolver,
+the cutting plane engine, the LP solver, etc.) while allow-
+ing us ﬂexibility in developing our own methods. (We used
+CPLEX version 9.1, i.e., the newest version at the time of the
+experiments.) We conﬁgured the search order to best-bound,
+and we vary the branching strategies as we will discuss.
+
+Selecting a question to branch on
+At every node of a tree search, the search algorithm has to
+decide what question to branch on (and thus what the children
+of the node will be). The bulk of research has focused on
+branching on individual variables because that is intuitive, has
+a relatively small set of branching candidates, and tends to
+keep the LP sparse and thus relatively fast to solve. In other
+words, the question is: “What should the value of this variable
+be?”. The children correspond to different answers to this
+question.
+
+One commonly used method in OR is to branch on the most
+fractional variable, i.e., variable whose LP value is furthest
+from being integral [Wolsey, 1998]. Finding the branching
+variable under this rule is fast and this method yields small
+search trees on many problem instances.
+
+A more sophisticated approach, which is better suited for
+certain hard problem instances, is strong branching [Apple-
+gate et al., 1994]. The algorithm performs a one-step looka-
+head for each variable that is non-integral in the LP at the
+node. The one-step lookahead computations solve the LP re-
+laxation for each of the children.2
+
+1The difference is that in A* the children are evaluated when
+they are generated, while in best-bound search the children are
+queued for expansion based on their parents’ values and the LP of
+each child is only solved if the child comes up for expansion from
+the queue. Thus best-bound search needs to continue until each node
+on the queue has value no better than the incumbent. Best-bound
+search generates more nodes, but may require fewer (or more) LPs
+to be solved.
+
+2Often in practice, the lookahead is done only for some heuristi-
+cally selected ones of those variables in order to reduce the number
+
+Algorithm 1 Strong Branching (SB)
+
+1. candidates ← {i | xi fractional}
+2. For each i ∈ candidates:
+
+(a) xf ← xi − (cid:6)xi(cid:7)
+(b) Let zl
+(c) Let zu
+(d) score(xi) ← 10 · min{zl, zu} + max{zl, zu}
+
+be solution of current LP with xl
+be solution of current LP with xu
+
+i ≤ (cid:6)xi(cid:7).
+i ≥ (cid:9)xi(cid:10).
+
+3. i∗ ← argmaxi∈candidates score(xi)
+4. Return i∗
+
+There are many different ways that step 2.d could be per-
+formed in Algorithm 1. The above method is from [Applegate
+et al., 1994]. We experimented with the following variations
+in addition to the method above:
+
+1. score(xi) ← min{zl, zu} + 10 · max{zl, zu}
+2. score(xi) ← zl + zu
+3. score(xi) ← max{zl, zu}
+4. score(xi) ← min{zl, zu}
+5. score(xi) ← (1 − xi)zl + xizu
+
+In our preliminary experiments, there was no variation that
+dominated any of the others. We therefore decided to go with
+the variation in Algorithm 1, which has been shown to per-
+form well in practice [Applegate et al., 1994].
+
+2 The information-theoretic paradigm to
+
+branching in search
+
+The simple key observation behind our paradigm is that in
+the beginning of a search, the nodes on the frontier of the
+search tree have large amounts of uncertainty about the vari-
+ables’ values, while at the end of a search there is none (a
+path ends once there is no uncertainty left in a node’s variable
+assignments)3. Motivated by this observation, our paradigm
+is to guide the search so as to remove uncertainty from the
+nodes on the frontier of the search tree. In this paper we ap-
+ply this paradigm to decide what question should be branched
+on at each search node. While there has been much work
+on search (and speciﬁcally on developing branching heuris-
+tics), to our knowledge this is the ﬁrst work that takes an
+information-theoretic approach to guiding the search process.
+Another view to this paradigm is that we use information-
+theoretic measures to quantify how much propagation a can-
+didate branching question would cause—not only counting
+how many of the unassigned variables would be affected, but
+also by how much.
+
+Speciﬁcally in the context of MIP,
+
+the idea behind
+our paradigm is to treat the fractional portion of integer-
+constrained variables in the LP solution as probabilities, indi-
+cating the probability with which we expect the variable to be
+greater than its current value in the optimal solution. Clearly,
+interpreting LP variable values as independent probabilities
+
+of LPs that need to be solved. Similarly, the child LPs are not solved
+to optimality; the amount of work (such as the number of simplex
+pivots) to perform on each child is a parameter. We will vary both
+of these parameters in our experiments.
+
+3In addition to all variables getting ﬁxed value assignments, a
+path can end by infeasibility (the assignments so far implying a con-
+tradiction) or by pruning by bound (the optimistic value of the node
+being no better than the value of the incumbent).
+
+IJCAI-07
+
+2287
+
+is an enormous inaccurate assumption, and it is one that we
+approach with caution. Due to the constraints in the problem,
+the variables are indeed interdependent. However, because
+we are not attempting to derive theoretical results related to
+this assumption, and because we use the assumption only in
+deciding how to branch within a search framework (and thus
+we still guarantee optimality), this assumption does not neg-
+atively interfere with any of our results. As we demonstrate
+later in our experiments, this assumption works well in prac-
+tice, so it is not without merit. (Interpreting LP variables as
+probabilities is also used successfully in randomized approx-
+imation algorithms [Vazirani, 2001].)
+
+Before we describe any speciﬁc families of branch ques-
+tion selection techniques under this paradigm, it will be useful
+to deﬁne how we can quantify the “uncertainty” of a partial
+solution. For this, we borrow some deﬁnitions from informa-
+tion theory, from which the primary contribution is the notion
+of entropy [Shannon, 1948], which measures the amount of
+uncertainty in a random event. Given an event with two out-
+comes (say 0 or 1), we can compute the entropy of the event
+from the probability of each outcome occurring.
+
+Deﬁnition 2 (Entropy of a binary variable)
+Consider an event with two outcomes, 0 and 1. Let x be the
+probability of outcome 1 occurring. Then 1 − x is the proba-
+bility of outcome 0 occurring and we can compute the entropy
+of x as follows:
+
+(cid:2)
+
+e(x) =
+
+−x log2
+
+x − (1 − x) log2(1 − x) : 0 < x < 1
+0 : x ∈ {0, 1}.
+
+(cid:3)(cid:3) 1
+
+(cid:3)(cid:3)
+
+It is possible to use other functions to measure the uncer-
+− x
+tainty in a binary variable. For example, e(x) = 1
+and e(x) = x − x2 could alternatively be used. In the con-
+text of the ﬁrst family of branching question selection tech-
+niques (discussed below), we experimented using these other
+functions but found no major improvement compared to us-
+ing e(x) as in Deﬁnition 2. Thus, throughout the rest of the
+paper, we will use this standard way of calculating entropy.
+
+−
+
+2
+
+2
+
+Entropy is additive for independent variables so we com-
+
+pute the entropy of a group of variables as follows:
+
+Deﬁnition 3 (Entropy of a group of binary variables)
+Given a set X of probabilities corresponding to independent
+binary events, we can compute the entropy of the set as:
+
+(cid:4)
+
+entropy (X ) =
+
+e(x)
+
+where e(x) is as in Deﬁnition 2.
+
+x∈X
+
+While it is possible for there to be multiple optimal solu-
+tions to an optimization problem, all optimal solutions will
+have zero uncertainty according to this measure. We are now
+ready to present our four families of branching question selec-
+tion techniques. They all fall under the information-theoretic
+paradigm for branching.
+
+3 Family 1: Entropic lookahead for variable
+
+selection
+
+In the ﬁrst family, we determine the variable to branch on us-
+ing one-step lookahead as in strong branching. The difference
+
+is that instead of examining the objective values of potential
+child nodes, we examine the remaining uncertainty (entropy)
+in potential child nodes, choosing a variable to branch on that
+yields children with the least uncertainty.
+
+Algorithm 2 Entropic Branching (EB)
+1. candidates ← {i | xi fractional}
+2. For each i ∈ candidates:
+
+(a) xf ← xi − (cid:6)xi(cid:7)
+(b) Let ˆxl
+(c) Let ˆxu
+(d) entropy(xi) ←
+
+i ≤ (cid:6)xi(cid:7).
+be solution vector of LP with ˆxl
+(cid:6)
+(cid:7)
+i ≥ (cid:9)xi(cid:10).
+be solution vector of LP with ˆxu
++ xf e
+ˆxu
+j
+
+(cid:6)
+(cid:5)n
+j=1(1 − xf )e
+ˆxl
+j
+3. i∗ ← argmini∈candidates entropy(xi)
+4. Return i∗
+EB is usable on any MIP since it does not make any as-
+sumptions about the underlying model for the problem on
+which it is used.
+
+(cid:7)
+
+EB can be modiﬁed to perform more than one-step looka-
+head in the obvious way. This would likely lead to smaller
+search trees but more time would be spent per node. One
+way of mitigating this tradeoff would be to conduct deeper
+lookaheads only on candidates that look promising based on
+shallower lookaheads. One could even curtail the candidate
+set based on heuristics before any lookahead is conducted.
+
+For illustrative purposes, there is an interesting (though not
+exact) analogy between our entropic lookahead method for
+question selection at search nodes and algorithms for deci-
+sion tree induction [Quinlan, 1986].
+In most recursive de-
+cision tree induction algorithms, a question is inserted at a
+leaf that results in the greatest information gain. Similarly, in
+search, by choosing questions whose children have the least
+entropy, we are creating children that in a sense also result in
+the greatest information gain.
+
+4 Family 2: Hybridizing SB and EB
+
+As can be observed from the pseudocode given in Algo-
+rithms 1 and 2, SB and EB are computed quite similarly. A
+natural question arises: can we develop a hybrid approach
+combining the strengths of both without using signiﬁcantly
+more computational resources? In this section we answer this
+question in the afﬁrmative by introducing a second family of
+variable selection strategies. In this family, SB and EB are
+hybridized in different ways. Each of these methods requires
+only a small amount of additional computation compared to
+performing only SB or EB (because the same lookahead with
+the same child LP solves is used). We classify our hybrid
+approaches into two categories: tie-breaking and combina-
+tional.
+
+4.1 Tie-breaking methods
+In this approach, we ﬁrst perform the SB computations as in
+Algorithm 1, but instead of simply branching on the variable
+with best score, we break ties using an entropy computation.
+Since we have already computed the LP relaxations for each
+branch, computing the entropy is a negligible computational
+cost (relative to computing the LP relaxations). In addition to
+breaking exact ties, we also experimented with the approach
+of considering two variables having SB scores within x% of
+
+IJCAI-07
+
+2288
+
+each other as tied. In the experiments (described below) we
+tested with x ∈ {0, 5, 10}.
+
+4.2 Combinational methods
+
+We present two methods of combining information from SB
+and EB in order to compute a single score for a variable. The
+variable with the best score will then be branched on.
+
+The ﬁrst method, RANK, performs the computation for
+SB and EB ﬁrst. (Again, these computations are performed
+simultaneously at little additional cost beyond doing either
+SB or EB alone.) Deﬁne rankSB(xi) to be the rank of
+variable xi in terms of its SB score (i.e., the variable with
+the largest score would have rank 1, the variable with the
+second-largest score would have rank 2, and so on). Sim-
+ilarly, deﬁne rankEB(xi) to be the rank of variable xi in
+terms of its EB entropy. Then, for each variable, we let
+rank(xi) = rankSB(xi)+rankEB(xi) and choose the vari-
+able xi with the smallest rank.
+
+The second method, COMB(ρ, 1 − ρ), computes a convex
+combination of the SB score (with weight ρ) and the current
+entropy minus the EB score (with weight 1−ρ). It then selects
+the variable with the highest ﬁnal score.
+
+4.3 Experiments on EB and the hybrid methods
+
+We conducted a host of experiments with the search methods
+described above, both on MIPLIB and real-world procure-
+ment optimization instances.
+In all of our experiments the
+algorithms ran in main memory, so paging was not an issue.
+In order to be able to carefully and fairly control the pa-
+rameter settings of both SB and EB, we implemented both.
+(Using CPLEX’s default SB would not have allowed us to
+control the proprietary and undocumented candidate selection
+method and scoring function, and CPLEX does not provide
+adequate APIs to use those same methods for EB.) Implemen-
+tation of both algorithms in the same codebase also minimizes
+differences in implementation-related run-time overhead.
+
+Experiments on MIPLIB 3.0
+MIPLIB [Bixby et al., 1998] is a library of MIP instances that
+is commonly used for benchmarking MIP algorithms. We
+experimented on all instances of the newest MIPLIB (3.0).
+
+EB and SB were comparable: they reached the 1-hour time
+limit on 34.7% and 24.5% of the instances, respectively. EB
+outperformed SB on 13 of the 49 instances. This is quite
+remarkable in the sense that EB does not use the objective
+function of the problem at all in making branching decisions.
+Our experiments show that, on average, RANK is the best
+among the hybrid methods. On 17 of the instances, at least
+one of the hybrid methods outperformed both SB and EB,
+showing that the combination is better than either of its parts.
+Although EB performs comparably to SB, both of these
+strategies are dominated on MIPLIB by CPLEX’s default
+branching strategy (although it searches a larger number of
+nodes). For problems with lots of structure, we expect the
+reverse to be true. Indeed, in the next subsection we use in-
+stances on which CPLEX’s default SB outperforms CPLEX’s
+default branching strategy, and we demonstrate that EB out-
+performs SB on that data set.
+
+Experiments on real-world procurement optimization
+As we showed in the previous section, lookahead (such as in
+strong branching) does not pay off on all classes of problems.
+To obtain a pertinent evaluation of EB against the state-of-
+the-art lookahead-based technique, SB, we wanted to test on
+a problem set on which SB is the algorithm of choice (com-
+pared to non-lookahead-based standard techniques). We ran
+experiments on CombineNet, Inc.’s repository of thousands
+of large-scale real-world industrial procurement optimization
+instances of varying sizes and structures, and selected the in-
+stances on which CPLEX’s implementation of SB was faster
+than CPLEX’s default branching strategy. On those 121 in-
+stances, CPLEX’s implementation of SB was on average 27%
+faster than CPLEX’s default branching strategy. Thus we
+concluded that SB is a good algorithm for that data set, and
+performed a comparison of EB against SB on that data.
+
+Tables 1–3 summarize the experimental results for EB. We
+varied the size of the candidate list and the number of sim-
+plex iterations performed in the dual LP of each child of the
+candidate.4 When limiting the size of the candidate list, we
+choose the candidates in order of most fractional.
+
+candidates
+
+10 iters
+
+25 iters
+
+100 iters
+
+unlimited iters
+
+10
+
+unlimited
+
+1947.00
+1916.81
+
+2051.07
+1962.09
+
+1966.21
+1813.76
+
+1913.56
+1696.53
+
+Table 1: Average computation time over 121 instances for
+entropic branching with a 1-hour time limit.
+100 iters
+
+unlimited iters
+
+candidates
+
+25 iters
+
+10 iters
+
+10
+
+3600
+
+3600
+
+3600
+
+unlimited
+
+2955.78
+
+3195.58
+
+1374.679
+
+3600
+590.23
+
+Table 2: Median computation time over 121 instances for en-
+tropic branching with a 1-hour time limit.
+100 iters
+
+unlimited iters
+
+candidates
+
+10 iters
+
+25 iters
+
+10
+
+unlimited
+
+62
+59
+
+65
+57
+
+62
+54
+
+61
+49
+
+Table 3: Number of instances (of 121) taking over an hour.
+As the tables demonstrate, EB was fastest with the most
+detailed branch selection. The additional work in performing
+more simplex iterations pays off by giving a more accurate
+estimate of the entropy of the individual variables. Similarly,
+by examining more candidate variables, EB is more likely to
+branch on a variable that decreases the total amount of en-
+tropy the most. This suggests that a better method for choos-
+ing the candidate list could lead to further speedup. When
+both methods were allowed unlimited candidates and itera-
+tions, EB was 29.5% faster than SB: the comparable number
+to EB’s 1696.53 average seconds was 2406.07 for SB.
+
+5 Family 3: Entropic lookahead-free variable
+
+selection
+
+We introduce a third family of branching strategies, again
+within the entropy-based branching paradigm. This method
+
+4As usual in MIP, we tackle the dual LP instead of the primal
+LP because a node’s dual solution serves as a feasible basis for the
+child and thus serves as a hot start for simplex. The ﬁrst child’s dual
+LP solve starts from the parent’s dual LP basis. The second child’s
+LP solve starts from the ﬁrst child’s LP basis.
+
+IJCAI-07
+
+2289
+
+is computationally less expensive than the methods we pre-
+sented so far because it does not use lookahead. How-
+ever, it does require an advanced knowledge of the struc-
+ture of the problem. The problem with which we experi-
+ment is motivated by a real-world electronic commerce ap-
+plication: a combinatorial procurement auction (aka.
+re-
+verse auction) where the buyer speciﬁes the maximum num-
+ber of winning suppliers [Davenport and Kalagnanam, 2001;
+Sandholm and Suri, 2006].
+
+Deﬁnition 4 (Combinatorial procurement auction with max-
+imum winners constraint)
+Let M = {1, . . . , m} be the m goods that the buyer wishes
+to procure (the buyer wants at least one unit of each good).
+Let S = {1, . . . , s} be the s suppliers participating in the
+procurement and let B = {B1, . . . , Bn} be the bids, where
+Bi = (cid:11)Gi, si, pi(cid:12) indicates that supplier si can supply the
+bundle of goods Gi ⊆ M at price pi. Finally, the buyer
+indicates the maximum number of winners, k. The winner de-
+termination problem is to identify the winning bids so as to
+minimize the buyer’s cost subject to the constraints that the
+buyer’s demand is satisﬁed and that the maximum number of
+winners constraint is satisﬁed.
+This problem is N P-complete, even if the bids are on sin-
+gle items only [Sandholm and Suri, 2006].
+Integer pro-
+gramming methods have been successfully used previously in
+winner determination research (e.g. [Andersson et al., 2000;
+Sandholm et al., 2005; Sandholm, 2006]), and we can very
+naturally formulate the above generalized winner determina-
+tion problem as a MIP:
+
+minimize
+such that
+
+(cid:5)n
+(cid:5)
+(cid:5)
+i=1
+(cid:5)s
+i|j∈Gi
+i|si=j xi − myj ≤ 0
+
+xi ≥ 1
+
+pixi
+
+yj − k ≤ 0
+
+j=1
+
+xi ∈ {0, 1}
+yj ∈ {0, 1}
+
+j ∈ {1, . . . m}
+j ∈ {1, . . . , s}
+
+i ∈ {1, . . . , n}
+j ∈ {1, . . . , s}
+
+The formulation is typical of a common class of problems
+in which binary “indicator” variables—the yj variables in
+the formulation above—are used to model logical connec-
+tives [Nemhauser and Wolsey, 1999]. Constraints that state
+that at most (or exactly) k variables from a set of variables can
+be nonzero are an important special case. (The case k = 1 is
+called a special-ordered set of Type I.) Typically, the LP relax-
+ation gives poor approximate values for indicator variables:
+due to big-M ’s in the constraints that include the indicators
+(and even with large m’s that are as small as possible as in
+the above formulation), an indicator can in effect be on even
+while taking a tiny value (or conversely, be off while holding
+a value close to 1). As we show, the branching method that
+we propose helps signiﬁcantly to address this problem.
+
+5.1 Branching strategy
+
+The hardness in this problem comes primarily from deter-
+mining the winning set of suppliers. In terms of the above
+MIP, we need to determine the yj values. The main idea
+in our branching strategy for this problem is to branch on
+yj values that correspond to suppliers about which we are
+most uncertain. But rather than deriving this uncertainty
+
+(cid:5)
+
+from the variable yj (for which the LP gives very inaccu-
+rate values), we derive it from the variables corresponding
+to supplier j(cid:4)s bids. The branching strategy works as fol-
+lows. For each supplier j where yj /∈ {0, 1}, compute
+i|si=j e(xi) and branch on the variable yj (cid:2)
+entropy(j) =
+where j(cid:4) = argminj entropy(j). This strategy does not use
+lookahead: it only uses the LP values of the current search
+node. We call this branching strategy Indicator Entropic
+Branching (IEB).
+
+5.2 Experimental results
+Although this problem is motivated by a real-world applica-
+tion, there are no publicly available real-world instances (the
+real-world data studied in the previous section does not ex-
+actly ﬁt this model).5 Instead we created an artiﬁcial instance
+distribution for this problem which closely approximates the
+real-world problem.
+
+Given parameters s (number of suppliers), r (number of
+regions), m (goods per region), and b (bids per region) we
+create an instance of a procurement auction with a maximum
+winners constraint as follows: 1) Each bidder bids on a re-
+gion with probability 0.9; 2) for each region, generate the
+bidder’s bids using the Decay distribution [Sandholm, 2002]
+with α = 0.75.6 For this data distribution, we determined
+that CPLEX’s default branching strategy was the best of the
+four qualitatively different branching strategies that CPLEX
+offers. In particular, it was faster than strong branching on
+this data. Table 4 shows experimental results comparing IEB
+with CPLEX using its default branching strategy. The results
+indicate that IEB performs signiﬁcantly better, and the rela-
+tive difference increases with problem size. (We also found
+that part of the beneﬁt can be achieved even without entropic
+branching by simply forcing branching on every path to occur
+on the fractional indicator variables ﬁrst before branching on
+any other variables. Other than that, we let CPLEX make the
+variable selection in that strategy (CPLEX-IF)).
+
+s
+
+20
+30
+40
+
+r m
+
+b
+
+10
+15
+20
+
+10
+15
+20
+
+100
+150
+200
+
+k
+
+5
+8
+10
+
+CPLEX CPLEX-IF
+
+IEB
+
+25.63
+
+5755.92
+37.05%
+
+15.13
+684.83
+32.38%
+
+11.81
+551.82
+30.57%
+
+Table 4: The ﬁrst two rows contain the solution time (in seconds)
+for ﬁnding the optimal solution and proving optimality averaged
+over 25 instances (there were no timeouts). The third row indicates
+the average integrality gap (how far from optimal (at worst) the best
+solution found so far is) after one hour.
+6 Family 4: Entropic lookahead for
+
+multi-variable branches
+
+In this section we introduce a fourth family of methods for
+determining a good question to branch on. In EB, we per-
+formed a one-step lookahead for each non-integral variable.
+Here, we generalize entropic lookahead beyond branching on
+
+5Furthermore, none of the combinatorial auction instance gener-
+
+ators published in the literature have a notion of supplier.
+
+6Each bid in the Decay distribution is generated as follows. Give
+the bid one random item from M. Then repeatedly add a new ran-
+dom item from M (without replacement) with probability α until
+an item is not added or the bid includes all m items. Pick the price
+uniformly between 0 and the number of items in the bid.
+
+IJCAI-07
+
+2290
+
+(cid:5)
+i∈X ˆxi
+
+(cid:8)(cid:5)
+i∈X xi ≤ k and
+
+variables.
+In integer programming one can branch on the
+sum of the values of a set of variables. For example, if the
+LP relaxation at the current search node has xi = 0.2 and
+xj = 0.6, we could set one branch to be xi + xj ≤ 0 and
+the other branch to be xi + xj ≥ 1. In general, given a set
+(cid:9)
+X of variables and the current LP relaxation solution ˆx, we
+(cid:5)
+can let k =
+and we can generate the branches
+i∈X xi ≥ k + 1.7,8,9 Then, instead of
+branching on the variable with the smallest amount of entropy
+in its child nodes, we select the set X of variables for branch-
+ing that results in the smallest amount of entropy in the two
+child nodes.10 In step 2.d of EB, we weighted the entropy of
+each child by the probability that we expect the optimal so-
+lution to occur in each child. In the multi-variable case, we
+still perform this weighting, but it is more complicated since
+the probability of each branch depends on several variables.
+The probability that the sum is less than k is the summation
+of a combinatorial number of products of probabilities; this
+number is exponential only in |X |, so it is not prohibitive for
+generating branches with small numbers of variables.)
+
+While branching on more than one variable at a time may
+seem unintuitive, it does not cause any obvious loss in branch-
+ing power:
+Proposition 1 Assume that each integer variable xi has ﬁ-
+nite domain Di. Ignoring the effects of pruning (by infeasi-
+bility, bound, and LP integrality), propagation (by LP), and
+learning (e.g., from conﬂicts in subproblems [Achterberg,
+2006; Sandholm and Shields, 2006]), the number of leaves
+in the tree is the same regardless of how many (and which)
+
+7No other value of k is worth considering: any other integer
+value would cause one child’s LP optimum to be exactly the same
+as the node’s. Thus that child’s EB analysis (or SB analysis, or in
+fact any branching rule based solely on the node’s local information)
+would be the same as that of the node’s, leading to an inﬁnitely deep
+search path and non-termination of the overall algorithm.
+
+i∈X
+
+i∈X
+
+8The special case k = 0 of this branching question has
+been shown to be effective in set partitioning, set packing, and
+set covering problems [Etcheberry, 1977; Ryan and Foster, 1981;
+Ryan, 1992]. For such 0-1 problems, theory has been developed that
+shows that each path consisting of carefully selected such branches
+will yield an LP with all vertices integral after a quadratic number of
+branches in the number of constraints [Barnhart et al., 1998]. Future
+research includes exploring the use of techniques from our Family 4
+to select among such branching candidates in those problems.
+P
+
+can branch on the disjunction
+aixi ≥ r + 1, where the con-
+stants ai can be positive or negative, as long as there are no
+integer solutions between those two hyperplanes (e.g., [Owen and
+Mehrotra, 2001]). Our entropy reduction measure could then be
+used to select from among such pairs of hyperplanes. Branching
+on high-level properties has also been shown efﬁcient in constraint
+satisfaction problems [Gomes and Sellmann, 2004], and it would
+be interesting to try the information-theoretic paradigm for branch
+question selection in that context as well.
+
+9More generally,
+
+aixi ≤ r versus
+
+one
+P
+
+10We never branch on a set of variables X if
+
+ˆxi happens to
+be integral because one of the branches will not constrain the current
+LP solution. Thus the corresponding child node will be identical
+to its parent, leading again to nontermination with any branching
+rule that is based on location information. (In fact, we do not even
+conduct the lookahead for such X .)
+
+i∈X
+
+P
+
+(cid:10)n
+
+variables are used in different branches—as long as trivial
+branches where a child is identical to its parent are not used.
+If the branching factor is two, then this equality applies to the
+number of nodes in the tree as well.
+
+i=1
+
+|Di| solutions. For any nontrivial
+PROOF. There are
+branching, that is the number of leaves. Binary trees with the
+same number of leaves have the same number of nodes. (cid:2)
+We performed experiments on MIPLIB 3.0 and on com-
+binatorial auction winner determination problem instances
+(again from the Decay distribution). We limited our algo-
+rithm to considering branches containing just 1 or 2 variables
+in order to keep the number of candidate branching questions
+small so as to not have to solve too many child LPs. This also
+helps keep the LP sparse and thus relatively fast to solve.
+
+While we found that this strategy led to trees that are
+slightly smaller on average than when branching on individ-
+ual variables only, the computational effort needed to perform
+the lookahead for pairs of variables was not worth it in terms
+of total search time. It thus seems that in order for this method
+to be effective, there needs to be some quick way of determin-
+ing (before lookahead) what good candidate variable sets to
+branch on might be, and to only conduct the lookahead on
+them. We also tried randomly picking only a restricted num-
+ber of variable pairs as candidates; even though that helped
+in overall run-time, it did not help enough to beat branching
+on individual variables only. Hopefully future research will
+shed light on what might be considered good multi-variable
+branching candidates.
+
+7 Conclusions, discussion, and future research
+
+We introduced a new paradigm for branch selection in search
+based on an information-theoretic approach. In the beginning
+of a search, there is the most uncertainty about the optimal
+solution. When the search is complete, there is zero uncer-
+tainty. Using this observation, we developed four families of
+methods for selecting what question to branch on at a search
+node so as to reduce the amount of uncertainty in the search
+process. All four of our families of methods are information-
+theoretically motivated to reduce remaining entropy. In the
+ﬁrst family, a good variable to branch on is selected based
+on lookahead. Experiments show that this entropic branch-
+ing method performs comparably to strong branching (a clas-
+sic technique that uses lookahead and LP-bounds to guide
+the search) on MIPLIB, and better than strong branching on
+hard real-world procurement optimization instances on which
+CPLEX’s default strong branching outperforms CPLEX’s de-
+fault branching strategy. The second family combines this
+idea with strong branching in different ways. The third fam-
+ily does not use lookahead, but instead exploits the tie be-
+tween indicator variables and the other variables they govern.
+Experiments show that this family signiﬁcantly outperforms
+the state-of-the-art branching strategies. The fourth family is
+about branching using carefully constructed linear inequality
+constraints over sets of variables.
+
+One can view many existing search methods as quick ap-
+proximations of entropy-based search. First, the classic OR
+idea of branching on the variable that has the most fractional
+LP value at the node in best-bound search [Wolsey, 1998] is
+
+IJCAI-07
+
+2291
+
+a lookahead-free approximation to entropy-based variable se-
+lection: it also tries to branch on the variable that the LP is
+most uncertain about and thus that branch should reduce un-
+certainty the most. Second, using entropy as the f -function
+in A* search (i.e., always picking the node with least en-
+tropy to expand next) tends to make A* more like depth-ﬁrst-
+search because deeper nodes tend to have less entropy. (How-
+ever, entropy does not always decrease monotonically even
+along one search path.) Third, the most common heuristic in
+constraint satisfaction problems, most-constrained-variable-
+ﬁrst [Bitner and Reingold, 1975], and its usual tie-breaker,
+the most-constraining-variable-ﬁrst heuristic [Br´elaz, 1979],
+approximate entropy-based variable selection:
+they tend to
+assign a variable that affects the other unassigned variables
+the most, thus reducing the entropy of those variables.
+
+There are several promising directions for future research
+down this path. One could develop quick heuristics to curtail
+the set of candidate questions to branch on before lookahead.
+One could even narrow down the candidate set incrementally
+by deeper and deeper lookahead (the leaves being evaluated
+using our entropic measure).
+
+It would also be interesting to try the paradigm on addi-
+tional problems, for example, on set covering, packing, and
+partitioning problems—perhaps using the specialized branch-
+ing constraints (discussed above) as the candidates.
+
+Our methods were largely derived for A* (best-bound)
+search where it is best to branch on a question about which
+the algorithm is most uncertain; in contrast, in the depth-ﬁrst
+node selection strategy it is often best to branch on a question
+for which the algorithm knows the right answer with high
+conﬁdence [Sandholm et al., 2005; Sandholm, 2006]. Thus
+it is not clear that these branch question selection techniques
+would work as well under the depth-ﬁrst strategy. That is a fu-
+ture question to pursue. One could also try our paradigm on
+constraint satisfaction problems; given that there are no LP
+values, one would need another way of measuring entropy.
+
+While we introduced four families of branch question se-
+lection techniques under the information-theoretic paradigm,
+we see no reason to believe that these are the only, or best,
+families. Future research should explore the development
+of additional families of entropy-motivated branch ques-
+tion selection techniques. Perhaps the information-theoretic
+paradigm can be helpful in search guidance beyond branch
+question selection as well.
+
+References
+[Achterberg, 2006] Tobias Achterberg. Conﬂict analysis in mixed
+
+integer programming. Discrete Optimization, 2006. To appear.
+
+[Andersson et al., 2000] Arne Andersson, Mattias Tenhunen, and
+Fredrik Ygge.
+Integer programming for combinatorial auction
+winner determination. In ICMAS, pp. 39–46, Boston, MA, 2000.
+[Applegate et al., 1994] David Applegate, Robert Bixby, Vasek
+Chv´atal, and William Cook. Finding cuts in the TSP. Techni-
+cal Report 95-05, DIMACS, Rutgers University, March 1995.
+
+[Barnhart et al., 1998] Cynthia Barnhart,
+
+Johnson,
+George L. Nemhauser, Martin W. P. Savelsbergh, and Pamela H.
+Vance. Branch-and-price: Column generation for solving huge
+integer programs. Operations Research, 46(3):316–329, 1998.
+
+Ellis L.
+
+[Bitner and Reingold, 1975] James Bitner and Edward Reingold.
+
+Backtrack programming techniques. CACM, 18(11):651–656.
+
+[Bixby et al., 1998] Robert Bixby, Sebastian Ceria, Cassandra
+McZeal, and Martin Savelsbergh. An updated mixed integer pro-
+gramming library: MIPLIB 3.0. Optima, 54:12–15, 1998.
+
+[Br´elaz, 1979] Daniel Br´elaz. New methods to color the vertices of
+
+a graph. CACM, 22(4):251–256, April 1979.
+
+[Davenport and Kalagnanam, 2001] Andrew J. Davenport
+
+and
+Jayant Kalagnanam. Price negotiations for procurement of direct
+inputs. Technical Report RC 22078, IBM, May 2001.
+
+[Dechter and Pearl, 1985] Rina Dechter and Judea Pearl. General-
+ized best-ﬁrst search strategies and the optimality of A*. Journal
+of the ACM, 32(3):505–536, 1985.
+
+[Etcheberry, 1977] Javier Etcheberry. The set-covering problem:
+A new implicit enumeration algorithm. Operations Research,
+25(5):760–772, September–October 1977.
+
+[Gomes and Sellmann, 2004] Carla Gomes and Meinolf Sellmann.
+
+Streamlined constraint reasoning. In CP, pp. 274–287, 2004.
+
+[Hart et al., 1968] Peter Hart, Nils Nilsson, and Bertram Raphael.
+A formal basis for the heuristic determination of minimum cost
+paths. IEEE Trans. on Sys. Sci. and Cybernetics, 4(2):100–107.
+
+[ILOG Inc, 2005] ILOG Inc. CPLEX 9.1 User’s Manual, 2005.
+[Karp, 1972] Richard Karp. Reducibility among combinatorial
+problems. In R. E. Miller and J. W. Thatcher, editors, Complexity
+of Computer Computations, pp. 85–103. Plenum Press, NY.
+
+[Nemhauser and Wolsey, 1999] George Nemhauser and Laurence
+Wolsey. Integer and Combinatorial Optimization. Wiley, 1999.
+[Owen and Mehrotra, 2001] Jonathan H. Owen and Sanjay Mehro-
+tra. Experimental results on using general disjunctions in branch-
+and-bound for general-integer linear programs. Computational
+Optimization and Applications, 20(2):159–170, November 2001.
+[Padberg and Rinaldi, 1987] Manfred Padberg and Giovanni Ri-
+naldi. Optimization of a 532-city symmetric traveling salesman
+problem by branch and cut. Oper. Res. Letters, 6:1–7, 1987.
+
+[Padberg and Rinaldi, 1991] Manfred Padberg and Giovanni Ri-
+naldi. A branch-and-cut algorithm for the resolution of large-
+scale symmetric traveling salesman problems. SIAM Review,
+33:60–100, 1991.
+
+[Quinlan, 1986] Ross Quinlan.
+
+Induction of decision trees. Ma-
+
+chine Learning, 1(1):81–106, 1986.
+
+[Ryan and Foster, 1981] David Ryan and Brian Foster. An integer
+programming approach to scheduling. In A. Wren, ed., Computer
+Scheduling of Public Transport, pp. 269–280. North-Holland.
+
+[Ryan, 1992] David Ryan. The solution of massive generalized set
+partitioning problems in aircrew rostering. The Journal of the
+Operational Research Society, 43(5):459–467, May 1992.
+
+[Sandholm and Shields, 2006] Tuomas Sandholm and Robert
+Shields. Nogood learning for mixed integer programming.
+Workshop on Hybrid Methods and Branching Rules in Combi-
+natorial Optimization, Montr´eal, Sept. 18–22, 2006.
+
+[Sandholm and Suri, 2006] Tuomas Sandholm and Subhash Suri.
+Side constraints and non-price attributes in markets. Games and
+Economic Behavior, 55:321–330, 2006.
+
+[Sandholm et al., 2005] Tuomas Sandholm, Subhash Suri, Andrew
+Gilpin, and David Levine. CABOB: A fast optimal algorithm for
+winner determination in combinatorial auctions. Management
+Science, 51(3):374–390, 2005.
+
+[Sandholm, 2002] Tuomas Sandholm. Algorithm for optimal win-
+ner determination in combinatorial auctions. Artiﬁcial Intelli-
+gence, 135:1–54, January 2002.
+
+[Sandholm, 2006] Tuomas Sandholm. Optimal winner determina-
+In P. Cramton, Y. Shoham, and R. Steinberg,
+
+tion algorithms.
+eds., Combinatorial Auctions, pp. 337–368. MIT Press, 2006.
+
+[Shannon, 1948] Claude Shannon. A mathematical theory of com-
+
+munication. Bell System Tech. J., 27:379–423 and 623–656.
+
+[Vazirani, 2001] V. Vazirani. Approximation Algorithms. Springer.
+[Wolsey, 1998] Laurence Wolsey. Integer Programming. Wiley.
+
+IJCAI-07
+
+2292
+
+

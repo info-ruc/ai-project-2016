@@ -1,0 +1,1085 @@
+Extracting Certiﬁcates from Quantiﬁed Boolean Formulas ∗
+
+Marco Benedetti
+
+Istituto per la Ricerca Scientiﬁca e Tecnologica (IRST)
+
+Via Sommarive 18, 38055 Povo, Trento, Italy
+
+benedetti@itc.it
+
+Abstract
+
+A certiﬁcate of satisﬁability for a quantiﬁed
+boolean formula is a compact representation of
+one of its models which is used to provide solver-
+independent evidence of satisﬁability. In addition,
+it can be inspected to gather explicit information
+about the semantics of the formula. Due to the
+intrinsic nature of quantiﬁed formulas, such cer-
+tiﬁcates demand much care to be efﬁciently ex-
+tracted, compactly represented, and easily queried.
+We show how to solve all these problems.
+
+Introduction
+
+1
+The term “certiﬁcate” has a fairly general meaning, originat-
+ing in language recognition and complexity theory. Once ver-
+iﬁed, a certiﬁcate proves that the string it refers to actually
+belongs to a language of interest. Applied to logic, the term
+denotes any means of providing evidence of (un)satisﬁability
+for a given statement, other than a refutationally-compete de-
+ductive approach. In essence, we verify that a given logical
+formula belongs to the language of (un)satisﬁable statements.
+The most natural certiﬁcate of satisﬁability (sat-certiﬁcate)
+for a formula is an explicit representation of some of its mod-
+els. A formula is indeed satisﬁable if and only if some model
+makes it evaluate to true. The validity of a certiﬁcate can be
+veriﬁed by whoever is knowledgeable about the evaluation
+apparatus of the logic (deductive capabilities are unneces-
+sary), independently of how it was obtained.
+
+In this paper, we focus on sat-certiﬁcates for Quantiﬁed
+Boolean Formulas (QBFs). Such certiﬁcates have never been
+proposed or used so far for a number of reasons. First, the
+intrinsic nature of a QBF confers a tree-shaped structure to
+its models, whose explicit representation may become unaf-
+fordable. Second, theoretical arguments exist that make it un-
+likely to ﬁnd polynomial-time veriﬁcation procedures (QBF
+satisﬁability is PSPACE-complete [Stockmeyer and Meyer,
+1973]). Finally, present QBF solvers ﬁnd it either impractical
+or not straightforward to collect all the information needed to
+construct a model. As a consequence, QBF models feature no
+∗This work is supported by PAT (Provincia Autonoma di Trento,
+
+Italy), under grant n. 3248/2003.
+
+commonly accepted representation (if any at all), and all the
+current solvers return a little more than a sat/unsat answer.
+Despite these issues, sat-certiﬁcates for QBFs are ex-
+tremely desirable thank to their potential beneﬁts on appli-
+cations and solvers. For example, a certiﬁcate is a conclu-
+sive means to judge conﬂicting answers given by different
+solvers on the very same instance. Clearly, this event reveals
+no ﬁner problem than a bug in the implementation, which we
+might think is not worth considering. This happens fairly of-
+ten though, and as long as we treat solvers as black boxes,
+a proof-of-satisﬁability approach is the only realistic way to
+tell the truth. We quote [Le Berre et al., 2004]:
+
+The question of how to check the answer of the QBF
+solvers in an effective way is still unanswered [...]
+the question of what is a good certiﬁcate of satisﬁa-
+bility/unsatisﬁability [...] remains open. This point
+is not only an issue for the QBF evaluation, but
+also for the implementation: [...] we had sound-
+ness problems with 4 QBF solvers. [...]
+
+Yet, a certiﬁcate is much more than a way to ensure satisﬁ-
+ability: It can be inspected to gather semantics from the un-
+derlying formula. This is of paramount importance in appli-
+cations, where certiﬁcates add valuable information to a mere
+sat/unsat answer. For example, a sat answer to the proposi-
+tional (PROP) encoding of (the negation of) a desired prop-
+erty over a logic circuit means that the circuit is faulty w.r.t.
+that property. But, it takes a certiﬁcate to outline a deﬁnite
+scenario in which the fault shows up. As opposed to QBF
+certiﬁcates, such PROP certiﬁcates are easy to represent and
+verify, hence they have had a wide application.
+
+The relevance of certiﬁcates enlarges with the scope of ap-
+plication of the underlying logic. In this respect, QBF is a
+notable case with plenty of applications. Every problem that
+can be stated as a two-player ﬁnite game can be modeled in
+QBF. An insightful example is obtained by considering the
+famous game “Connect-4”. It is known that the player who
+moves ﬁrst can always win. The rules of the game and the
+existence of a winning strategy can be encoded into a QBF
+instance [Gent and Rowley, 2003], expected to be sat. Which
+is the winning strategy? A certiﬁcate would disclose such in-
+formation: The ﬁrst player would prevail by just inspecting
+the certiﬁcate at each move, whatever the opponent does.
+
+The interesting point here is that many real-world appli-
+cations can be modeled as two-player games: Unbounded
+
+model checking for ﬁnite-state systems [Rintanen, 2001] and
+conformant planning [Rintanen, 1999]—just to name two rel-
+evant examples—have handy QBF formulations.
+
+In the rest of this paper, after a brief introduction to QBFs
+and their models (Section 2), we present a solver-independent
+representation for QBF sat-certiﬁcates (Section 3). As ex-
+pected, we are able to describe how to verify them (Section 4)
+before the more complex task of their extraction is addressed
+(Section 5). We conclude by discussing the implementation
+of our approach and the future work (Section 6).
+
+2 QBFs and their models
+
+With no loss of generality, we consider QBFs in prenex con-
+junctive normal form (CNF). They consist in a preﬁx exhibit-
+ing an arbitrary number of alternations of existentially and
+universally quantiﬁed variables, followed by a matrix, i.e. a
+conjunction of clauses. For example:
+
+∀a∀b∃c∀d∃e∃f.(¬b∨e∨f ) ∧ (a∨c∨f ) ∧ (a∨d∨e)∧
+(¬a∨¬b∨¬d∨e) ∧ (¬a∨b∨¬c) ∧ (¬a∨¬c∨¬f )∧
+(a∨¬d∨¬e) ∧ (¬a∨d∨¬e) ∧ (a∨¬e∨¬f )
+
+Given a QBF F , we denote by eF its matrix, by var∃(F )
+
+(1)
+
+(var∀(F )) the set of existentially (universally) quantiﬁed
+variables in F , and by var∀(F, e) ⊆ var∀(F ) the set of uni-
+versal variables preceding (or dominating) e ∈ var∃(F ) in
+the preﬁx (we pose δ(e) .= |var∀(F, e)|). Given a CNF ma-
+the literal l, i.e. by removing from F each ¬l literal and each
+clause containing l. This notation is readily extended to sets
+
+trix eF , the formula eF ∗ l is the CNF obtained by assigning
+of literals. A matrix eF is satisﬁed by a set of literals M (writ-
+ten M |= eF ) when eF ∗ M is the empty formula.
+
+The alternations of quantiﬁers in the preﬁx guide us to ex-
+tending this notion of satisﬁability from matrixes to QBFs.
+For example, the satisﬁability problem on (1) asks whether
+for each possible (consistent) combination of literals on a and
+b there exists a way to choose a literal on c such that for both
+possible literals over d, two literals on e and f exist such that
+the resulting set satisﬁes the matrix. Hence, a QBF model is
+a set of |var∃(F )| functions, each one specifying the literal
+to be chosen (if any) on the ex-
+istential variable e as a function
+of the choices on all the univer-
+sal variables dominating e. To
+represent all these functions at
+once we can use a labeled tree,
+such as the one aside, depicting
+a model for (1). If we call uni-
+versal hypothesis every consis-
+tent set of universal literals (or,
+equivalently, every assignment
+[u1 = ψ1, . . . , un = ψn] to the universal variables, with
+ψi ∈ B = {0, 1}), we may say, informally, that a tree
+structure like the one above is a model for a QBF with matrix
+
+eF iff for every universal hypothesis U the set of existential
+eF ∗ U (see [B¨uning and Zhao, 2004] for details).
+
+literals collected along the branch individuated by U satisﬁes
+
+3 Certiﬁcate representation
+A QBF model can be represented explicitly by employing
+data structures such as trees or truth tables. Or, we may pur-
+sue compactness at the expense of managing an implicit rep-
+resentation1 requiring computation to yield values.
+
+An ideal certiﬁcate should be compact (easy to manage)
+and explicit (easy to verify and query). A successful tradeoff
+is obtained by employing Binary Decision Diagrams [Bryant,
+1986]. We consider their reduced ordered version (ROBDDs,
+or just BDDs henceforth) with complemented arcs. A BDD
+E representing a total function F (u1, u2, . . . , un) from Bn
+to B is a directed acyclic graph with one root (labeled by F )
+and one sink node (labeled by “1”). Each internal node is la-
+beled by one variable in U = {u1, u2, . . . un}, and always
+has two children, one attached to the outcoming then-arc, the
+other to the else-arc. The else-arc may or may not be comple-
+mented. A unique path from the root to the sink is identiﬁed
+by assigning a value to each variable in U: The then-arc is
+chosen for variables assigned to 1, the else-arc is followed
+otherwise. The function F represented by E evaluates to 1 on
+hψ1, ψ2, . . . , ψni ∈ Bn iff an even number of complemented
+arcs is encountered along the path deﬁned by ψ1, ψ2, . . . , ψn.
+As an example, let us consider the BDD aside,
+where solid arrows denote then-arcs, while
+dashed (dotted) arcs are used for regular (com-
+plemented) else-arcs. It represents a binary func-
+tion F (a, b, c) of three binary variables a, b
+It is, for example, F (0, 1, 1) = 1 and
+and c.
+F (1, 1, 1) = 0. The represented function may
+be written as F = b ∧ (a ∨ c) ∧ (¬a ∨ ¬c). In a
+set-oriented interpretation, this BDD represents
+the one-set of F , i.e. the set having F as charac-
+teristic function. In our case, it stands for the set
+{h0, 1, 1i,h1, 1, 0i} where F evaluates to 1.
+
+The BDDs we utilize are ordered and reduced: The same
+variable ordering is followed along each path, and no two
+nodes representing the same set exist, so that each function
+has only one canonic representation. Furthermore, the ver-
+sion with complemented arcs is such that the set S is denoted
+by the same node as S (referred to with a complemented arc).
+The BDD way of representing sets is regarded as symbolic
+in that it avoids the explicit enumeration of sets’ elements
+in favor of a more abstract, diagram-based way of comput-
+ing characteristic functions. Such representations may be ex-
+ponentially more succinct than explicit ones (see [Wegener,
+2000]), and all the operations on the sets/functions they rep-
+resent (union/disjunction, intersection/conjunction, etc.) can
+be performed by manipulating the involved BDDs [Bryant,
+1986]. With a small abuse of notation, we treat BDDs as if
+they were the sets they represent. For example, x ∈ E is an
+element in the subset of Bn individuated by E.
+
+When we manage collections of BDDs, canonicity spans
+over their set of nodes as a whole. This allows the sharing of
+structural information among diagrams. A BDD in such a set
+
+1In [B¨uning and Zhao, 2004] propositional formulas and QBFs
+with free variables are used. Implicitness is not an issue for the au-
+thors as they focus on characterizing classes of models/formulas.
+
+a¬ab¬bb¬be¬cd¬d¬e  f¬e¬cd¬d¬e¬e  fcd¬de  ¬f¬ecd¬de  ¬fMab1F(a,b,c)cbof interconnected diagrams—called a forest—is identiﬁed by
+a (complemented) arc pointing to its root node.
+Deﬁnition 3.1 (QBF sat-certiﬁcate, validity) A sat-certi-
+ﬁcate for a QBF F with var∃(F )={e1, . . . , em}, var∀(F )=
+{u1, . . . , un}, and δi = δ(ei) is a forest of BDDs containing
+i and E−
+two roots hE +
+i are
+deﬁned over var∀(F, ei)={u1, . . . , uδi}. The certiﬁcate
+
+i i for each i in [1, m]. Both E +
+
+i ,E−
+
+C(F ) = [hE +
+
+1 ,E−
+
+1 i,hE +
+
+2 ,E−
+
+2 i, . . . ,hE +
+i ∩ E−
+
+m,E−
+mi]
+i = ∅.
+
+is consistent when ∀i ∈ [1, m] it is E +
+It is
+valid for F when for any hψ1, . . . , ψni ∈ Bn the formula
+[1, m]}, where the functions s(i) : Bδi → B are deﬁned as
+
+eF[u1=ψ1,...,un=ψn] is satisﬁed by {ei =s(i)(ψ1, . . . , ψδi), i ∈
+1 if hψ1, . . . , ψδii ∈ E +
+
+0 if hψ1, . . . , ψδii ∈ E−
+undef. otherwise
+
+s(i)(ψ1, . . . , ψδi) =
+
+i
+
+i
+
+In essence, a sat-certiﬁcate is a compact but explicit repre-
+sentation of the dependencies that have to exist between ex-
+istential (dependent) and universal (independent) variables in
+order to satisfy the matrix whichever the universal hypothesis.
+Lemma 3.1 If C(F ) is valid for a QBF F , then F is satisﬁ-
+able. Every satisﬁable QBF has at least one valid certiﬁcate.
+Proof sketch. A QBF is satisﬁable iff it has at least one
+model, i.e.
+iff we ﬁnd at least one tree-like structure (like
+the one introduced in Section 2), such that for every assign-
+ment U = [u1 = ψ1, . . . , un = ψn] to the universal variables
+the set of existential literals collected along the branch in-
+
+dividuated by U satisﬁes eF ∗ U. Given a consistent certiﬁ-
+cate C for F , we insert the literal ei into the label of the
+node reached following the u1 = ψ1, . . . , uδi = ψδi path
+iff hψ1, . . . , ψδii ∈ E +
+(and, dually, ¬ei appears in the label
+iff hψ1, . . . , ψδii ∈ E−
+i ). By construction, if the certiﬁcate
+is valid according to the notion of validity given in Deﬁni-
+(cid:3)
+tion 3.1, the tree-like structure obtained is a model.
+
+i
+
+A valid sat-certiﬁcate for (1) is depicted in Figure 1.
+
+4 Certiﬁcate veriﬁcation
+The ﬁrst thing we wish to do with a consistent certiﬁcate C
+for F is to verify its validity. We check that by choosing the
+truth values of the existential variables according to what the
+certiﬁcate suggests, we always satisfy the matrix.
+Function checkValidity(QBF F , certiﬁcate C)
+Let var∃(F ) be {e1, . . . , em};
+Let var∀(F ) be {u1, . . . , un};
+1 ,E−
+Let C be [hE +
+2 ,E−
+forall Γ ∈ F do
+
+2 i . . . ,hE +
+Let Γ be ψ1⊗ui1 ∨ ··· ∨ ψh⊗uih∨
+φ1⊗ej1 ∨ ··· ∨ φk⊗ejk;
+E ← (∪φi=0E +
+);
+if E [ui1 =ψ1,...,uih =ψh] 6= ∅ then return FALSE;
+
+) ∪ (∪φi=1E−
+
+1 i,hE +
+
+m,E−
+
+mi];
+
+ji
+
+ji
+
+return TRUE;
+
+Figure 1: A BDD-based sat-certiﬁcate for the QBF (1).
+
+An easy but impractical way of checking a certiﬁcate
+would be to check that M produces a satisfying assignment
+under all the possible universal hypotheses. Fortunately, the
+symbolic nature of the certiﬁcate helps us to perform a much
+more efﬁcient, clause by clause, BDD-based veriﬁcation. Let
+us use the exclusive or “⊗” to construct literals out of vari-
+ables (ϕ⊗v means v when ϕ = 0, and ¬v when ϕ = 1).
+Lemma 4.1 The algorithm checkValidity answers TRUE
+on hF,Ci if and only if C is a valid certiﬁcate for F .
+Let us consider, for example, the clause ¬u1 ∨ e1 ∨ u2 ∨
+¬e2 ∨ e3 under the preﬁx ∀u1∃e1∀u2∃e2∃e3. The only rele-
+vant universal hypotheses for this clause are those assigning
+both u1=1 and u2=0: All the others immediately satisfy the
+clause via one of its universal literals. So, it remains to verify
+that under the assignment [u1 =1, u2 =0] at least one of the
+that every
+three remaining literals in the clause is true, i.e.
+universal hypothesis containing u1 = 1, u2 = 0 falls within
+the one-set of at least one out of E +
+2 (for ¬e2),
+1 (for e1), E−
+and E +
+3 (for e3). This is a two-step check: First, we collect
+the universal hypotheses E = E +
+2 ∪E +
+1 ∪E−
+3 under which the
+clause is satisﬁed by some existential literal. Then, we check
+that all the hypotheses E (in which no existential literal satis-
+ﬁes the clause) assign either u1 = 1, or u2 = 0, or both, so
+that the clause is satisﬁed by a universal literal.
+
+The meaning of a successful veriﬁcation is twofold: We
+are ensured that the formula is sat, and that the certiﬁcate en-
+codes a model. Conversely, the veriﬁcation fails when either
+the certiﬁcate is invalid or the formula is unsat (we cannot
+tell right away which circumstance has occurred). Validity
+check is a coNP-complete problem [B¨uning and Zhao, 2004].
+
+5 Certiﬁcate Extraction
+For certiﬁcate extraction to be symbolic in the same sense as
+our certiﬁcate is, we want it to work on a BDD-based repre-
+sentation of the problem. We describe one such representa-
+tion (Section 5.1), and show how it relates to certiﬁcates (Sec-
+tion 5.2). Then, a two-step procedure is discussed to (a) eval-
+uate the instance (Section 5.3), and (b) construct a certiﬁcate
+on the basis of the steps taken in the evaluation (Section 5.4).
+
+5.1 Symbolic Formulas via Skolemization
+The Skolem theorem shows how to transform any given First
+Order Logic (FOL) statement F into a skolemized formula
+Sk(F ) that has two properties: (1) Sk(F ) contains no exis-
+tential quantiﬁer, and (2) Sk(F ) is satisﬁable iff F is satis-
+ﬁable. Existential quantiﬁers are eliminated by replacing the
+
+aa1c+(a)dbac-(a)e+(a,b,d)e-(a,b,d)f+(a,b,d)f-(a,b,d)aabvariables they bind with Skolem functions whose deﬁnition
+domains are appositely chosen to preserve satisﬁability. In
+the outer form of skolemization, the function introduced for
+e ∈ var∃(F ) depends on the universal variables var∀(F, e)
+that have e in their scope (for prenex formulas: all the univer-
+sal variables to the left of e in the preﬁx).
+
+Skolemization-based solvers replace the original formula
+F with the satisﬁability-equivalent instance Sk(F ). Such in-
+stance is no longer propositional. Nevertheless, we are able to
+capture its semantics without exceeding the expressive power
+of propositional logic, by explicitly managing the truth values
+of the (interpretation of) skolem terms in each point of their
+deﬁnition domains, as shown in [Benedetti, 2005].
+
+The duty we pay is a (possibly) exponential blowup in the
+size of the problem. BDDs come out to be precious in keeping
+this space explosion problem under control: What we actu-
+ally manage is a symbolic formula, i.e. a compact BDD-based
+representation of a propositional instance representing the de-
+ﬁnability of the set of skolem terms introduced in Sk(F ).
+Let as denote by Ψ|k the k-bit long preﬁx of Ψ ∈ Bn, n ≥
+k. The notion is extended to sets: I|k = {Ψ|k.Ψ ∈ I}.
+Deﬁnition 5.1 (Symbolic formula) A symbolic formula F is
+a BDD-based representation of a CNF instance.
+It con-
+sists of a symbolic preﬁx [e1]δ1 . . . [em]δm on the variables
+var(F) = {e1, . . . , em}, with 0 ≤ δ1 ≤ ··· ≤ δm, fol-
+
+lowed by a symbolic matrix eF, i.e. a conjunction of symbolic
+clauses. A symbolic clause ΓI is made up by a consistent set
+Γ = [ϕ1 ⊗ ei1, . . . , ϕh ⊗ eih] of literals on var(F), and a
+(BDD represented) subset I of Bδ(Γ), δ(Γ) .= maxl∈Γ δ(l).
+The CNF represented by F is called propositional expansion
+of F. It has variables {s(i)
+Φ , i ∈ [1, m], Φ ∈ Bδ(ei)}, and is
+deﬁned as P rop(F) .= ∧ΓI∈F P rop(ΓI), where
+
+ϕ1⊗s(1)
+Ψ|δ1
+
+∨ . . . ∨ ϕm⊗s(m)
+Ψ|δm
+
+P rop(ΓI) .= ^
+
+Ψ∈I
+
+Symbolic formulas inherit the semantics of their proposi-
+tional expansions (which we also call ground counterparts).
+Noticeably, a consistent set M = {[l1]I1, . . . , [lm]Im} of
+symbolic literals satisﬁes F (M |= F) iff its expansion
+P rop(M)=∪[l]J ∈MP rop([l]J ) satisﬁes P rop(F).
+Deﬁnition 5.2 (Symbolic skolemization) The symbolic sko-
+lemization SymbSk(F ) of a QBF F with var∃(F ) =
+{e1, . . . , em} is a symbolic formula with preﬁx [e1]δ(ei) ···
+[em]δ(em), having one symbolic clause [l1, . . . , lh]I for each
+clause Λ ∈ F , where {l1, . . . , lh} are the existential literals
+in Λ, {ϕ1⊗ei1, . . . , ϕh⊗eih} are the universal literals in Λ,
+and I = {hψi, . . . , ψki ∈ Bk |∀j.ψij 6= ϕj}, k = δ(Λ).
+As an example, the symbolic skolemization of (1) is given
+In essence, a symbolic skolemization F =
+in Figure 2.
+SymbSk(F ) is a compact representations for a purely exis-
+tential instance P rop(F) having the following key property.
+Theorem 5.1 For any QBF F , P rop(SymbSk(F )) sat≡ F .
+Proof sketch. By applying outer skolemization as described
+in [Benedetti, 2005] we turn the QBF instance F into a
+sat-equivalent purely universal formula: We substitute ev-
+ery existential variable v dominated by {u1, u2, . . . , un} ⊆
+
+01∃sc
+
+10∃sc
+
+00∃sc
+
+var∀(F ) with a Skolem function sv(u1, u2, . . . , un). For ex-
+
+ample, the instance (1) with matrix eN, is sat-equivalent to
+∀a∀b∀d. eN[sc(a, b)/c, se(a, b, d)/e, sf (a, b, d)/f]
+
+(2)
+Then, we propositionally encode the deﬁnability of the
+Skolem terms introduced, leveraging a noteworthy feature:
+They all map Bn onto B (for some n ≥ 0), hence they
+are fully speciﬁed by 2n boolean parameters, and have a
+direct CNF representation. For example, if we denote by
+{sc
+αβ,hα, βi ∈ B2} the four boolean parameters represent-
+ing the truth value of sc over hx, yi, we obtain for sc(a, b) the
+following propositional skolemization Sk(sc) ≡ sc(a, b):
+10) ∧ (¬a∨¬b∨sc
+(a∨b∨sc
+11)
+By replacing each v∈var∃(F ) with Sk(sv) we obtain Sk(F )
+∃sc∃se∃sf∀a∀b∀d. eN[Sk(sc)/c, Sk(sd), Sk(se)/e]
+
+01) ∧ (¬a∨b∨sc
+
+00) ∧ (a∨¬b∨sc
+
+010) ∧ (sc
+
+001) ∧ (sc
+
+000) ∧ (sc
+
+where ∃sc stands for ∃sc
+11, and similarly for
+the other functions. This formula is easily turned—clause
+by clause—into a CNF. By distributing the connectives, re-
+moving clauses with complementary literals, and eliminating
+literals over universal quantiﬁers, we obtain 2δ(Γ)−m clauses
+out of a QBF clause Γ with m universal literals. For example,
+we obtain 23−1=4 clauses from the clause a∨c∨f in (1):
+01 ∨ sf
+00 ∨ sf
+011)
+(sc
+All the clauses coming out of a given QBF clause mention
+the same skolem functions. What makes one differ from an-
+other are the subscripted indexes. This allows us to write
+them compactly by representing function names apart from
+indexes. For example, the four clauses above may be suc-
+cinctly represented as ΓI = [c, f]{000,001,010,011}, where
+I ⊆ Bδ(Γ) contains one element per clause, and the i-th
+component of each Ψ ∈ I refers to the universal variable
+ui: Once Ψ ∈ I is selected, each literal l obtains its own
+subscript by projecting Ψ onto the subspace related to the
+ﬁrst δ(l) components, written Ψ|δ(l) . For example, given
+Ψ=010 it is Ψ|δ(c)=Ψ|2=01 and Ψ|δ(f )=Ψ|3=010, hence
+[c, f]{010}=sc
+010. This property allows us to recover the
+ground meaning of a factored clause through the P rop func-
+tion. The factored representation becomes symbolic as soon
+as we represent and manipulate sets of indexes via BDDs
+over var∀(F ), thus obtaining the (linear-size) representation
+(cid:3)
+SymbSk(F ).
+For example, the propositional expansion of the formula in
+
+00 ∨ sf
+
+01 ∨ sf
+
+01∨sf
+
+Figure 2 yields a CNF instance equivalent to (1).
+5.2 From symbolic models to certiﬁcates
+The connection between a symbolic model and a certiﬁcate is
+so close that the former is smoothly turned into the latter. Let
+i(M, l) .=∪[l]I∈MI be the indexes on the literal l mentioned
+in a symbolic model M.
+Theorem 5.2 If M |= SymbSk(F ), then the certiﬁcate
+i]
+e = i(M,¬e) is valid for F .
+
+C(M) .= [hC+
+e = i(M, e), and C−
+
+e2i, . . . ,hC+
+
+e1i,hC+
+
+with C+
+
+e1,C−
+
+e2,C−
+
+,C−
+
+em
+
+em
+
+I0, i.e. when Γ0 ⊆ Γ and I ⊆ I0. Under this condition,
+Γ0
+ΓI can be removed. In partial subsumption (Γ0 ⊆ Γ but
+I 6⊆ I0) the subsumed clause is replaced by ΓI∩I0.
+• Substitution: We write [l/a]J , δ(l) ≤ δ(a), to denote
+the substitution of lΨ|δ(φ) for aΨ for each Ψ ∈ J :
+
+ΓI[l/a]J = (Γ[l/a])I∩J ∧ ΓI∩J
+
+(4)
+The rules above establish primitive manipulation capabilities
+for the solver. It arranges these components into the following
+higher-level, satisﬁability-preserving transformations.
+Assignment. When [l]J is realized to be a consequence of
+F (i.e.: for all Ψ ∈ J , it is P rop(F) ‘ lΨ), the formula
+is simpliﬁed to F ∗ [l]J by assigning [l]J , i.e. resolving
+against [¬l]J and subsuming against [l]J .
+
+Equivalence reasoning. If the solver discovers a proof that
+J↔[l] (i.e.: ∀Ψ∈J , P rop(F) ‘ aΨ|δ(a)↔lΨ), it is en-
+[a]
+titled to simplify F by applying the substitution [l/a]J .
+Redundancy removal. Subsumption is applied to eliminate
+subsumed clauses. This may heavily reduce the burden
+on the solver, while logical equivalence is preserved.
+
+Variable elimination. The clauses containing a variable d
+are replaced by the set of resolvents of every clause con-
+taining d against each clause containing ¬d (Figure 3).
+Symbolic elimination rules out one symbolic variable,
+hence all the related ground variables at once.
+
+As far as we are concerned, a solution-based evaluation pro-
+cedure is an algorithm that produces a (memory and time af-
+fordable) sequence of instantiations of the above rules, and
+guarantees to end up with the empty formula on sat instances,
+and with a contradiction (an empty clause) on unsat formu-
+las. Each step is a back-chaining reduction from a problem F0
+to a problem F. Hence, a model for the original instance is
+not directly extracted. Rather, satisﬁability equivalence guar-
+antees that at each step, should F have a model, than a model
+for F0 could be (easily) derived.
+
+This apparent drawback suddenly turns into an advantage.
+It indeed allows to decouple evaluation from model recon-
+struction, with almost no overhead for the former and a clear
+semantics for the latter. The two meshes of the chain are con-
+nected through an inference log, produced by the solver, and
+subsequently read by a model reconstructor.
+Deﬁnition 5.3 (Inference log and trace) An inference log is
+a list of entries, each one describing an instantiation of one
+of the above sat-preserving transformations. It contains:
+
+the set of clauses containing {a,¬l} or {¬a, l}.
+and G− are the sets of clauses containing d and ¬d.
+
+• hassign, l,J i, for an assignment [l]J .
+• hsubst, a, l,J ,Gi, for a substitution [l/a]J , where G is
+• helim, d,G+,G−i, for the elimination of d, where G+
+Let us denote with I(F, op) the formula obtained by ap-
+plying to F the transformation described by the entry op.
+An inference log L = [op1, op2, . . . , opt] induces an infer-
+ence trace [F0,F1, . . . ,Ft] where Fi = I(Fi−1, opi), with
+F0 = F. A log such that Ft is empty is called sat-log for F.
+Clearly, a sat-log for F exists iff F is sat. For example, the
+reader may verify that Figure (4) depicts a sat-log for (1).
+
+Figure 2: Symbolic propositional skolemization for (1).
+
+Ψ in P rop(F), F =
+Proof. The propositional variable si
+SymbSk(F ) represents, for each i ∈ [1, m] and each Ψ =
+hψ1, . . . , ψki ∈ Bk, k=δ(ei), the value the Skolem function
+s(i)(u1, . . . , uk) (introduced to skolemize ei ∈ var∃(F )) as-
+sumes under the universal hypothesis [u1=ψ1, . . . , uk=ψk].
+By construction, F embodies the deﬁnability of the skolem
+terms, i.e. all the mutual constraints among (interpretation
+of) terms that have to be obeyed to always satisfy the ma-
+trix. A model M for F is a way to comply with all these
+constraints at once: s(i)(ψ1, . . . , ψk) has to evaluate to 1 if
+Ψ ∈ P rop(M), to 0 if ¬s(i)
+Ψ ∈ P rop(M), and is uncon-
+s(i)
+strained otherwise. By comparing the resulting functions
+if hψ1, . . . , ψki ∈ C+
+if hψ1, . . . , ψki ∈ C−
+
+se(ψ1, . . . , ψk) =
+
+e
+
+ 1
+
+0
+undef ined otherwise
+
+e
+
+with Deﬁnition 3.1 (valid certiﬁcates) the thesis follows. (cid:3)
+5.3 Evaluating symbolic formulas
+We devote our attention to solution-based procedures [Biere,
+2004; Pan and Vardi, 2004; Benedetti, 2005], as they may be
+lifted to extract models symbolically. We consider a solver
+that manipulates symbolic clauses through rules designed to
+achieve at once on ΓI the same result ground rules would
+obtain if applied separately to each clause in P rop(ΓI).
+• Resolution: Given two resolving clauses containing the
+same variable e in opposite polarities, we construct a
+necessary consequence—called resolvent clause—made
+up by all the literals from both originating clauses apart
+from e and ¬e. For the symbolic version to produce at
+most one symbolic resolvent per step, we only resolve on
+variables with the same universal depth as all the clauses
+in which they appear. The resolvent of ΓI and Γ0
+I0 on e,
+with e∈Γ, ¬e∈Γ0, δ(Γ)=δ(Γ0)=δ(e), is2.
+(Γ \ {e} ∪ Γ0 \ {¬e})I∩I0
+
+(3)
+If either I ∩ I0 = ∅ or Γ and Γ0 share further couples
+of complementary literals other than e and ¬e, the resol-
+vent represents an empty set of clauses and is removed.
+I0 when all the
+ground clauses in ΓI are subsumed by some clause in
+
+• Subsumption: ΓI is subsumed by Γ0
+
+2To simplify the notation, we omit the projection of the index
+sets of derived clauses onto the proper subspaces: Whenever ΓI is
+derived, the clause actually inserted into the formula is ΓI|δ(Γ).
+
+[c, f]{}[¬c,¬f]{}[e, f]{}[¬e,¬f]{}[e]{}[¬e]{}[¬e]{}[e]{}[¬c]{}∧∧∧∧∧∧∧∧db1abdddb#1
+
+#2
+#3
+
+#4
+#5
+
+hsubstitute, f,¬e,{010, 011},{[e, f ]{010,011,110,111},
+
+[¬e,¬f ]{000,001,010,011}}i
+
+hassign,¬e,{001, 011, 100, 110}i
+hresolve, f,{[f ]{110}, [c, f ]{000,001}, [e, f ]{111}},
+
+{[¬c,¬f ]{100,101,110,111}, [¬e,¬f ]{000}}i
+
+hassign, e,{111}i
+hresolve, c,{[c]{00,01}},{[¬c]{10,11}}i
+
+Figure 3: Moving from F 0 to F by eliminating the variable d.
+
+Inductive model reconstruction
+
+5.4
+Once a sat-log is known, the reconstructor comes into play.
+It trusts the solver about the log being a sat-log, and parses it
+backward, reasoning by induction on the number of entries:
+Base case. At the end of the inference trace we ﬁnd the
+empty formula Ft, satisﬁed by an empty model Mt.
+Inductive case. Given a model Mi for Fi, the reconstructor
+computes a model Mi−1 = R(Mi, opi) for Fi−1 by
+reasoning on how opi turned Fi−1 into Fi.
+This leads to a model M0 for F, hence to a certiﬁcate for F ,
+once the function R has been properly deﬁned. Let us denote
+by i(F) .=∪ΓI∈FI the set of indexes mentioned in F.
+Theorem 5.3 When applied to any sat-log for F, the induc-
+tive model reconstruction procedure deﬁned by the following
+function R computes a model M0 for F0 = F.
+R(M, op)
+M ∪ {[l]I}
+
+hassign, l,Ii
+
+hsubst, e, l,I,Gi exts(M ∪ {[e]I∩i(M,l), [¬e]I∩i(M,¬l)})
+helim, e,G+,G−i Me ∪ {[e]i(G+∗Me), [¬e]i(G−∗Me)}
+where exts(M) .=M ∪ [e]i(G∗M), and Me .=exte(M), with
+I0i ∈ G+∗M×G−∗M
+with e6=v, v∈Γ∩Γ0, I ∩ I06=∅
+
+ext(M∪[v]I) if ∃hΓI, Γ0
+
+exte(M)=
+
+M, otherwise
+
+op
+
+2+ ∪ F0
+
+0 mentions e, all the clauses in F0
+
+Proof. For each op we show that R(M, op) |= F0, working
+under the inductive hypothesis of knowing a model M for
+F = I(F0, op) (i.e. F ∗ M is the empty formula).
+Assignment. F ∗M = (F0 ∗ [l]I)∗M = F0 ∗ ({[l]I}∪M)
+is empty, hence {[l]I}∪M satisﬁes F0.
+1 ∪ F0
+0 ∪ F0
+Equivalence. Let F0 be F0
+2−, where no
+clause in F0
+1 mention e but
+2+ contain both e and l (or ¬e and
+not l, ¬l; all the clauses in F0
+2− contain e and ¬l (or ¬e and l). M
+¬l), and the clauses in F0
+satisﬁes F=F0[l/e]I=F0 ∪ (F0
+2+)[l/e]I, hence it satis-
+1 ∪F0
+ﬁes F0
+2+
+provided we mirror on e the assignments collected so far over
+l, by adding [e]I∩i(M,l) and [¬e]I∩i(M,¬l). In general, the re-
+sulting model M+ = M ∪ {[e]I∩i(M,l), [¬e]I∩i(M,¬l)} sat-
+isﬁes all the clauses in F0 but some in F0
+2−: By construction,
+such clauses failed to pass to F because F0
+2−[l/e]I = G[l/e]I
+is empty (clauses satisﬁed by complementary e/¬l literals).
+To satisfy the (possibly) nonempty remaining set G ∗ M+ of
+
+0 = F0 with no modiﬁcation. It also satisﬁes F0
+
+1 ∪F0
+
+Figure 4: A sat-log that solves the QBF (1).
+
+clauses, we extend M+ by applying the exts function: It adds
+an arbitrary truth assignment to all (and only) the indexes for
+e mentioned in G ∗ M+, i.e. it adds [e]i(G∗M+).
+
+i , Γ−
+
+i , Γ−
+
+d × G−
+
+i and Γ−
+
+d = ∧iΓ+
+
+Variable elimination. We focus on the insightful ground-
+case proof (see Figure 3). The extension to the symbolic
+case is a matter of notation. Suppose that the model M
+for F satisﬁes at least one clause of each hΓ+
+j i couple,
+i , Γ−
+i ∈ [1, n], j ∈ [1, m]. This implies that it either satisﬁes the
+d = ∧iΓ−
+i , or the whole G−
+whole set G+
+i , or both.
+Hence, we are free to choose a literal on d in such a way to
+satisfy F 0: M ∪{a} satisﬁes F 0 when G+
+d ∗ M is non-empty,
+M∪{¬a} when G−
+d ∗M is non-empty, while M itself sufﬁces
+when both sets are empty. Now, we show that every model M
+for F either satisﬁes at least one clause in each hΓ+
+j i cou-
+ple, or can be extended to a model exte(M) that fulﬁlls this
+property. The former case happens (at least) when no resol-
+vent clause has been satisﬁed by complementary literals dur-
+ing variable elimination. In this case, F contains exactly m∗n
+resolvents, one for each couple in G+
+d . Every model of
+a resolvent is valid for at least one of its resolving clauses,
+hence the thesis. Now, suppose that the couple hΓ+
+j i is
+not satisﬁed by M. It follows that M doesn’t model the resol-
+vent of Γ+
+j , hence such resolvent failed to pass to F :
+It was satisﬁed by complementary literals on some still unas-
+signed variable v 6= d. A literal on v can be arbitrarily added
+to the model under construction to satisfy either Γ+
+j (no
+conﬂict arises: v would have not appeared as unassigned if in-
+volved in any past—w.r.t. the solver’s standpoint—inference
+step). This extension of M to exte(M) is repeated until no
+(cid:3)
+unsatisﬁed couple is left.
+Examples: M0 = {a,¬b, c} is a model for F 0 = (¬a∨c) ∧
+(a∨b∨¬c) ∧ (¬a∨¬b) because M = {a,¬b} is a model for
+F = F 0 ∗ c = (a∨b) ∧ (¬a∨¬b). M0 = {¬a, b, c} is a model
+for F 0 = (¬a∨c)∧ (a∨b∨¬c)∧ (¬a∨¬b) because M = {b, c}
+is a model for F 0[¬c/a] = c ∧ (b∨¬c) ∧ (c∨¬b). In Figure 3,
+the assignment M1 ={a, b, c} satisﬁes F and also F 0: d is
+left unassigned. The model M2={a,¬b} satisﬁes G+
+d but not
+d , hence M0=M2 ∪ {¬d} is constructed to satisfy F 0. The
+G−
+1 i is untouched by M3={a}, so no truth value
+couple hΓ+
+for d helps. But the resolvent of Γ+
+1 was satisﬁed
+by complementary literals on b, so we construct exte(M3)=
+M3 ∪ {b}, then satisfy F 0 with M0 = exte(M3) ∪ {¬d} =
+{a, b,¬d}. As a complete example, the reader may verify
+that by performing inductive model reconstruction according
+to the rules given in Theorem 5.3 over the sat-log in Figure 4
+for the SymbSk(F ) in Figure 2, a model is extracted which
+through Theorem 5.2 produces the sat-certiﬁcate in Figure 1.
+
+2 and Γ−
+
+i or Γ−
+
+2 , Γ−
+
+a∨d¬b∨c∨db∨¬da∨¬b∨¬da∨¬c∨¬dΓ +:1Γ +:2Γ -:1Γ -:2Γ -:3resolveover ''d''All the clausescontaining "d"All the clausescontaining "¬d"Other clauses on "a", "b", and "c"a∨ba∨¬ba∨¬ca∨¬b∨cΓ     :1-1Γ     :1-2Γ     :1-3Γ     :2-2...Σ   :1...Σ   :2...Σ   :k. . .Resolvent clausesUntouched clausesΣ   :1Σ   :k...6 Discussion and Conclusions
+We presented a solution to an open question on QBFs, namely
+the problem of representing, verifying and extracting their
+sat-certiﬁcates. The importance of such solution is twofold:
+It gives means of conveying solver-independent evidence of
+satisﬁability, and enables the extraction of precious informa-
+tion from certiﬁed formulas. The former feature can be used,
+for example, to effectively test the decisions of QBF solvers.
+The latter contribution is valuable to applications, in that a
+certiﬁcate is needed to exemplify a deﬁnite scenario in which
+QBF-encoded problems reveal their satisﬁability. For exam-
+ple, a sat-answer sufﬁces to know that at least one winning
+strategy exists in a QBF-encoded two-player game, but it
+takes a certiﬁcate to exhibit an actual strategy.
+
+Stand-alone certiﬁcates convey no self-contained seman-
+tics, as the meaning of each variable is a piece of informa-
+tion held by the “encoders”. To allow semantics’ owners
+to interrogate their own QBF models, we have implemented
+a solver/veriﬁer suite [Benedetti, 2004b; 2004a] to produce,
+verify, dump to ﬁle (in open formats), and query certiﬁcates.
+This implementation is helping to shed light on further
+open questions on QBFs. For example: Is QBF certiﬁcation
+impractical? Let us deﬁne the certiﬁcation of F “impracti-
+cal” when it is affordable to solve F while it is not feasible to
+memorize and/or verify any certiﬁcate C(F ). Our approach
+suggests that impracticality is not an issue. For instance, the
+certiﬁcates in Table 1 are well within the manipulation capa-
+bilities of current machines, while the formulas they certify
+are hard for present solvers3. Another crucial question we
+are enabled to address is the following: Given a certiﬁcate C
+for F , how much in practice the trio hF,C, verifyi improves
+on the couple hF, decidei as a means to prove that F is sat?
+Metrics such as the time · space product will be used to pre-
+cisely compare the two strategies. Our results already suggest
+that the improvement is quite large, as exempliﬁed in Table 1.
+We observed a surprising phenomenon: The time taken
+to reconstruct a model may overcome the time needed to
+solve the instance. This is rather unusual when compared,
+for example, with search-based SAT reasoning, where a
+model is extracted with no overhead on the satisﬁability deci-
+sion. Conversely, we have not yet observed an expected phe-
+nomenon: checkValidity would operate in polynomial
+time should we employ a constant-time BDD oracle. The
+non-polynomiality of veriﬁcation stems from the size of the
+forest of BDDs, which should grow exponentially for some
+parametrically scalable family of instances. This unfavorable
+phenomenon doesn’t show up in Table 1: Certiﬁcates scale
+up polynomially with instance size. These effects and upper
+bounds on the certiﬁcate size will be further investigated.
+
+We showed how to extract certiﬁcates using a particular
+class of QBF solvers (the skolemization-based ones). How-
+ever, the BDD-based representation we employ is solver-
+independent. It comes out that not only the mere represen-
+tation but also the technique for constructing certiﬁcates can
+be lifted to work with other families of QBF-solvers. The
+
+3The “adder” family belongs to a set of benchmarks related to
+equivalence checking of partial implementations of circuits, and is
+regarded as extremely challenging [Le Berre et al., 2004]
+
+|C|
+
+Tv
+0.1
+0.1
+0.1
+0.4
+4.6
+
+|L|
+38
+165
+384
+695
+1098
+
+∃
+∀
+37
+27
+174
+106
+411
+237
+420
+748
+755 1185
+
+Tr
+Ts
+0.1
+0.1
+0.1
+0.2
+2.3
+0.6
+4.6
+35.6
+40.2 537.2
+
+instance
+3.7 · 102
+adder-2
+7.1 · 103
+adder-4
+5.6 · 104
+adder-6
+1.1 · 105
+adder-8
+4.1 · 106
+adder-10
+Table 1: A family of QBF encodings with ∀∃∀∃ alternation. We
+report: the number of existential (∃) and universal (∀) variables, the
+time taken to solve/reconstruct/verify (Ts,Tr,Tv), the size of the log
+(|L|, number of steps) and of the certiﬁcate (|C|, number of nodes).
+
+key ingredient stays the same: Inductive model reconstruc-
+tion detached from instance evaluation, with an inference log
+in between. What changes is the kind of information recorded
+in the log (and the way it is to be interpreted).
+
+We are extending our technique towards solvers based on
+(1) non-symbolic q-resolution, (2) SAT reasoning, and (3)
+symbolic/non-symbolic DPLL-like branching reasoning. The
+ultimate goal is to build a QBF model reconstructor able
+to extract certiﬁcates by interpreting generic QBF inference
+logs4, whichever the evaluation strategy adopted to solve the
+instance (including hybrid strategies such as the one lever-
+aged by the QBF solver sKizzo [Benedetti, 2004b]).
+
+Acknowledgments
+We thank Amedeo Cesta and Gigina Aiello for their com-
+ments on how to improve the organization of the paper, Marco
+Cadoli for helpful discussions on technical issues, and the
+anonymous referees for their precious remarks.
+References
+[Benedetti, 2004a] M. Benedetti. sKizzo: a QBF Decision Procedure based on Propo-
+sitional Skolemization and Symbolic Reasoning. Technical Report 04-11-03, ITC-
+irst, 2004.
+
+[Benedetti, 2004b] M. Benedetti. sKizzo’s web site, sra.itc.it/people/
+
+benedetti/sKizzo. 2004.
+
+[Benedetti, 2005] M. Benedetti. Evaluating QBFs via Symbolic Skolemization.
+
+In
+Proc. of the 11th International Conference on Logic for Programming, Artiﬁcial
+Intelligence, and Reasoning (LPAR04), number 3452 in LNCS. Springer, 2005.
+
+[Biere, 2004] A. Biere. Resolve and Expand. In Proc. of SAT’04, 2004.
+[Bryant, 1986] R. E. Bryant. Graph-based algorithms for Boolean function manipula-
+
+tion. IEEE Transaction on Computing, C-35(8):677–691, 1986.
+
+[B¨uning and Zhao, 2004] H. K. B¨uning and X. Zhao. On Models for Quantiﬁed
+
+Boolean Formulas. In Proc. of SAT’04, 2004.
+
+[Gent and Rowley, 2003]
+
+I. Gent and A. Rowley. Encoding Connect-4 using Quanti-
+
+ﬁed Boolean Formulae. Technical Report 68-2003, APES Research Group, 2003.
+
+[Le Berre et al., 2004] D. Le Berre, M. Narizzano, L. Simon, and A. Tacchella. Second
+
+QBF solvers evaluation, avaliable on-line at www.qbflib.org. 2004.
+
+[Pan and Vardi, 2004] G. Pan and M.Y. Vardi. Symbolic Decision Procedures for QBF.
+In Proc. of the 10th Conf. on Princip. and Practice of Constraint Programming,
+2004.
+
+[Rintanen, 1999] J. Rintanen. Construction Conditional Plans by a Theorem-prover.
+
+Journal of A. I. Research, pages 323–352, 1999.
+
+[Rintanen, 2001] J. Rintanen. Partial implicit unfolding in the davis-putnam procedure
+for quantiﬁed boolean formulae. In Proceedings of the International Conference on
+Logic for Programming, Artiﬁcial Intelligence and Reasoning (LPAR’01), 2001.
+
+[Stockmeyer and Meyer, 1973] L. J. Stockmeyer and A. R. Meyer. Word Problems
+Requiring Exponential Time. In In 5th Annual ACM Symposium on the Theory of
+Computing, 1973.
+
+[Wegener, 2000]
+
+Ingo Wegener. Branching Programs and Binary Decision Diagrams.
+
+Monographs on Discrete Mathematics and Applications. SIAM, 2000.
+
+4A standard log format for each inference rule is required.
+
+

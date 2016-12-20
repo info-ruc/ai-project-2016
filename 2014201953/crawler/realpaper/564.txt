@@ -1,0 +1,907 @@
+Factored Planning 
+
+Eyal Amir and  Barbara Engelhardt 
+
+Computer Science Division, University of California at Berkeley 
+
+Berkeley, CA 94720-1776, USA 
+
+{eyal,bee}@cs.berkeley.edu 
+
+Abstract 
+
+We present a general-purpose method for dynami(cid:173)
+cally factoring a planning domain, whose structure 
+is then exploited by our generic planning method 
+to find sound and complete plans. The planning al(cid:173)
+gorithm's time complexity scales linearly with the 
+size of the domain, and at worst exponentially with 
+the size of the largest subdomain and interaction be(cid:173)
+tween subdomains. The factorization procedure di(cid:173)
+vides a planning domain into subdomains that are 
+organized in a tree structure such that interaction 
+between neighboring subdomains in the tree is min(cid:173)
+imized. The combined planning algorithm is sound 
+and complete, and we demonstrate it on a represen(cid:173)
+tative planning domain.  The algorithm appears to 
+scale to very large problems regardless of the black 
+box planner used. 
+
+Introduction 
+
+1 
+Many planning algorithms use independencies or loose  in(cid:173)
+teractions  between  components  in the  planning  domain  to 
+find plans more efficiently.  For example, hierarchical plan(cid:173)
+ners divide a goal into subgoals (high-level operators) using 
+a decomposition of the domain into loosely interacting parts 
+(e.g., [Knoblock, 1990; Erol et ai, 1994]). Planning is done 
+at each level separately, and later the subplans are pieced to(cid:173)
+gether to build a valid plan.  Other planners that use domain 
+decomposition (e.g., [Lansky and Getoor, 1995]) are not lim(cid:173)
+ited to domains with explicit hierarchical structure, but re(cid:173)
+quire backtracking across subdomains, and often replan for 
+subgoals that already have valid plans.  In general, domain-
+decomposition planning does not scale well because back(cid:173)
+tracking between subdomains can dominate the complexity 
+of the search, and the domain decomposition is often ad hoc. 
+In this paper we present an approach to planning that scales 
+to very large domains by taking advantage of domain struc(cid:173)
+ture. This approach is composed of two procedures: factoring 
+and planning.  The factoring procedure partitions a planning 
+domain  into  loosely  interacting  subdomains  that  are  orga(cid:173)
+nized in a tree structure. Our factoring procedure uses decom(cid:173)
+position algorithms from graph theory, and our contribution 
+in this matter is in translating the planning-problem decompo(cid:173)
+sition task into a graph decomposition task.  After factoring, 
+
+our planning procedure finds plans for multiple subgoals in 
+each of the subdomains separately, using a generic black box 
+planner. It searches over possible plans using complex action 
+descriptors from each of the subdomains to form a plan for 
+the overall goal.  The planning procedure uses dynamic pro(cid:173)
+gramming principles, and backtracking occurs only within a 
+subdomain as part of the black box planner. 
+
+We prove that our planning procedure runs in time linear in 
+the number of subdomains and takes time that is at most ex(cid:173)
+ponential in the size of the largest subdomain and the number 
+of dependencies between subdomains.  The type of factoring 
+that we select is justified by this complexity result.  We also 
+prove that the combined algorithm is sound and complete, 
+and that it can be applied to solve any planning problem us(cid:173)
+ing any generic black box planner for planning within subdo(cid:173)
+mains.  The complexity is upper bounded by the complexity 
+of the black box planner on the unpartitioned domain. 
+
+We implemented and tested our planning algorithm on a 
+simple domain to guide further development. We created two 
+implementations, one with the IPP planning system [Koehler 
+and Hoffmann, 2000] and one with the FF planner [Hoffmann 
+and Ncbel, 2001]. We compared the results of our algorithm 
+with those of IPP and FF, and have shown that for a single do(cid:173)
+main our results scale much better than these planners alone. 
+The example validates our analytical results and shows that 
+our planner's performance scales linearly with the size of the 
+domain for this problem, motivating further development. 
+2  Factored Planning 
+In this section we present an algorithm for planning with a 
+partitioned planning domain, where the subdomains are ar(cid:173)
+ranged in a rooted tree.  Each subdomain corresponds to a 
+subset of the fluents, or single states,  in the domain and a 
+subset of the actions which use only those fluents. Neighbor(cid:173)
+ing subdomains may share fluents and actions, and the ideal 
+partition has the smallest number of shared fluents. We ana(cid:173)
+lyze this algorithm computationally and present a procedure 
+for finding a tree partition with close-to-optimal properties. 
+
+2.1  Partitioned Planning Problems 
+We restrict ourselves to partitioned planning problems that 
+are described using a simple propositional action language. 
+A partitioned domain description is a labeled graph that de(cid:173)
+scribes a set of subdomains and the connections between the 
+
+PLANNING 
+
+929 
+
+subdomains. Formally, a partitioned domain description is a 
+labeled graph 
+
+with 
+
+• 
+
+vertices:  for all 
+planning domain description with 
+
+is a 
+
+a set of propositional //MeflAv (features of our do(cid:173)
+
+main that may change value over time), 
+
+a set of action (operator) definitions over 
+
+•  Edges E over 
+•  A labeling / of the edges in E.  For every 
+
+and 
+
+is a subset of fluents from 
+
+The label 
+
+includes at least the fluents shared be(cid:173)
+tween 
+but it may include other (e.g. 
+global) fluents. We use the convention that action 
+refers 
+to the action definition (also called action schema) and that at 
+denotes the instantiation of the action in a plan. We say that 
+action 
+
+iff it is defined in 
+
+is in subdomain 
+
+We specify the preconditions and effects of actions in Ai 
+using the simple language of situation calculus (with preposi(cid:173)
+tional fluents), and allow actions to have conditional effects. 
+We use the simple compilation technique of [Reiter, 2001] 
+to provide monotonic semantics for this language (and avoid 
+the frame problem).  All of our results apply to the PDDL 
+language [Fox and Long, 2002] as well. PDDL is the repre(cid:173)
+sentation language used in our example (Section 3) to model 
+the domains, the subdomains, and the plans. 
+
+fluents, 
+
+2.2  Planning Algorithm 
+Here we present our planning algorithm, PartPlan (Figure 2), 
+which finds plans in a partitioned domain. We use the follow(cid:173)
+ing notation. For P a set of propositional 
+is the 
+language of P, i.e., the set of propositional sentences that can 
+be built with P. 
+High-Level Overview 
+PartPlan processes a partitioned domain tree iteratively from 
+the leaves to the root (the subdomain that holds the goal of 
+PartPlan). It selects a leaf subdomain, tries to build plans for 
+each of a set of possible preconditions and goals (Step 2b), 
+records the successful attempts, adds them as new (macro(cid:173)
+like) actions to this leaf's single parent subdomain (Step 2c), 
+and removes that leaf subdomain from the graph. 
+
+The result of planning in each subdomain is not a complete 
+plan, but rather a compilation of capabilities, which contain 
+both subdomain actions and capabilities of descendant sub-
+domains. Generally, every subdomain's capabilities are those 
+plans that it can find (using its own actions and capabilities of 
+its neighbors) that affect the fluents that it shares with its par(cid:173)
+ent subdomain in the tree.  Capabilities of a subdomain are 
+shared by sending a message to the parent domain containing 
+a complex action describing the capability. 
+
+When the tree is reduced to the single subdomain (after the 
+iterative processing and removal of leaves) that contains the 
+problem goal, we perform planning in that node to achieve 
+the goal condition, based on the capabilities from the (elim(cid:173)
+inated) child subdomains (Step 3).  Then, the plan found by 
+this subdomain is expanded into a plan that achieves the over(cid:173)
+all problem goal, using the actions of this subdomain along 
+
+with the reported capabilities of the children in the tree. Ev(cid:173)
+ery capability that appears in this plan is expanded into a sub-
+plan by the subdomain that reported it.  Those subplans can 
+themselves contain capabilities that are then expanded, and 
+the process continues until the plan contains only the original 
+domain actions. 
+The Simple Algorithm is Incomplete 
+The view presented above  leaves the exact nature of plan(cid:173)
+ning in each subdomain unspecified. It suggests, roughly, that 
+planning in each subdomain takes the form of finding a plan 
+that starts from some initial state of local fluents and reaches 
+a specified end state of local fluents. Unfortunately, limiting 
+ourselves to this kind of message from children subdomains 
+to parents is incomplete, as demonstrated in the following ex(cid:173)
+ample (see Figure 1 for an illustration). 
+
+Charger 
+
+Actions: 
+charge, switch 
+Fluents: 
+battery I 
+full 
+battery  2  full 
+second_power_line 
+upgraded 
+
+battery l_full 
+battery2_full 
+second_powe 
+
+line 
+
+Robot 
+
+Actions-
+add_line_segment 
+
+Fluents: 
+battery 1 ..full 
+battery 2_iu II 
+sccond_power_lme 
+one_segment 
+two_scgments 
+
+Figure 1: Subdomains for upgrading a battery charger. 
+
+Consider a scenario in which we have a charger that can 
+charge batteries and a robot that can connect power cables to(cid:173)
+gether and that uses two batteries. Initially, every charge ac(cid:173)
+tion of the charger charges exactly one battery, so two charge 
+actions are required to charge both of the robot's batteries. 
+However, if the charger is connected to an additional power 
+source, then a single charge action charges two batteries at 
+once. Our task is to upgrade the charger so that it can charge 
+two batteries at once.  For this,  the robot needs to build a 
+power line that is long enough to reach the charger, and the 
+charger needs to switch to using both sources.  Thus, build(cid:173)
+ing this line requires multiple charges interleaved with adding 
+lines.  A plan that solves this problem needs to charge the 
+robot's batteries, add a line segment, charge again, add an(cid:173)
+other line segment, charge again, add the final line segment, 
+and switch the charger to the new mode. 
+
+We want our factored-planning approach to apply to any 
+given planning problem and be complete (i.e., find a plan if 
+there is one) regardless of the plan partition.  We will show 
+that there is a partitioning of this problem so that simple mes(cid:173)
+sages of the form "if X holds, then 1 can make Y hold" are 
+not sufficient in a directed tree to find a complete plan. Mes(cid:173)
+sages of the form  "if 
+if  you 
+hold,  then  1  can  cause  to hold" are 
+subsequently make 
+required for domains with interleaved interactions as in this 
+example. These complex messages can be extended for larger 
+numbers of interleaved preconditions and effects, and the al(cid:173)
+gorithm we present allows that type of message. 
+
+holds, then 1 can cause 
+
+One  possible  partitioning  of the  example  above  is  pre(cid:173)
+sented  in Figure  1.  On the left-hand side we  include the 
+
+930 
+
+PLANNING 
+
+actions charge and switch, and the features battery I. full, 
+battery2.full, second jpotver. 
+and upgraded. The ac(cid:173)
+tion charge has the following effects and preconditions: 
+
+Action switch has the following effects and preconditions: 
+• If second .power dine, then switch causes upgraded. 
+On  the  right-hand  subdomain  we  include  the  ac(cid:173)
+
+tion add dine .segment, and the features 
+(cid:173)(cid:173)(cid:173)(cid:173)(cid:173)(cid:173)(cid:173)(cid:173)(cid:173)(cid:173)(cid:173)(cid:173)(cid:173)(cid:173)(cid:173) 
+two.segments. The action add dine.segment has the fol(cid:173)
+lowing effects and preconditions: 
+
+one.segment,  and 
+
+Now, consider all the possible simple messages, i.e., mes(cid:173)
+sages of the form "if X, then 1 can cause Y to hold".  We 
+require each of those X  and Y to be a combination of flu(cid:173)
+ent values for fluents that are shared between the two subdo-
+mains.  In our case, those shared fluents are 
+battery2.full,  and  second.power.line. 
+
+Assume that we chose the root node in our partition to be 
+the left-hand side subdomain.  The only non-trivial message 
+that the right-hand side can send is 
+
+then 1 can cause 
+
+We would like to find a plan in the root subdomain (the 
+left-hand side subdomain) that uses these messages and that 
+results in the charger being upgraded.  Note that this is not 
+possible with only simple messages. 
+
+One way to resolve this problem is to allow more complex 
+messages. Particularly, in our example, we can allow the fol(cid:173)
+lowing message to be sent: 
+
+If our planner on the left-hand subdomain can handle such 
+complex actions, then it can use such a message to find a 
+plan that succeeds in upgrading the charger.  Indeed allow(cid:173)
+ing this kind of messages makes our planning algorithm com(cid:173)
+plete.  This is consistent with results achieved by [Amir and 
+Mcllraith, 2000; Mcllraith and Amir, 2001] for inference in 
+first-order logic, and is also consistent with [Amir, 2002] that 
+presented results for projection in factored domains. 
+
+An alternative to using such long messages is to include in(cid:173)
+ternal (i.e., not shared) fluents in shorter messages. However, 
+this has the effect of breaking the encapsulation and structure 
+
+that we strive to employ, reducing our problem to that of tradi(cid:173)
+tional planning on the entire domain and forcing backtracking 
+across different subdomains. 
+Detailing the Planning Algorithm 
+Procedure PartPlan is presented in Figure 2 and its subrou(cid:173)
+tines are presented in Figures 3 and 4.  PartPlan is given a 
+partitioned planning domain 
+a 
+indexed by subdomain 
+set of initial conditions 
+such that 
+a goal 
+state condition 
+, and search pa(cid:173)
+(interactions) and d (depth).  It returns a plan for 
+rameters 
+achieving the specified goal conditions in the given domain, 
+if such a plan exists under the search constraints. Notice that 
+we show goals that can be represented in a single subdomain. 
+We illustrate how to get around this restriction in Section 2.5. 
+
+is the initial state for the fluents in 
+
+for root node 
+
+in 
+
+Figure 2: Planning with Subdomains 
+
+We discuss two of the subroutines of PartPlan in detail. 
+The first, SinglePlan, is presented in Figure 3. It determines 
+whether there is a plan with at most  actions in subdomain 
+
+that starts with the state described by the initial state 
+
+and arrives at a state that satisfies 
+We require the plan to 
+have 
+preconditions interleaved within  effects, corre(cid:173)
+sponding to the number of interleaved conditions in the mes(cid:173)
+sage (e.g.,  in (1), the message sent in our example above, 
+To find such an interleaving message the planner 
+
+uses fluent-setting actions, which set the fluents in 
+to a truth assignment in one of 
+They correspond 
+to (yet undetermined) action sequences that can be performed 
+in ancestor (or cousin) subdomains. If the parent subdomain 
+wishes to use the result of this planning, it will need to find a 
+sequence of actions that replaces these fluent-setting actions. 
+
+PLANNING 
+
+931 
+
+Every fluent-setting action, 
+
+can be used at most once, 
+must have been used before this ac(cid:173)
+
+and all  of 
+tion.  Also,  prior to  using this fluent-setting action, 
+must hold.  This condition corresponds to the state that is 
+required by the other subdomain's complex action as a pre(cid:173)
+condition for the subsequent complex action. 
+
+Figure 3: Planning in a single subdomain, and storing a plan. 
+
+Subroutine SendMessage (Figure 4) takes a plan found by 
+(stored in table T by subroutine  StorePlan) 
+subdomain 
+and adds a new complex action definition in the parent sub-
+whose initial state and goal are fluents found 
+domain, 
+in 
+This new action contains complex action definitions 
+from child subdomains and actions local to 
+Plans execute 
+sequentially to ensure that the preconditions for complex ac(cid:173)
+tions are satisfied at the appropriate times. 
+
+2.3  Properties of PartPlan 
+In this section we prove the completeness and soundness of 
+PartPlan and analyze its computational behavior. We pursue 
+the intuition that our planning algorithm can find a plan more 
+efficiently if the number of interactions between subdomains 
+is small.  The maximum shared fluents across the partition 
+determines the time complexity of the algorithm. 
+Definition 2.1 (Width of a Plan) Let 
+a partitioned planning domain tree, and 
+sequence of actions. The width of 
+
+for G is the largest 
+
+be 
+
+Figure 4: Sending a message, and expanding a plan. 
+
+edge 
+
+(minus one) for which there is subsequence of actions and 
+an 
+in G such  t h a t a re  in subdomains 
+on different sides of 
+The plan-width k for our partitioned domain is the least 
+that 
+will allow PartPlan to find a plan. In our example in Figure 1 
+4 there is no message that we can send 
+that will allow us to find a plan in the left-hand subdomain. 
+Also, notice that every plan 
+
+for D has width at most 
+
+4 because for 
+
+A tree decomposition of planning domain D is a parti(cid:173)
+satisfying the run(cid:173)
+and also 
+in 
+
+tioned domain description tree 
+ning intersection property: if a fluent / appears in 
+in Pj, then all the edge-labels on the path between 
+G must include  /. 
+Theorem 2.2  Let G(D, E,l),  be a  tree decomposition  of 
+planning domain D with m subdomains. PartPlan(G, I, Q, 
+k, d) returns a plan n of that achieves Q in D starting from 
+I, if and only if one exists with width at most 2k and at most 
+d • m actions. 
+
+The role of d is to bound the length of the complex actions 
+to at most d interactions; bounding this variable can be used in 
+
+932 
+
+PLANNING 
+
+an iterative deepening algorithm to find plans with the short(cid:173)
+est possible complex actions.  The parameter  can be used 
+similarly, and its role is to restrict the length of messages that 
+are sent from children subdomains to parent subdomains. 
+Corollary 2.3 Iterative deepening of search parameters 
+in PartPlan is  sound and complete planning algorithm. 
+
+The time bound for procedure PartPlan is exponential in 
+the number of fluents in the links between subdomains and 
+the plan-width of the partitioned-planning problem, but is lin(cid:173)
+ear in the number of subdomains. 
+Theorem 2.4 PartPlan 
+
+terminates in time 
+being the largest 
+number of action symbols and largest number of fluent sym(cid:173)
+bols in any subdomain, respectively, and I being the largest 
+in 
+number  of  symbols 
+2.4  Automatic Factoring 
+Theorem 2.2 assumes that a tree decomposition G(B, E,l/) is 
+given. For a planning domain D we can build the decomposi(cid:173)
+tions by hand, adding a knowledge-engineering and planning 
+perspectives to the domain description. We can also find a de(cid:173)
+composition automatically using graph decomposition tech(cid:173)
+niques. In this section we describe such an algorithm. 
+
+for all subdomains 
+
+The notion of tree decomposition in planning domains is 
+a  special  case  of tree decomposition  in  graphs  [Robertson 
+and Seymour,  1986].  The width of a tree-decomposition is 
+the width of the largest subset in the tree minus one.  The 
+treewidth of a graph G(V, E) is the minimum width over all 
+tree-decompositions of G minus one 
+
+Finding optimal tree decompositions is NP-hard. Nonethe(cid:173)
+less,  there are several algorithms that find close-to-optimal 
+tree decompositions (e.g., [Becker and Geiger,  1996; Amir, 
+2001]), and there are also some heuristics (e.g.,  [Kjaerulff, 
+1993]) that have been applied successfully in inference algo(cid:173)
+rithms for Bayesian networks and theorem proving. 
+
+The reduction of the planning decomposition problem into 
+a graph decomposition problem is as follows.  We create a 
+graph G(V, E) with a vertex 
+V  for every propositional 
+fluent in our domain D. E is the set of edges in this graph, and 
+it includes an edge between 
+V if and only if there is an 
+action definition that includes both v, u (either as a precondi(cid:173)
+tion or as an effect). In the next step we find a tree decompo(cid:173)
+sition (5, T), 
+for this graph 
+using one of the algorithms mentioned above. Finally, we cre(cid:173)
+ate a partitioned domain description 
+as 
+follows:  The vertices (domain descriptions) 
+are chosen such that 
+
+and 
+includes all the action definitions that can be expressed 
+The edges in ED  are the tree edges, 
+is the set 
+, i.e., 
+
+with the fluents in 
+F, in T.  The labeling I of a edge 
+of fluents that are shared between the vertices 
+
+includes all  the fluents in 
+
+2.5  Distribution of the Goal 
+So far we have assumed that the goal is represented in the set 
+of fluents of a single subdomain. In many planning problems 
+the goal consists of a conjunction of conditions on many dif(cid:173)
+ferent fluents. If we create a single subdomain that includes 
+all those fluents, then the width of the tree decomposition will 
+be high, and so will be the planning time. Instead, we can dis(cid:173)
+tribute the goal between subdomains, as we show here. 
+
+of domain 
+
+with 
+
+Assume that we are given a tree decomposition G(D, E, I) 
+Let a goal condition be 
+where Qx is a part of the goal represented with the 
+as 
+we add a new 
+For every leaf sub-
+and its effect is qt. For every 
+
+fluents in Pi. Arbitrarily, choose a single subdomain, 
+the root of the tree.  To each subdomain 
+fluent symbol, 
+domain, 
+internal node in the tree, with c h i
+condition is 
+
+l d r e ns pre(cid:173)
+
+and a new action, 
+
+and its effectis 
+
+precondition is 
+
+in subdomain 
+
+When planning with this revised decomposition we use a 
+single  goal, 
+The revised planning prob(cid:173)
+lem in this tree decomposition  is equivalent to the original 
+one, and we have reduced a (worst case) exponentially large 
+problem down to a linear one. 
+3  An Extended Example 
+Consider  the  following  domain,  where  a  robot  can  move 
+around in a set of rooms connected by doors as a ring [Cimatti 
+and Roveri, 2000].  Each room has a window which can be 
+open, closed, or locked. The robot has four possible actions: 
+move clockwise, move counterclockwise, close the window 
+of the current room, and lock the window of the current room 
+if the window is already closed. The goal state is that the win(cid:173)
+dows of all the rooms are locked. The start state is the robot in 
+one of the 
+rooms and some configuration of windows open, 
+closed, and locked.  In this simple example we assume that 
+the state of windows and the location of the robot are known. 
+In other words, the initial condition is one of 
+possible 
+initial configurations. 
+
+Define the following set of fluents: 
+•  Agent location: 
+•  Windows closed: 
+•  Windows locked: 
+•  Windows  locked 
+
+from  room  1  up  to  room 
+
+The 
+
+fluents 
+
+represent  conjunctions  of 
+fluents from parent and ancestor 
+
+the 
+
+subdomains in the tree, as in the previous section. Define the 
+following set of actions and corresponding effect axioms: 
+
+•  Actions: close, 
+•  Effect axioms: 
+
+This algorithm complexity is taken up by the decomposi(cid:173)
+
+tion of the graph G(V,E). Most heuristics are at most O 
+and one approximation algorithm  [Amir,  2001]  takes time 
+(fc is the treewidth of G, and is typ(cid:173)
+ically much smaller than n).  This is an upper bound on the 
+time taken by the planning domain decomposition algorithm. 
+
+PLANNING 
+
+933 
+
+In the last set of axioms we use the convention that addition 
+and subtraction are modulo the number of rooms in the ring. 
+In other words, the next room after  is 
+
+For the ring of rooms, an obvious partition turns out to be 
+a good one.  Specifically, we associate each subdomain with 
+one room, letting the fluents and actions for subdomain Dt be 
+
+mod 
+
+Each subdomain contains all actions whose preconditions 
+
+and effects mention only fluents in that subdomain. 
+
+Figure 5: Subdomains for Ring of Rooms. 
+
+The graph of subdomains is not a tree (see Figure 5). One 
+way to turn it into a tree decomposition is by removing one of 
+the edges completing a cycle and adding (in the worst case) 
+the label of that edge to the rest of the edges in this graph (this 
+is an example of a more general algorithm that is outside the 
+scope of this paper; see [Amir and Mcllraith, 2000]). The re(cid:173)
+sult is presented in Figure 6. The graph G connects every two 
+consecutive subdomains but 
+ber of rooms (and subdomains). The labeling on the edges is 
+originally 
+After 
+transforming to graph into a tree we get the labeling 
+
+, for m being the num(cid:173)
+
+Figure 6: Tree decomposition for Ring of Rooms. 
+
+We show how PartPlan finds a plan for this domain.  We 
+which is expressed in the fluents of 
+
+set the goal to be 
+subdomain rn. We set t — 
+
+to be the root of the tree. 
+
+We take node 
+
+whose parent in the tree is  =  2, 
+and find all the plans possible with 
+One such 
+plan is "if the robot is in room 1 and the window is open, then 
+close, lock and move clockwise." We find a plan for D\: 
+
+Both  pre1,eff2  are  complete  state  descriptions  in 
+There  is  a  plan  that SinglePlan(D 1, I1, (pre1), (ef 1>, ett 2, 
+
+d) will return.  Thus, one message that is sent to subdomain 
+is "if in some state the robot is in room  1, then D\  has 
+a sequence of actions that results in all 1 being true and the 
+robot moving to room 2."  In more precise terms, the defi(cid:173)
+nition for this capability 
+by 
+subroutine SendMessage. 
+
+is added to subdomain 
+
+Now, we take node 
+
+whose parent in the tree is 
+
+3, and find all the plans possible with 
+One 
+such plan is, "if in some state the robot is in room 2, then 
+move counter-clockwise, execute a subdomain-1-action, then 
+close, lock and move clockwise." We find a plan for Do-
+
+that  S i n g l e P l a n (e f
+
+These are all complete state descriptions in Z'(2,3).  There 
+is a plan 
+d) will return. The message that is sent to subdomain .  _ is 
+roughly speaking "if the robot is in room 2, then D2  has a 
+sequence of actions that results in all2 being true".  In more 
+precise terms, the definition for action 
+is added to subdo(cid:173)
+main 
+
+by subroutine SendMessage. 
+
+f ^, 
+
+This method continues for all the subdomains up to 
+
+that contains the goal. Subdomain 
+can conclude that there 
+exists a plan for closing and locking all the windows, satisfy(cid:173)
+ing allm. If the initial condition of our problem specifies that 
+the robot is in room r, then starting in subdomain Dr wc will 
+already have a plan independent of the position of the robot. 
+This will lead to a complete plan in subdomain m. 
+
+When the plan is found in subdomain the algorithm then 
+goes on to expanding the complex actions into their capabil(cid:173)
+ity plans. For example, when the complex action c2,i of sub-
+domain 1 is encountered in the plan 
+it is expanded into a 
+segment 
+that is placed instead of r 2ti in 
+plan 
+It results in a sequence of actions that is between the 
+state satisfying condition eff 1 (i.e., when the robot appears in 
+room 1) and the state satisfying eff2. 
+Using  this  domain  and  associated  tree  decomposition 
+above we implemented our algorithm to see that the run time 
+scaled linearly as the number of rooms increased.  The re(cid:173)
+sults are compared in figure (7), which shows four different 
+planning algorithm on this domain as the size of the domain 
+grows.  For all runs, the optimal-sized plans were found.  In 
+very small domains, there is some constant time overhead in(cid:173)
+volved in the PartPlan algorithm, but asymptotically the Part-
+Plan algorithms begin to dominate because of the linear scal(cid:173)
+ing with respect to the number of rooms. Although this exam(cid:173)
+ple is not rigorous enough to show the empirical dominance 
+of the PartPlan algorithm for every domain, it does motivate 
+further development of the ideas in real-world domains. 
+4  Related Work 
+Some of the techniques that we apply have been  used be(cid:173)
+fore in automated reasoning.  Best known are methods for 
+reasoning with probabilistic graphical models [Pearl, 1988J), 
+logical theories  [Dechter and Rish,  1994; Amir and Mcll(cid:173)
+raith, 2000] and constraint satisfaction problems [Dechter and 
+Pearl, 1989]. The common principle for those applications is 
+the advantage taken of low treewidth available in many do(cid:173)
+mains. With a tree decomposition of close-to-optimal width, 
+
+934 
+
+PLANNING 
+
+ECS-9873474. The second author is supported under an NSF 
+Graduate Research Fellowship. 
+References 
+[Amir and Mcllraith, 2000]  E. Amir and S. Mcllraith.  Paritition-
+based logical reasoning.  In Prvc. KR '00, pages 389-400. MK, 
+2000. 
+
+[Amir, 2001]  E. Amir.  Efficient approximation for triangulation of 
+
+minimum treewidth. In Prvc. UAI '01, pages 7-15. MK, 2001. 
+
+[Amir, 2002]  E. Amir. Projection in decomposed situation calculus. 
+
+In Proc. KR '02, pages 315-326. MK, 2002. 
+
+[Becker and Geiger, 1996]  A. Becker and D. Geiger. A sufficiently 
+fast algorithm for finding close to optimal junction trees. In Proc. 
+UAI '96, pages 81-89. MK, 1996. 
+
+[Cimatti and Roveri, 2000]  A. Cimatti and M. Roveri. Conformant 
+planning via symbolic model checking. JAIR, 13:305-338, 2000. 
+[Dechter and Pearl, 1989]  R. Dechter and J. Pearl.  Tree clustering 
+
+for constraint networks. AU, 38:353-366, 1989. 
+
+[Dechter and Rish, 1994]  R. Dechter and I. Rish. Directional reso(cid:173)
+lution: The davis-putnam procedure, revisited. In Proc. KR '94, 
+pages 134-145. Morgan Kaufmann, 1994. 
+
+[Ephrati and Rosenschein, 1994]  E. Ephrati and J. S. Rosenschein. 
+Divide and conquer in multi-agent planning. In Proc. AAA I '94, 
+pages 375-380. AAAI Press, 1994. 
+
+[Erol etal, 1994]  K. Erol, J. Hendler, and D. S. Nau.  HTN plan(cid:173)
+ning:  Complexity and expressivity.  In Proc. AAAI  '94, pages 
+1123  1128. AAAI Press, 1994. 
+
+[Fox and Long, 2002]  M.  Fox and D.  Long.  PDDL2.1:  An ex(cid:173)
+tension  to  PDDL  for  expressing  temporal  planning  domains. 
+http://www.dur.ac.Uk/d.p.long/IPC/pddl.html,  2002. 
+
+[Guestrin et ai, 2002]  C. Guestrin, D. Koller, and R. Parr.  Multia-
+gent planning with factored mdps. In Proc. NIPS"01. MIT, 2002. 
+[Hoffmann andNebel, 2001]  J. Hoffmann and B. Nebel.  The FF 
+planning system:  Fast plan generation through heuristic search. 
+JAIR, 14:253-302,2001. 
+
+[Kjacrulff, 1993] U. KjaerulfT. Aspects of efficiency imporvement 
+
+in bayesian networks. PhD thesis, Aalborg University, 1993. 
+
+[Knoblock, 1990]  Craig A. Knoblock.  Learning abstraction hierar(cid:173)
+
+chies for problem solving. In Prvc. AAAI '90, 1990. 
+
+[Kochler and Hoffmann, 2000]  J.  Koehler and J.  Hoffmann.  On 
+reasonable and forced goal orderings and their use in an agenda-
+driven planning algorithm. JAIR, 12:339 386, 2000. 
+
+[Lansky and Getoor, 1995]  A. L. Lansky and L. C. Getoor.  Scope 
+and abstraction:  Two criteria for localized planning.  In Prvc. 
+1JCA1 '95, pages 1612-1618, 1995. 
+
+[Mcllraith and Amir, 2001]  Sheila Mcllraith and Eyal Amir. Theo(cid:173)
+rem proving with structured theories. In Proc. IJCA1 '01, pages 
+624 631. MK, 2001. 
+
+[Pearl, 1988] J. Pearl. Probabilistic Reasoning in Intelligent Sys(cid:173)
+
+tems : Networks of Plausible Inference. MK, 1988. 
+
+[Reiter, 2001] R. Reitcr. Knowledge In Action. MIT, 2001. 
+[Robertson and Seymour, 1986]  N. Robertson and P. D. Seymour. 
+
+Graph minors. II: algorithmic aspects of treewidth. J. of Algo-
+rithms, 7:309-322, 1986. 
+
+[Wolverton and desJardins, 1998]  M. Wolverton and M. desJardins. 
+Controlling communication in distributed planning using irrele(cid:173)
+vance reasoning. In Proc. AAAI '98, pages 868- 874, 1998. 
+
+Figure 7:  Comparison of run time  for IPP, FF, PartPlan-IPP, 
+and PartPlan-FF.  The  figure  on  the  left  is  for 0-150  rooms, 
+the  figure  on the right is for 0-500 rooms.  The scale on the 
+;y-axis is in milliseconds. 
+
+these reasoning algorithms use two sweeps of the tree, an evi(cid:173)
+dence collection and evidence distribution sweep, and the en(cid:173)
+tire process is linear in the number of nodes. 
+
+Similar techniques  to  these  have  also  been  used  in prob(cid:173)
+abilistic  planning  to  find  approximate  policies  for  factored 
+MDPs (e.g., LGuestrin et al., 2002]), and also in the context of 
+multi-agent stochastic planning with MDPs.  The main differ(cid:173)
+ence with this approach is that we find an exact solution, and 
+we act in domains that do not have universal reachability (all 
+states are reachable from all states), as is assumed in MDPs. 
+Section  1  discusses  approaches  for  multi-agent  planning 
+LLansky and Getoor,  1995;  Ephrati  and Rosenschein,  1994; 
+Wolverton and desJardins, 1998]. 
+
+5  Conclusions 
+Two  contributions  of our  work  are  automated  planning  do(cid:173)
+main  decomposition  by  minimizing subdomain  interactions, 
+and  an  algorithm  to  plan  in  this  decomposed  domain  with 
+no backtracking.  The planning algorithm is sound and com(cid:173)
+plete,  and  exploits a  low treewidth partition  for a particular 
+planning domain, enabling planning to scale linearly with the 
+domain  size.  Our automatic  factoring  algorithm  for a plan(cid:173)
+ning domain attempts to optimize the run-time complexity of 
+the planner.  Theoretical results and empirical examples show 
+that the planning algorithm scales well  in domains with de(cid:173)
+composable structure. 
+
+Directions  for  future  work  in  this  area  include  the  devel(cid:173)
+opment of algorithms for richer domains and description lan(cid:173)
+guages,  such as nondeterministic planning actions,  stochas(cid:173)
+tic actions, and actions involving duration and numerical pa(cid:173)
+rameters.  Our approach  is built on the language of situation 
+calculus  (in  which  we  developed our first version  of the  al(cid:173)
+gorithms),  leading  us  to  believe  that  it will  extend  to  these 
+directions and more.  Our work connects automated reason(cid:173)
+ing and planning, and we expect to extend this connection to 
+allow first-order decomposition of planning and other related 
+problems, such as diagnosis and reactive control. 
+
+Acknowledgments 
+The  first  author  is  supported  under  an  ONR  MURI  Funds 
+N00014-01-1-0890,  and N00014-00-1-0637, and NSF grant 
+
+PLANNING 
+
+935 
+
+

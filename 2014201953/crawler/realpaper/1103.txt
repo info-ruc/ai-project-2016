@@ -1,0 +1,1399 @@
+Building Structure into Local Search for SAT
+
+Duc Nghia Pham1,2 and John Thornton1,2 and Abdul Sattar1,2
+
+1 Safeguarding Australia Program, National ICT Australia Ltd.
+
+2 Institute for Integrated and Intelligent Systems, Grifﬁth University, Australia
+
+{duc-nghia.pham, john.thornton, abdul.sattar}@nicta.com.au
+
+Abstract
+
+Local search procedures for solving satisﬁabil-
+ity problems have attracted considerable attention
+since the development of GSAT in 1992. How-
+ever, recent work indicates that for many real-world
+problems, complete search methods have the ad-
+vantage, because modern heuristics are able to ef-
+fectively exploit problem structure. Indeed, to de-
+velop a local search technique that can effectively
+deal with variable dependencies has been an open
+challenge since 1997.
+In this paper we show that local search techniques
+can effectively exploit
+information about prob-
+lem structure producing signiﬁcant improvements
+in performance on structured problem instances.
+Building on the earlier work of Ostrowski et al. we
+describe how information about variable dependen-
+cies can be built into a local search, so that only
+independent variables are considered for ﬂipping.
+The cost effect of a ﬂip is then dynamically cal-
+culated using a dependency lattice that models de-
+pendent variables using gates (speciﬁcally and, or
+and equivalence gates). The experimental study on
+hard structured benchmark problems demonstrates
+that our new approach signiﬁcantly outperforms the
+previously reported best local search techniques.
+
+1 Introduction
+
+A fundamental challenge facing local search researchers in
+the satisﬁability (SAT) domain is the increasing scope and
+performance of complete search methods. While for most
+of the 1990s it was taken for granted that local search was
+the most practical method for solving large and complex real
+world satisﬁability problems [Selman et al., 1992; Kautz and
+Selman, 1996; B´ejar and Many`a, 2000], the latest generation
+of complete SAT solvers have turned the tables, solving many
+structured problems that are beyond the reach of local search
+(e.g. [Zhang et al., 2001; E´en and Biere, 2005]).1 So it is of
+
+1More information on the performance of complete search
+versus local search is available from the SAT competitions
+(http://www.satcompetition.org)
+
+basic importance to the area that local search techniques learn
+from the success of the newer complete methods.
+
+The current research goes to the core of this problem by
+modelling problem structure within a local search procedure.
+This involves a two-part process: ﬁrstly problem structure
+must be recognized within the original problem represen-
+tation (here we are considering satisﬁability problems ex-
+pressed in conjunctive normal form (CNF)). And secondly
+this structure must be represented within a local search pro-
+cedure in such a way that the local neighbourhood of possible
+moves will only contain structure respecting ﬂips.
+
+The ideas behind this approach come from two sources.
+Firstly, there is the recent work on modelling constraint sat-
+isfaction problems (CSPs) as SAT problems [Pham et al.,
+2005]. Here the presence of CSP multivalued variables is
+automatically detected in the clausal structure of a CNF prob-
+lem. This information is then embedded within a local search
+in such a way that for each group of binary valued SAT vari-
+ables corresponding to a single multivalued CSP variable,
+only one SAT variable will be true at any one time. This
+enforces that the underlying CSP variable is always instanti-
+ated with a single domain value. The SAT-based local search
+achieves this by doing a two-ﬂip look-ahead whenever it en-
+counters a literal associated with a CSP domain value.
+In
+effect this look-ahead turns off the current CSP domain value
+with one ﬂip and turns on a new value with a second ﬂip. A
+signiﬁcant advantage of this approach (when encoding binary
+CSPs) is that the cost of such a double-ﬂip equals the sum
+of the costs of the individual ﬂips, because these ﬂip pairs
+will never appear in the same conﬂict clause. For this reason,
+CSP structure exploiting algorithms can be easily embedded
+within an existing SAT local search architecture and add neg-
+ligible processing overhead to an individual ﬂip. As we shall
+see, more general structure exploiting approaches do cause
+interactions between literals within the same clauses, and so
+require more sophisticated ﬂip cost calculation procedures.
+
+The second source for the current research comes from Os-
+trowski et al.’s [2002] work on the extraction of gates from
+CNF encoded SAT problems. These gates represent relation-
+ships between SAT variables of the form y = f (x1, . . . , xn)
+where f ∈ {⇔, ∧, ∨} and y and xi are Boolean variables
+from the original problem. If such a gate is recognized, the
+value of y is determined by x1, . . . , xn, and can be removed.
+Ostrowski et al. used this method to simplify a range of struc-
+
+IJCAI-07
+
+2359
+
+tured SAT benchmark problems, producing signiﬁcant per-
+formance gains for their systematic DPLL solver. However,
+to the best of our knowledge, such structure exploiting ap-
+proaches have not been applied in the local search domain.
+
+The problem facing a local search approach to implement-
+ing gates is one of efﬁciency. Ostrowski et al.’s approach can
+detect independent variables whose values determine a set of
+dependent variables via clausal gate connections. Using this
+information, we can implement a local search that only ﬂips
+the values of independent variables and then dynamically cal-
+culates the effects of these ﬂips on the overall solution cost.
+However, a local search needs to know the ﬂip cost of all
+candidate ﬂips in advance of making a move. Generally this
+is achieved by maintaining a make cost and a break cost for
+each literal in the problem (i.e. the number of clauses that will
+become true if a literal is ﬂipped and the number of clauses
+that will become false). These costs are then updated after
+each ﬂip. A major advantage of a SAT local search is the
+speed with which these cost effects can be calculated (this
+is achieved using clever data structures that exploit the SAT
+CNF problem structure) [Tompkins and Hoos, 2004]. How-
+ever, taking an approach that only ﬂips independent variables
+renders the standard SAT local search architecture redundant.
+In this case, ﬁnding the potential cost of an independent vari-
+able ﬂip requires us to solve a mini-SAT problem involving all
+the affected dependent variables and their associated clauses.
+The rest of the paper is organized as follows: we ﬁrst ex-
+plain how the cost of ﬂipping an independent variable in a
+local search can be efﬁciently calculated using a dependency
+lattice data structure. This structure models the various de-
+pendencies in the original problem and dynamically calcu-
+lates which independent variables, when ﬂipped, will cause
+a clause to change its truth value. Details of the construc-
+tion and operation of this lattice are given in the next two
+sections. To evaluate the usefulness of this new approach,
+we conduct an empirical study that examines several of the
+structured SAT benchmarks that have proved to be the most
+difﬁcult for local search in the past. Finally, we discuss the
+signiﬁcance of our results and indicate some future directions
+of research.
+
+2 Gates and Dependencies
+In the following discussion we shall broadly follow the termi-
+nology used in [Ostrowski et al., 2002]. Firstly, consider the
+following CNF formula:
+
+(¬a ∨ b ∨ c ∨ d) ∧ (a ∨ ¬b) ∧ (a ∨ ¬c) ∧ (a ∨ ¬d)
+
+Here, for the clauses to be satisﬁed, if b and c and d are all
+false then a must necessarily be false, otherwise a must nec-
+essarily be true. This is an example of an “or” gate, because
+the value of a is determined by truth value of (b ∨ c ∨ d) and
+can be represented as
+
+a = ∨(b, c, d)
+
+Similarly, if we reverse the signs of the literals we get:
+(a ∨ ¬b ∨ ¬c ∨ ¬d) ∧ (¬a ∨ b) ∧ (¬a ∨ c) ∧ (¬a ∨ d)
+
+Now for the formula to be satisﬁed, if b and c and d are
+all true then a must necessarily be true, otherwise a must
+
+necessarily be false. This example of an “and” gate can be
+represented as
+
+a = ∧(b, c, d)
+
+A third commonly occurring clausal structure is the “equiv-
+
+alence” gate (or “xnor” gate), illustrated as follows:
+(a ∨ b ∨ c) ∧ (¬a ∨ ¬b ∨ c) ∧ (¬a ∨ b ∨ ¬c) ∧ (a ∨ ¬b ∨ ¬c)
+
+Here, in order to satisfy the formula, a will be true iff b
+and c are both true or both false, i.e. if they are equivalent,
+otherwise if b and c differ then a will be false. This can be
+represented as
+
+a =⇔ (b, c)
+
+Finally, an “xor” gate is the negation of an “equivalence”
+
+gate, illustrated as follows:
+(¬a ∨ ¬b ∨ ¬c) ∧ (a ∨ b ∨ ¬c) ∧ (a ∨ ¬b ∨ c) ∧ (¬a ∨ b ∨ c)
+
+where a will only be false if b and c are equivalent. This can
+be represented as
+
+a = ⊕(b, c)
+
+If an “equivalence” or an “xor” gate depends on more than
+two variables, then equivalence or difference is calculated in
+a pairwise fashion, i.e. if a =⇔ (b, c, d) and b and c are false,
+then b ⇔ c is true, and if d is true, then d ⇔ (b ⇔ c) is
+true and therefore the gate is true. In general, we represent an
+“xor” gate as y = ⊕(x1, . . . , xn), an “equivalence” gate as
+y =⇔ (x1, . . . , xn), an “or” gate as y = ∨(x1, . . . , xn) and
+an “and” gate as y = ∧(x1, . . . , xn). Here y is the dependent
+variable because its value is determined by the independent
+variables x1, . . . , xn. For the sake of simplicity, we treat an
+“xor” gate (e.g. a = ⊕(b, c)) as a special case of an “equiva-
+lence” gate (e.g. ¬a =⇔ (b, c)) in the rest of the paper.
+
+3 The Dependency Lattice
+As Ostrowski et al. [2002] have already described, the pro-
+cess of recognizing gates in a CNF problem can be reduced to
+searching for the appropriate clausal structures during a pre-
+processing phase. This information can then be used to clas-
+sify the dependent and independent variables. For a complete
+search method, this means the search space can immediately
+be reduced to only consider independent variable instantia-
+tions, as all dependent variable values can be automatically
+ﬁxed by propagation.
+
+However, for a local search, there is no built-in propagation
+mechanism. In fact, a local search strategy precludes propa-
+gation because it deliberately allows inconsistent assignments
+to persist. To exploit the information inherent in dependent
+variable relationships requires us to remove them from the
+domain of “free” variables while still including their effect in
+the overall cost of a particular ﬂip. To achieve this we have
+developed a dependency lattice data structure. This lattice
+is formed as a result of analyzing the original CNF problem
+into independent variables, and relationships between inter-
+nal and external gates. Firstly, an independent variable is
+not simply a variable that determines the value of a depen-
+dent variable in a gate relationship, because such determining
+variables can in turn be determined in another gate. An inde-
+pendent variable is a variable that is never determined in any
+
+IJCAI-07
+
+2360
+
+gate relationship. Secondly, an internal gate is any gate that
+can be recognized within the structure of the original CNF
+formula, and thirdly, an external gate is a gate where the de-
+pendent variable represents a clause from the original CNF
+formula that is not part of any internal gate. To clarify these
+concepts, consider the following CNF formula example:
+
+(¬g1 ∨ v2 ∨ v3) ∧ (g1 ∨ ¬v2) ∧ (g1 ∨ ¬v3)∧
+(g2 ∨ ¬v3 ∨ ¬v4) ∧ (¬g2 ∨ v3) ∧ (¬g2 ∨ v4)∧
+
+(g3 ∨ g1 ∨ g2) ∧ (¬g3 ∨ ¬g1 ∨ g2)∧
+
+(¬g3 ∨ g1 ∨ ¬g2) ∧ (g3 ∨ ¬g1 ∨ ¬g2)∧
+
+(v1 ∨ g1)
+
+which is equivalent to:
+
+(g1 = ∧(v2, v3)) ∧ (g2 = ∨(v3, v4))∧
+(g3 =⇔ (v1, v2)) ∧ (c1 = ∨(v1, g1))
+
+where c1 is an additional variable that depends on the clause
+(v1 ∨ g1) (i.e. if (v1 ∨ g1) is true, c1 is true, otherwise c1 is
+false). In general, each original CNF clause that is not sub-
+sumed within a gate dependency is represented by an addi-
+tional variable, that then subsumes the clause in an external
+“or” gate dependency.
+
+Having translated our original problem into a set of gates,
+we can now represent it as the dependency lattice in Figure 1:
+
+v
+
+1
+
+{F}
+
+v
+
+2
+
+{F}
+
+v
+
+3
+
+{T}
+
+v
+
+4
+
+{
+
+2v
+
+}
+
+AND
+
+v
+
+{
+
+3
+
+}
+
+OR
+
+g
+
+1
+
+{F}
+
+g
+
+2
+
+{T}
+
+{v 2 v 3}
+
+{F}
+
+3g
+
+{v
+
+1
+
+2v }
+
+OR
+
+c
+
+1
+
+{F}
+
+Figure 1: An example dependency lattice.
+
+Here the original variables have become nodes in the lat-
+tice, such that nodes v1 . . . v4 correspond to the independent
+variables, nodes g1 . . . g3 to the internal gates and node c1 to
+an external gate. In this form, a satisfying assignment to the
+original CNF formula is equivalent to an assignment of the
+independent variables such that all the ci external nodes eval-
+uate to true. This result follows trivially from the structure
+of the lattice, which implements the structure of the internal
+gates and therefore ensures that all internal gate relationships
+are necessarily satisﬁed. When all the external nodes eval-
+uate to true, this means all the remaining CNF clauses that
+were not subsumed as internal gates are true, and hence that
+a satisfying assignment has been found.
+
+The purpose of the lattice is to embody the structure of gate
+dependencies in such a way that the cost of ﬂipping an inde-
+pendent variable can be efﬁciently calculated. This is analo-
+gous to existing local search SAT solvers, except that existing
+solvers are only equipped to handle “or” gate dependencies.
+
+3.1 Calculating Flip Costs
+
+To illustrate the process of cost calculation, we have instanti-
+ated the independent variables in Figure 1 as follows: v1 ←
+false, v2 ← false, v3 ← true and v4 ← false. Moving down
+the lattice from v2 and v3 to the “and” gate at node g1 it fol-
+lows that the values of v2 and v3 make this gate variable false.
+Similarly, moving down from v3 and v4 to g2 we can see that
+the corresponding “or” gate variable is true. Then following
+down from the gates at g1 and g2 to the “equivalence” gate
+at g3 we can see that this gate variable is false, and so on. In
+this way, the lattice reﬂects the necessary consequences of the
+independent variable instantiations on the rest of the problem.
+To calculate the cost of ﬂipping a particular independent
+variable vi we need to know how many external gate variables
+will become false and how many will become true as a result
+of the ﬂip. This is achieved by storing at each gate node the
+set of independent variables that, if ﬂipped, would cause the
+gate variable to change its truth value. For example, node g1
+stores the independent variable v2, signifying that if v2 was
+ﬂipped then g1 would change from f alse to true. Similarly,
+g2 can only become f alse if v3 is ﬂipped. Moving down the
+lattice, we can see that g3 would become true if either g1 or
+g2 were to change values. As ﬂipping v2 will change the truth
+value of g1 and ﬂipping v3 will change the truth value of g2,
+either of these ﬂips will also change the truth value of g3, so
+g3 inherits v2 and v3 into its variable set. Node c1 similarly
+inherits v1 and v2, as a change in either variable will make c1
+true.
+
+Once we have the correct variable sets for each of the ex-
+ternal gates we can read off the make cost and break cost for
+each independent variable simply by counting the number of
+times a variable appears in a false external gate (= make cost)
+and the number of times it appears in a true external gate (=
+break cost). So, in our example, both v1 and v2 have a make
+cost of one, with all other make and break costs equal to zero.
+
+3.2 The General Case
+
+In realistic problems it can easily happen that the same in-
+dependent variable appears in multiple branches leading to
+the same gate. To handle such cases we require more gen-
+eral deﬁnitions of how the variable sets for each gate type are
+composed.
+
+Firstly, if an “and” gate is true then all its parent nodes
+must be true, therefore any change in a parent node’s truth
+value will also change the truth value of the gate. This means
+the gate’s variable set (V ) should inherit the union of all the
+parent variable sets (Psets), as follows:
+
+if true(AND) then V ← ∪(true(Psets))
+
+Alternatively, if an “and” gate is f alse then only if all its
+parent nodes become true will the gate become true. This
+requires that all false parent nodes become true and no true
+parent node becomes f alse, as follows:
+
+if false(AND) then V ← ∩(false(Psets)) \ ∪(true(Psets))
+
+The rules for an “or” gate can be similarly deﬁned in re-
+
+verse:
+
+IJCAI-07
+
+2361
+
+if false(OR) then V ← ∪(false(Psets))
+
+if true(OR) then V ← ∩(true(Psets)) \ ∪(false(Psets))
+
+For all “equivalence” gates with no more than two parents,
+only if the truth value of a single parent changes will the value
+of the gate change, as follows:
+
+and changes its variable set from {v1, v2} to {v2, v3}. This
+change then causes the make costs of v1 and v2 to be reduced
+by one and the break costs of v2 and v3 to be increased by
+one. The process terminates with all external nodes set to
+true, meaning that a satisfying solution has been found. This
+situation is illustrated in Figure 2:
+
+V ← ∪(Psets) \ ∩(Psets)
+
+In general, an “equivalence” gate is true iff the count of its
+true parents has the same parity as the count of all its parents.
+As we did not discover any “equivalence” gates with more
+than two parents in our problem set, we did not implement
+the more-than-two-parent case.
+
+In addition, we did ﬁnd rare problem instances where a sin-
+gle variable was dependent on more than one gate. In these
+circumstances, we added an additional dependent variable for
+each extra gate and connected these variables to the ﬁrst vari-
+able via additional “equivalence” gates.
+
+th
+
+th
+
+Implementation
+
+3.3
+The motivation behind the dependency lattice is to develop an
+efﬁcient method to update the make and break costs for the
+independent variables. Clearly there is a potential for the ad-
+ditional work of calculating ﬂip costs using the lattice to out-
+weigh the beneﬁts of reducing the size of the search space (i.e.
+by eliminating dependent variables and internal gate clauses
+from the problem). Therefore it is of signiﬁcance exactly how
+the lattice is updated. In our current implementation we do
+this by representing the total set of independent variables at
+each node using an nind bit pattern, such that if the i
+in-
+dependent variable is in the variable set of a particular node,
+position of the bit pattern for that node will be
+then the i
+set. Using this representation we can efﬁciently implement
+the set operations necessary to propagate the effects of ﬂip-
+ping an independent variable through the lattice. This propa-
+gation starts when an independent variable has been selected
+for ﬂipping. Beginning at the lattice node corresponding to
+this variable, the update works down the lattice to all the con-
+nected internal nodes. For example, if v3 is ﬂipped in Figure
+1, then nodes g1 and g2 will be selected for update. The up-
+date process then performs the appropriate set operations on
+the parent variable sets to produce an updated variable set and
+truth value for the selected gate. If the truth value of a node
+and the contents of its variable set remain unchanged after an
+update then no further propagation is required from that node.
+Otherwise the process continues until it reaches the external
+nodes. Then, if an external node’s variable set is changed, this
+updates the make and break costs of any affected independent
+variables and the process terminated.
+
+If we follow the process of ﬂipping v2 in Figure 1, this will
+alter the variable set at g1 from {v2} to {v2, v3} and change
+g1 to true. As the variable set at g1 has changed these effects
+are now propagated to the internal node g3 which becomes
+true. Now we have a situation where both parents of g3 share
+the same variable, i.e. g1 now has {v2, v3} and g2 has {v3}.
+In this case if v3 were ﬂipped then both parents of g3 would
+change their truth value and still remain equivalent, leaving
+g3 unchanged. Hence g3 only inherits v2 into its variable set.
+Finally, the external node c1 changes its truth value to true
+
+v
+
+1
+
+{F}
+
+v
+
+2
+
+{T}
+
+v
+
+3
+
+{T}
+
+v
+
+4
+
+{F}
+
+{v 2 v 3}
+
+AND
+
+{
+
+3v
+
+}
+
+OR
+
+g
+
+1
+
+{T}
+
+g
+
+2
+
+{T}
+
+}2v{
+
+}3v2v{
+
+OR
+
+c
+
+1
+
+{T}
+
+{T}
+
+g 3
+
+Figure 2: A dependency lattice solution.
+
+4 Experimental Validation
+In order to validate our approach to handling gate dependen-
++
+cies, we implemented a non-CNF version of AdaptNovelty
+[Hoos, 2002] that operates on the new dependency lattice
+platform. We then evaluated the performance of this algo-
+rithm on a selection of SATLIB ssa7552, parity 16- and 32-bit
+problems.2 Table 1 ﬁrstly shows the effect of gate detection
+on the number of variables and clauses in the problem set,
+detailing the number of independent and dependent gates in
+the corresponding non-CNF dependency lattices and the total
+time taken for each conversion.
+
+We then compared the performance of our new non-CNF
+AdaptNovelty+ algorithm against the original CNF based
+variant by running the two algorithms 100 times each on the
+ssa7552 and par16 instances and 10 times each on the par32
+instances. Table 2 shows the success rate, the average num-
+ber of ﬂips and time in seconds taken to solve these instances.
+Each run was timed out after 1 hour for the ssa7552 and par16
+instances and after 24 hours for the par32 instances.
+
+As
+
+shown in Table 2,
+
+the non-CNF version of
+AdaptNovelty+ signiﬁcantly outperforms its original CNF
+counterpart both in terms of ﬂips and time. Indeed, the new
+non-CNF approach is at least 100 times better than the orig-
+inal CNF approach on these instances.
+In addition, this is
+the ﬁrst time that a local search solver has managed to ﬁnd
+solutions for all the parity 32-bit problems within 24 hours.
+The only other SLS method that can solve these problems is
+DLM2005 [Wah and Wu, 2005]. However, DLM could only
+solve the compacted par32-*-c instances, producing only 1
+successful run out of 20 attempts and taking nearly 33 hours
+to ﬁnd a solution.
+
+As all else has been left unchanged between the two ver-
+sions of AdaptNovelty+, we must conclude that the extraor-
+dinary performance gains are due to the successful recogni-
+tion and exploitation of variable dependencies in the new non-
+CNF approach. As shown in Figure 3, the dependency lattice
+
+2Available from http://www.satlib.org
+
+IJCAI-07
+
+2362
+
+CNF
+
+Extracted
+
+non-CNF
+
+Problem #vars #clauses #ﬁxed
+
+#eq
+
+#and/or #input #output #seconds
+
+ 
+
+ 
+
+ 
+
+ 
+
+3, 034
+
+3, 032
+
+3, 126
+
+3, 575
+
+ssa-038 1, 501
+ssa-158 1, 363
+ssa-159 1, 363
+ssa-160 1, 391
+par16-1 1, 015
+par16-2 1, 015
+par16-3 1, 015
+par16-4 1, 015
+par16-5 1, 015
+par32-1 3, 176 10, 277
+par32-2 3, 176 10, 253
+par32-3 3, 176 10, 297
+par32-4 3, 176 10, 313
+par32-5 3, 176 10, 325
+
+3, 324
+
+3, 310
+
+3, 374
+
+3, 344
+
+3, 358
+
+40 1, 031
+
+186
+
+132
+
+894
+
+932
+
+25 1, 016
+
+408
+
+383
+
+395
+
+396
+
+388
+
+560
+
+585
+
+573
+
+572
+
+580
+
+758 2, 261
+
+784 2, 235
+
+781 2, 238
+
+791 2, 228
+
+791 2, 228
+
+23
+
+7
+
+11
+
+19
+
+31
+
+31
+
+31
+
+31
+
+31
+
+125
+
+125
+
+125
+
+125
+
+125
+
+407 1, 137
+
+276
+
+288
+
+331
+
+16
+
+16
+
+16
+
+16
+
+16
+
+32
+
+32
+
+32
+
+32
+
+32
+
+642
+
+683
+
+855
+
+91
+
+91
+
+91
+
+91
+
+91
+
+247
+
+247
+
+247
+
+247
+
+247
+
+0.016
+
+0.011
+
+0.015
+
+0.015
+
+0.011
+
+0.013
+
+0.011
+
+0.012
+
+0.016
+
+0.031
+
+0.034
+
+0.032
+
+0.032
+
+0.034
+
+Table 1: The effects of the gate extracting algorithm on the
+ssa7552-∗ and parity problems. This table shows the number
+of “ﬁxed”, “equivalence” (#eq) and “and/or” gates extracted
+from each instance. The number of “independent” and “exter-
+nal dependent” gates of each processed non-CNF instance are
+described in the table as #input and #output, respectively.
+
+CNF based
+
+non-CNF based
+
+Problem % solved
+
+#ﬂips
+
+#seconds % solved #ﬂips
+
+#seconds
+
+ssa-038
+
+ssa-158
+
+ssa-159
+
+ssa-160
+
+par16-1
+
+par16-2
+
+par16-3
+
+par16-4
+
+par16-5
+
+par32-1
+
+par32-2
+
+par32-3
+
+par32-4
+
+par32-5
+
+86% 180, 937, 822 838.790
+
+100% 2, 169
+
+15.131
+
+100% 303, 377, 289 419.054
+
+100% 439
+
+95% 118, 865, 143 499.300
+
+100% 460
+
+100% 154, 646, 089 377.383
+
+100% 1, 284
+
+100% 148, 475, 195 684.972
+
+100% 2, 455
+
+98% 331, 148, 102 788.312
+
+100% 2, 724
+
+100% 381, 887, 299 801.501
+
+100% 1, 640
+
+100% 79, 196, 974 779.877
+
+100% 3, 217
+
+100% 390, 162, 552 604.379
+
+100% 7, 938
+
+1.203
+
+1.396
+
+5.562
+
+0.489
+
+0.570
+
+0.320
+
+0.626
+
+1.630
+
+0%
+
+0%
+
+0%
+
+0%
+
+0%
+
+n/a > 24h
+
+80% n/a 48, 194.033
+
+n/a > 24h
+
+100% n/a 13, 204.536
+
+n/a > 24h
+
+100% n/a 17, 766.822
+
+n/a > 24h
+
+100% n/a 9, 487.728
+
+n/a > 24h
+
+100% n/a 23, 212.755
+
+Table 2: The results of solving the ssa7552-* and parity
+problems using the CNF and non-CNF based versions of
+AdaptNovelty+. The #f lips and #seconds are the aver-
+age number of ﬂips and seconds taken to solve each instance.
+For the original AdaptNovelty+ the #f lips values have been
+approximated as the ﬂip counter maximum was exceeded.
+
+of the par8-1 instance is highly connected. Access to this
+extra knowledge enables the new solver to maintain the con-
+sistency of the dependent variables and hence to efﬁciently
+navigate the search space and ﬁnd a solution. The structure
+of the variable dependencies is otherwise ﬂattened out and
+hidden in the original CNF representation. This means that
+CNF based SLS solvers must expend considerable extra ef-
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+Figure 3: The dependency lattice of the par8-1 instance. In
+this graph, the independent gates are depicted as shaded rect-
+angular boxes and the dependent “equivalence”, “and” and
+“or” gates are represented as hexagon, house and inverse
+house shaped boxes, respectively. External dependent gates
+are also lightly shaded. A solid arrow outputs the gate value,
+while a dashed arrow outputs the negation of the gate value.
+
+CNF based
+
+non-CNF based
+
+Problem % solved #ﬂips #seconds % solved #ﬂips #seconds
+
+bart26
+
+bart27
+
+bart28
+
+bart29
+
+bart30
+
+100% 216
+
+100% 233
+
+100% 222
+
+100% 244
+
+100% 266
+
+0.001
+
+0.001
+
+0.001
+
+0.001
+
+0.001
+
+100% 215
+
+100% 228
+
+100% 222
+
+100% 249
+
+100% 251
+
+3.585
+
+4.537
+
+4.191
+
+5.602
+
+6.677
+
+Table 3: The results of solving the Aloul’s bart FPGA
+problems using the CNF and non-CNF based versions of
+AdaptNovelty+. The #f lips and #seconds are the average
+number of ﬂips and seconds taken to solve each instance.
+
+fort to discover solutions that respect these dependencies.
+
+However, the cost of maintaining consistency between the
+newly discovered gates in our non-CNF approach is also sig-
+niﬁcant. To measure this, we conducted an additional exper-
+iment using a set of bart FPGA problems that exhibit no de-
+pendency structure [Aloul et al., 2002]. Table 3 shows our
+non-CNF AdaptNovelty+ solver to be more than 1, 000 times
+slower on these problems. However, this performance deﬁcit
+can be partly explained by the initial cost of searching for
+gate dependencies in the original CNF representation, and
+hence will become less signiﬁcant for problems where the
+solution time signiﬁcantly exceeds the preprocessing time.
+We also used the built-in C++ set class to update the lattice
+
+IJCAI-07
+
+2363
+
+which could be replaced by more efﬁcient, special purpose
+data structures and operators. Finally, it would be trivial to
+implement a switch that automatically reverts to using a CNF
+based solver when the proportion of gate dependencies falls
+below a given threshold.
+
+5 Conclusion
+In conclusion, we have introduced a new dependency lattice
+platform that effectively maintains the consistency between
+independent and dependent variables (or gates) during the ex-
+ecution of a local search. Based on this platform, our new
+non-CNF version of AdaptNovelty+ can solve many hard
+structured benchmark problems signiﬁcantly faster than its
+original CNF based counterpart. In addition, this non-CNF
+AdaptNovelty+ variant is the ﬁrst local search solver able to
+reliably solve all ﬁve par32 instances within 24 hours. By
+exploiting variable dependencies within a local search and
+by solving the par32 problems we have also successfully ad-
+dressed two of the “Ten Challenges in Propositional Reason-
+ing and Search” (#2 and #6) presented in [Selman et al.,
+1997].
+
+In future work, we expect that non-CNF implementations
+of the latest clause weighting local search solvers (such as
+PAWS [Thornton et al., 2004] and SAPS [Hutter et al., 2002])
+will further extend the state-of-the-art in local search tech-
+niques. In fact, the extension of these solvers using our de-
+pendency lattice is very straightforward. Instead of counting
+the number of external dependent gates that will be made or
+broken if an independent gate is ﬂipped, we simply sum the
+corresponding weights of the dependent gates.
+
+Another future research direction is to develop new
+heuristics that further exploit the gate dependencies when
+selecting the next variable to ﬂip. With these improvements,
+we expect that local search techniques will be able to match
+the performance of the state-of-the-art DPLL solvers on the
+more structured industrial benchmark problems.
+
+Acknowledgments The authors would like to acknowl-
+edge the ﬁnancial support of National ICT Australia (NICTA)
+and the Queensland government. NICTA is funded through
+the Australian Government’s Backing Australia’s Ability ini-
+tiative and also through the Australian Research Council.
+
+References
+[Aloul et al., 2002] Fadi A. Aloul, Arathi Ramani, Igor L.
+Markov, and Karem A. Sakallah. Solving difﬁcult SAT
+instances in the presence of symmetry. In Proceedings of
+Design Automation Conference (DAC-02), pages
+the 39
+731–736, 2002.
+
+th
+
+[B´ejar and Many`a, 2000] Ramo´on B´ejar and Felip Many`a.
+Solving the round robin problem using propositional logic.
+In Proceedings of the Seventeenth National Conference on
+Artiﬁcial Intelligence (AAAI-00), pages 262–266, 2000.
+
+[E´en and Biere, 2005] Niklas E´en and Armin Biere. Effec-
+tive preprocessing in SAT through variable and clause
+elimination.
+In Proceedings of the Eighth International
+Conference on Theory and Applications of Satisﬁability
+Testing (SAT-05), pages 61–75, 2005.
+
+[Hoos, 2002] Holger H. Hoos. An adaptive noise mech-
+anism for WalkSAT.
+In Proceedings of the Eighteenth
+National Conference on Artiﬁcial Intelligence (AAAI-02),
+pages 635–660, 2002.
+
+[Hutter et al., 2002] Frank Hutter, Dave A. D. Tompkins,
+and Holger H. Hoos. Scaling and probabilistic smooth-
+ing: Efﬁcient dynamic local search for SAT. In Proceed-
+ings of the Eighth International Conference on Principles
+and Practice of Constraint Programming (CP-02), pages
+233–248, 2002.
+
+[Kautz and Selman, 1996] Henry Kautz and Bart Selman.
+Pushing the envelope: Planning, propositional logic, and
+stochastic search.
+In Proceedings of the Thirteenth Na-
+tional Conference on Artiﬁcial Intelligence (AAAI-96),
+pages 1194–1201, 1996.
+
+[Ostrowski et al., 2002] Richard Ostrowski, ´Eric Gr´egoire,
+Bertrand Mazure, and Lakhdar Sa¨ıs. Recovering and ex-
+ploiting strutural knowledge from CNF formulas. In Pro-
+ceedings of the Eighth International Conference on Prin-
+ciples and Practice of Constraint Programming (CP-02),
+pages 185–199, 2002.
+
+[Pham et al., 2005] Duc Nghia Pham, John Thornton, Abdul
+Sattar, and Adelraouf Ishtaiwi. SAT-based versus CSP-
+based constraint weighting for satisﬁability. In Proceed-
+ings of the Twentieth National Conference on Artiﬁcial In-
+telligence (AAAI-05), pages 455–460, 2005.
+
+[Selman et al., 1992] Bart Selman, Hector Levesque, and
+David Mitchell. A new method for solving hard satisﬁabil-
+ity problems. In Proceedings of the Tenth National Confer-
+ence on Artiﬁcial Intelligence (AAAI-92), pages 440–446,
+1992.
+
+[Selman et al., 1997] Bart Selman, Henry Kautz, and David
+McAllester. Ten challenges in propositional reasoning and
+search. In Proceedings of the Fifteenth International Joint
+Conference on Artiﬁcial Intelligence (IJCAI-97), pages
+50–54, 1997.
+
+[Thornton et al., 2004] John Thornton, Duc Nghia Pham,
+Stuart Bain, and Valnir Ferreira Jr. Additive versus multi-
+plicative clause weighting for SAT. In Proceedings of the
+Twentieth National Conference on Artiﬁcial Intelligence
+(AAAI-04), pages 191–196, 2004.
+
+[Tompkins and Hoos, 2004] Dave A. D. Tompkins and Hol-
+ger H. Hoos. UBCSAT: An implementation and experi-
+mentation environment for SLS algorithms for SAT and
+MAX-SAT.
+In SAT (Selected Papers), pages 306–320,
+2004.
+
+[Wah and Wu, 2005] Benjamin W. Wah and Zhe Wu.
+Penalty formulations and trap-avoidance strategies for
+solving hard satisﬁability problems. J. Comput. Sci. Tech-
+nol., 20(1):3–17, 2005.
+
+Zhang,
+
+[Zhang et al., 2001] Lintao
+
+Conor Madigan,
+Matthew Moskewicz, and Sharad Malik. Efﬁcient con-
+ﬂict driven learning in a Boolean satisﬁability solver.
+In Proceedings of
+the International Conference on
+Computer-Aided Design, pages 279–285, 2001.
+
+IJCAI-07
+
+2364
+
+

@@ -1,0 +1,1404 @@
+Domain Independent Approaches for Finding Diverse Plans
+
+Biplav Srivastava†
+
+Tuan A. Nguyen‡ Alfonso Gerevini¶
+
+Subbarao Kambhampati∗ Minh Binh Do§
+
+Ivan Serina¶
+†IBM India Research Laboratory, New Delhi and Bangalore, India, sbiplav@in.ibm.com
+
+*Arizona State University, Tempe, AZ, USA 85287, rao@asu.edu
+
+‡University of Natural Sciences, Ho Chi Minh, Vietnam, natuan@ﬁt.hcmuns.edu.vn
+
+§Palo Alto Research Center, USA, minhdo@parc.com
+
+¶University of Brescia, Italy, {gerevini,serina}@ing.unibs.it
+
+Abstract
+
+In many planning situations, a planner is required
+to return a diverse set of plans satisfying the same
+goals which will be used by the external systems
+collectively. We take a domain-independent ap-
+proach to solving this problem. We propose differ-
+ent domain independent distance functions among
+plans that can provide meaningful insights about
+the diversity in the plan set. We then describe how
+two representative state-of-the-art domain indepen-
+dent planning approaches – one based on compila-
+tion to CSP, and the other based on heuristic local
+search – can be adapted to produce diverse plans.
+We present empirical evidence demonstrating the
+effectiveness of our approaches.
+
+1 Introduction
+
+A typical automated planner takes as input the speciﬁcations
+of the initial and goal states and the set of available ac-
+tions, and ﬁnds a plan that will satisfy the goals by efﬁciently
+searching in the space of possible state conﬁgurations or ac-
+tion orderings (plans). In many planning situations, a planner
+is required to return not one but a set of diverse plans satisfy-
+ing the same goals which will be used by the external systems
+collectively. As an example, in adaptive web services compo-
+sition, the web service engine wants to have a set of diverse
+plans/ compositions such that if there is a failure while exe-
+cuting one composition, an alternative may be used which is
+less likely to be failing simultaneously[Chaﬂe et al., 2006].
+However, if a user is helping in selecting the compositions,
+the planner could be ﬁrst asked for a set of diverse plans and
+when she selects one of them, the planner is next asked to ﬁnd
+plans that are similar to the selected one. Another example is
+using planning for intrusion detection [Boddy et al., 2005],
+where the aim is to detect diverse ways of possible intrusion
+attacks (represented as plans).
+
+Although the need for ﬁnding similar or different plans has
+been noticed in the past, there has been little concrete work
+on formalizing and solving the problem. What little there is
+has concentrated on ﬁnding similar plans[Fox et al., 2006] or
+
+∗
+
+Kambhampati’s research is supported in part by an IBM Faculty
+Award, the NSF grant IIS–308139, the ONR grant N000140610058,
+and by a Lockheed Martin subcontract TT0687680 to ASU as part
+of the DARPA Integrated Learning program.
+
+are domain-speciﬁc approaches (See Section 5). For exam-
+ple, Myers [Myers & Lee, 1999] expects the domain model-
+ers to provide a “meta-theory” of the domain (in addition to
+the domain transition model in terms of actions and their ef-
+fects). In this paper, we focus on domain-independent means
+of ﬁnding (and comparing) diverse plans. This immediately
+brings up the issue: on what basis should two plans be com-
+pared? The ﬁrst contribution of this paper is the proposal of a
+spectrum of distance measures that capture plan characteris-
+tics in terms of actions, behaviors (states that result from the
+plan execution) and causal structures.
+
+Once the distance measures are in place, we turn to the
+issue of automatically generating sets of plans that have the
+desired diversity in terms of those distance measures. A naive
+approach for this would be to let the planner generate multi-
+ple solutions and ﬁlter out the solutions that do not satisfy
+the required diversity. Such a ﬁltering approach is not very
+promising, particularly given the fact that the set of plans for
+a given problem can in principle be inﬁnite.1 Indeed, Boddy
+et. al. 2005, who use this type of ﬁltering technique in the in-
+trusion detection domain, explicitly acknowledge the need for
+approaches that take diversity constraints into account during
+search more actively.
+
+The second contribution of our paper is thus an investiga-
+tion of effective approaches for using distance measures to
+bias a planner’s search to ﬁnd diverse plans efﬁciently. The
+technical details of biasing the search do depend on the de-
+tails of the underlying planner. To get a broader understand-
+ing, we decided to investigate two representative state-of-the-
+art planning approaches. The ﬁrst, GP-CSP, typiﬁes the issues
+involved in generating diverse plans in bounded horizon com-
+pilation approaches, while the second, LPG, typiﬁes the issues
+involved in modifying the heuristic search planners. Our in-
+vestigations with GP-CSP allow us to compare the relative dif-
+ﬁculties of enforcing diversity with each of the three distance
+measures. We ﬁnd that using action-based distance measures
+to ﬁnd diverse plans usually results in plans that are also di-
+verse with respect to their behavior and causal structures, but
+less likely in other permutations. With LPG, we focus only
+on the action-based distance, which can be treated in a nat-
+ural way by a relatively simple modiﬁcation of the heuristic
+function, to explore scaleup issues. We ﬁnd that the proposed
+distance measures make LPG more effective in solving for di-
+verse plans over large problem instances.
+
+1To see this, note that there may be inﬁnitely many non-minimal
+
+variations of a single plan.
+
+IJCAI-07
+
+2016
+
+Basis
+Actions
+
+States
+
+Causal links
+
+Pros
+Does not require
+problem information
+Not dependent on any speciﬁc
+plan representation
+Considers causal proximity
+of state transitions (action)
+rather than positional
+(physical) proximity
+
+Cons
+No problem information
+is used
+Needs an execution
+simulator to identify states
+Requires domain theory
+
+Table 1: The pros and cons of different bases to characterize
+plans.
+
+In the rest of the paper, we start by formalizing the problem
+and then propose different plan distance functions. Next, we
+propose methods to ﬁnd diverse plans and demonstrate their
+effectiveness using GP-CSP and LPG. We end with a discus-
+sion on related work and our main results.
+
+2 Distance Measures
+
+To talk formally about generation of diverse plans, we need to
+start with the notion of distance between plans. Let δ(Si, Sj)
+→ [0, 1] denote a distance function between a pair of plans.
+A value of 0 represents complete similarity of plans while 1
+represents complete diversity. Following the convention of
+[Hebrard et al., 2005], for a given set S of plans, we de-
+ﬁne max(δ, S) = max
+Si,Sj∈S
+δ(Si, Sj). The problem of ﬁnding k diverse/ similar plans
+for a problem P P , whose set of all plans is represented by
+Plan(P P ), is then stated below.
+
+Si,Sj ∈S δ(Si, Sj) and min(δ, S) = min
+
+dDISTANTkSET (resp. dCLOSEkSET): Find S
+with S ⊆ Plan(P P ), | S | = k and min(δ, S) ≥ d
+(resp. max(δ, S) ≤ d).
+
+At the heart of tackling this problem is the issue of deﬁning
+criteria by which two plans are compared.2 As mentioned
+earlier, we focus here on domain-independent measures for
+comparing plans. We can compare two plans in terms of:
+
+1. Actions that are present in the two plans.
+
+2. The behaviors resulting from the execution of the plans
+(where the behavior is captured in terms of the sequence
+of states the agent goes through).
+
+3. The causal structures of the two plans measured in terms
+of the causal links representing how actions contribute to
+the goals being achieved.3
+
+Table 1 gives the pros and cons of using the different com-
+parison methods. We note that if actions in the plans are used
+as the basis for comparison, no additional problem or domain
+theory information is needed. If plan behaviors are used as
+the basis for comparison, the representation of the plans that
+bring about state transition becomes irrelevant since only the
+
+2This issue is complicated by the fact that the plans being com-
+pared can be generated by an automated planner or found in other
+ways, e.g., given manually or manipulated after getting it from
+a planner[Srivastava, Vanhatalo, & Koehler, 2005]. Although we
+only consider generated plans, the distance measures apply to other
+provences as well. We make no apriori assumption about the plans
+like each goal has a single causal support structure.
+
+3A causal link A1
+
+p1→ A2 records that a predicate is produced
+at A1 and consumed at A2. A causal chain is a sequence of causal
+pn−1→ An. We use
+links of the form A1
+causal links for analysis but refer to a plan’s causal links by causal
+chains, wherever possible, for convenience.
+
+p2→ A3, ..., An−1
+
+p1→ A2, A2
+
+Name
+δ1 (δa)
+δ2
+δ3 (δs)
+δ4
+δ5 (δc)
+δ6
+
+Basis
+Actions
+Actions
+States
+States
+Causal Links
+Causal Links
+
+Computation
+Set-difference
+Preﬁxes Neighbourhood
+Set-difference
+Preﬁxes Neighbourhood
+Set-difference
+Preﬁxes Neighbourhood
+
+Table 2: A spectrum of distance functions based on different
+bases and way of computations.
+actual states that an execution of the plan will take is consid-
+ered. Hence, we can now compare plans of different repre-
+sentations, e.g., 4 plans where the ﬁrst is a deterministic plan,
+the second is a contingent plan, the third is a hierarchical plan
+and the fourth is a policy encoding probabilistic behavior. If
+causal links are used as the basis for comparison, the causal
+proximity among actions is now considered rather than just
+physical proximity in the plan.
+
+Aggregating Distances Once a basis for plan comparison is
+chosen, we still have different choices for aggregating the dis-
+tances. For example, if we are interested in action based com-
+parison of plans, then we could (i) view the plans as sets (or
+bags) of actions and consider set (bag) difference between the
+two plans, (ii) consider the plans as sequences of actions and
+consider measures such as “hamming distance” that are sen-
+sitive to the position of the actions. In Table 2, 6 distance
+functions are presented which use 3 different bases and 2 dif-
+ferent ways of computation. We use δ1, δ3 and δ5 and refer to
+them by δa, δs and δc, respectively, in the rest of the paper.
+
+n
+n
+
+Pendn
+Pendn
+
+e
+e
+
+nalae
+
+alae
+
+Plan
+Plan
+
+al
+al
+
+aalan
+aalan
+
+-
+-
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+-
+-
+
+Plan
+Plan
+
+-
+-
+
+Plan
+Plan
+
+-
+-
+
+Plan
+
+-
+
+Figure 1: Example illustrating bases for distance measures.
+Ai and Ag denote dummy actions producing the initial state
+and consuming the goal state, respectively.
+Example:
+
+In Figure 1, three plans are shown for a planning prob-
+lem where the initial state is (cid:6)p1, p2, p3(cid:7) and the goal state
+is (cid:6)g1, g2, g3(cid:7). The action models and the causal structures
+of plans are shown to the left. Plans S1-1 and S1-2 have the
+same actions but different ordering structures. S1-1 has par-
+allel actions while S1-2 has them in sequence. The plan S1-3
+has A1 like the other plans but all other actions are different
+(A
+
+2 and A
+An action based plan comparison method which uses
+position-based distance aggregation would ﬁnd S1-1, S1-2
+and S1-3 to be all different. This is because all the three plans
+
+3). However, it also achieves the same goals.
+
+(cid:2)
+
+(cid:2)
+
+IJCAI-07
+
+2017
+
+have different sets of action preﬁxes. If instead, the action in-
+formation is used with set differencing, S1-1 and S1-2 would
+be found to be identical.
+
+A state based comparison method which uses any of the
+given computation choice would ﬁnd S1-2 and S1-3 to be
+identical, and both of them to be different from S1-1. This
+is because the states after every transition in S1-2 and S1-3
+are identical. S1-1, on the other hand, has (trivially) the same
+ﬁrst and last states but no intermediate states.
+
+A causal link based comparison method which uses set dif-
+ferencing would ﬁnd S1-1 and S1-2 to be the same while S1-3
+as different. This is because the causal links for goals g2 and
+g3 in S1-1 (S1-2) are different from those of S1-3.
+
+3 Finding Diverse Plans with GP-CSP
+The GP-CSP planner[Do & Kambhampati, 2001] converts
+Graphplan’s planning graph into a CSP encoding, and solves
+it using a standard CSP solver. The solution of the encoding
+represents a valid plan for the original planning problem. In
+the encoding, the CSP variables correspond to the predicates
+that have to be achieved at different levels in the planning
+graph (different planning steps) and their possible values are
+the actions that can support the predicates. For each CSP vari-
+able representing a predicate p, there are two special values:
+i) ⊥: indicates that a predicate is not supported by any action
+and is false at a particular level/planning-step; ii) “noop”: in-
+dicates that the predicate is true at a given level i because it
+was made true at some previous level j < i and no other
+action deletes p between j and i. Constraints encode the re-
+lations between predicates and actions: 1) mutual exclusion
+relations between predicates and actions; and 2) the causal
+relationships between actions and their preconditions.
+
+3.1 Adapting GP-CSP to Different Distance Bases
+When the above planning encoding is solved by any standard
+CSP solver, it will return a solution containing (cid:6)var, value(cid:7) of
+the form {(cid:6)x1, y1(cid:7), ...(cid:6)xn, yn(cid:7)}. The collection of xi where
+yi (cid:9)= ⊥ represents the facts that are made true at different time
+steps (plan trajectory) and can be used as a basis for the state-
+based distance measure; the set of (yi (cid:9)= ⊥) ∧ (yi (cid:9)= noop)
+represents the set of actions in the plan and can be used
+for action-based distance measure; lastly, the assignments
+(cid:6)xi, yi(cid:7) themselves represent the causal relations and can be
+used for the causal-based distance measure.
+
+However, there are several complications we need to over-
+come before a speciﬁc distance measure between plans can
+be computed. First, the same action can be represented by
+different values in the domains of different variables. Con-
+sider a simple example in which there are two facts p and
+q, both supported by two actions a1 and a2. When set-
+ting up the CSP encoding, we assume that the CSP variables
+x1 and x2 are used to represent p and q. The domains for
+x1 and x2 are {v11, v12} and {v21, v22}, both representing
+the two actions {a1, a2} (in that order). The assignments
+{(cid:6)x1, v11(cid:7), (cid:6)x2, v21(cid:7)} and {(cid:6)x1, v12(cid:7), (cid:6)x2, v22(cid:7)} have a dis-
+tance of 2 in traditional CSP because different values are as-
+signed for each variable x1 and x2. However, they both rep-
+resent the same action set {a1, a2} and thus lead to the plan
+distance of 0 if we use the action-based distance in our plan
+comparison. Therefore, we ﬁrst need to translate the set of
+values in all assignments back to the set of action instances
+before doing comparison using action-based distance. The
+
+second complication arises for the causal-based distance. A
+p→ a2 between two actions a1 and a2 indi-
+causal link a1
+cates that a1 supports the precondition p of a2. However, the
+CSP assignment (cid:6)p, a1(cid:7) only provides the ﬁrst half of each
+causal-link. To complete the causal-link, we need to look at
+the values of other assignments to identify action a2 that oc-
+cur at the later level in the planning graph and has p as its
+precondition.
+
+3.2 Making GP-CSP Return a Set of Solutions
+
+To make GP-CSP return a set of solutions satisfying the
+dDISTANTkSET constraint using one of the three distances,
+we add “global” constraints to each original encoding to en-
+force d-diversity between every pair of solutions. When each
+global constraint is called upon by the normal forward check-
+ing and arc-consistency checking procedures inside the de-
+fault solver to check if the distance between two solutions is
+over a predeﬁned value d, we ﬁrst map each set of assign-
+ments to an actual set of actions (action-based), predicates
+that are true at different plan-steps (state-based) or causal-
+links (causal-based) using the method discussed in the previ-
+ous section. This process is done by mapping all (cid:6)var, value(cid:7)
+CSP assignments into action sets using a call to the planning
+graph, which is outside of the CSP solver, but works closely
+with the general purpose CSP solver in GP-CSP. The com-
+parison is then done within the implementation of the global
+constraint to decide if two plans are diverse enough.
+
+We investigate two different ways to use the global con-
+straints: 1) parallel strategy to return the set of k solutions
+all at once; and 2) greedy strategy to return them one after an-
+other. In the parallel approach, we create one encoding that
+contains k identical copies of each original planning encod-
+ing created using GP-CSP planner. The k copies are connected
+together using k(k − 1)/2 pair-wise global constraints. Each
+global constraint between the ith and jth copies ensures that
+two plans represented by the solutions of those two copies
+will be at least d distant from each other. If each copy has n
+variables, then this constraint involves 2n variables.
+
+In the greedy approach, the k copies are not setup in par-
+allel up-front, but sequentially. We add to the ith copy one
+global constraint to enforce that the solution of the ith copy
+should be d-diverse from any of those i − 1 solutions. The
+advantage of the greedy approach is that each CSP encoding
+is signiﬁcantly smaller in terms of the number of variables (n
+vs. k∗n), smaller in terms of the number of global constraints
+(1 vs. k(k − 1)/2), and each global constraint also contains
+lesser number of variables (n vs. 2∗n).4 Thus, each encoding
+in the greedy approach is easier to solve. However, because
+each solution depends on all previously found solutions, the
+encoding can be unsolvable if the previously found solutions
+comprise a bad initial solution set.
+
+3.3 Empirical Evaluation
+
+We implemented the parallel and greedy approaches dis-
+cussed earlier for the three distance measures and tested them
+with the benchmark set of Logistics problems provided with
+the Blackbox planner[Kautz & Selman, 1998]. All experi-
+ments were run on a Linux Pentium 4, 3Ghz machine with
+
+4However, each constraint is more complicated because it en-
+
+codes (i-1) previously found solutions.
+
+IJCAI-07
+
+2018
+
+Prob1
+
+Prob2
+
+Prob3
+
+Prob4
+
+Prob5
+
+δa
+δs
+δc
+
+Random
+
+0.087
+0.077
+0.190
+
+0.327
+
+7.648
+9.354
+6.542
+
+15.480
+
+1.021
+1.845
+1.063
+
+8.982
+
+6.144
+6.312
+6.314
+
+8.083
+8.667
+8.437
+
+Prob6
+
+178.633
+232.475
+209.287
+
+88.040
+
+379.182
+
+6105.510
+
+Table 3: Average solving time (in seconds) to ﬁnd a plan us-
+ing greedy (ﬁrst 3 rows) and by random (last row) approaches
+
+Prob1
+
+Prob2
+
+Prob3
+
+Prob4
+
+Prob5
+
+Prob6
+
+δa
+δs
+δc
+
+0.041/0.35
+0.035/0.4
+0.158/0.8
+
+0.067/0.65
+
+0.05/0.8
+
+0.136/0.95
+
+0.067/0.25
+0.096/0.5
+0.256/0.55
+
+0.131/0.1*
+0.147/0.4
+
+0.459/0.15*
+
+0.126/0.15
+0.140/0.5
+0.346/0.3*
+
+0.128/0.2
+0.101/0.5
+0.349/0.45
+
+Table 4: Comparison of the diversity in the solution sets re-
+turned by the random and greedy approaches
+
+512MB RAM. For each problem5, we test with different d
+values ranging from 0.01 (1%) to 0.95 (95%)6 and k increases
+from 2 to n where n is the maximum value for which GP-CSP
+can still ﬁnd solutions within plan horizon. The horizon (par-
+allel plan steps) limit is 30.
+
+We found that the greedy approach outperformed the paral-
+lel approach and solved signiﬁcantly higher number of prob-
+lems. Therefore, we focus on the greedy approach hereafter.
+For each combination of d, k, and a given distance measure,
+we record the solving time and output the average/min/max
+pairwise distances of the solution sets.
+Baseline Comparison: As a baseline comparison, we have
+also implemented a random approach. In this approach, we
+do not use global constraints but use random value ordering
+in the CSP solver to generate k different solutions without
+enforcing them to be pairwise d-distance apart. For each dis-
+tance d, we continue running the random algorithm until we
+ﬁnd kmax solutions where kmax is the maximum value of k
+that we can solve for the greedy approach for that particular
+d value. In general, we want to compare with our approach
+of using global constraint to see if the random approach can
+effectively generate diverse set of solutions by looking at: (1)
+the average time to ﬁnd a solution in the solution set; and
+(2) the maximum/average pairwise distances between k ≥ 2
+randomly generated solutions.
+Figure 3 shows the comparison of average solving time to
+ﬁnd one solution in the greedy and random approaches. The
+results show that on an average, the random approach takes
+signiﬁcantly more time to ﬁnd a single solution, regardless of
+the distance measure used by the greedy approach. To assess
+the diversity in the solution sets, Table 4 shows the compar-
+ison of: (1) the average pairwise minimum distance between
+the solutions in sets returned by the random approach; and (2)
+the maximum d for which the greedy approach still can ﬁnd
+a set of diverse plans. The comparisons are done for all three
+distance measures. For example, the ﬁrst cell (0.041, 0.35)
+in Table 4, implies that the minimum pairwise distance av-
+eraged for all solvable k ≥ 2 using the random approach is
+d = 0.041 while it is 0.35 (i.e. 8x more diverse) for the
+greedy approach using the δa distance measure. Except for 3
+cases, using global constraints to enforce minimum pairwise
+distance between solutions helps GP-CSP return signiﬁcantly
+more diverse set of solutions. On an average, the greedy ap-
+
+5log-easy=prob1, rocket-a=prob2, log-a = prob3, log-b = prob4,
+
+log-c=prob5, log-d=prob6.
+
+6Increments of 0.01 from 0.01 to 0.1 and of 0.05 thereafter.
+
+d
+
+0.01
+0.03
+0.05
+0.07
+0.09
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+
+Prob1
+
+11,5, 28
+6,3,24
+5,3,18
+2,3,14
+2,3,14
+2,3,10
+2,3,5
+2,2,3
+1,2,3
+1,1,3
+1,1,2
+1,1,2
+1,1,2
+-
+
+Prob2
+
+8,18,12
+8,13,9
+6,11,9
+6,10,8
+6,9,6
+6,9,6
+5,9,6
+4,7,5
+3,6,5
+2,4,5
+2,3,4
+1,2,2
+1,2,2
+1,1,2
+
+Prob3
+
+Prob4
+
+Prob5
+
+Prob6
+
+9,8,18
+7,7,12
+5,7,10
+4,7,6
+3,6,6
+3,6,6
+2,6,6
+1,4,4
+1,3,3
+1,2,2
+-
+-
+-
+-
+
+3,4,5
+2,4,3
+2,4,3
+2,4,2
+2,4,2
+2,4,2
+1,3,1
+1,2,1
+1,2,1
+-
+-
+-
+-
+-
+
+4,6,8
+4,6,6
+4,6,5
+4,6,5
+3,6,4
+2,6,4
+1,5,2
+1,3,2
+1,2,1
+1,2,1
+-
+-
+-
+-
+
+8,7,7
+4,7,6
+3,7,5
+3,7,5
+3,7,4
+3,7,4
+2,5,3
+1,3,3
+1,2,3
+1,2,1
+-
+-
+-
+-
+
+Table 5: For each given d value, each cell shows the largest
+solvable k for each of the three distance measures δa, δs, and
+δc (in this order). The maximum values in cells are in bold.
+
+proach returns 4.25x, 7.31x, and 2.79x more diverse solutions
+than the random approach for δa, δs and δc, respectively.
+Analysis of the different distance-bases: Overall, we were
+able to solve 1264 (d, k) combinations for three distance mea-
+sures δa, δs, δc using the greedy approach. We were particu-
+larly interested in investigating the following issues:
+
+• H1 - Is it easy or difﬁcult to ﬁnd a set of diverse so-
+lutions using different distance measures? Thus, (1) for
+the same d and k values, which distance measure is more
+difﬁcult (time consuming) to solve; and (2) given an en-
+coding horizon limit, how high is the value of d and k
+that we can still ﬁnd set of solutions for a given problem
+using different distance measures.
+
+• H2 - What, if any, is the correlation/sensitivity between
+different distance measures? Thus, how diverse the so-
+lutions returned when using distance measure δ(cid:3)
+are ac-
+(where δ(cid:3), δ(cid:3)(cid:3) ∈ {δa, δs, δc})
+cording to another δ(cid:3)(cid:3) (cid:9)= δ(cid:3)
+Regarding H1, Table 5 shows the highest solvable k value
+for each distance d and base δa, δs, and δc. For a given (d, k)
+pair, enforcing δa appears to be the most difﬁcult, then δs, and
+δc is the easiest. GP-CSP is able to solve 237, 462, and 565
+combinations of (d, k) respectively for δa, δs and δc. GP-CSP
+solves dDISTANTkSET problems more easily with δs and δc
+than with δa due to the fact that solutions with different ac-
+tion sets (diverse with regard to δa) will likely cause different
+trajectories and causal structures (diverse with regard to δs
+and δc). Between δs and δc, δc solves more problems for eas-
+ier instances (Problems 1-3) but less for the harder instances,
+as shown in Table 5. We conjecture that for solutions with
+more actions (i.e. in bigger problems) there are more causal
+dependencies between actions and thus it is harder to reorder
+actions to create a different causal-structure.
+
+For running time comparisons, among 216 combinations
+of (d, k) that were solved by all three distance measures, GP-
+CSP takes the least amount of time for δa in 84 combinations,
+for δs in 70 combinations and 62 for δc. The ﬁrst three lines
+of Table 3 show the average time to ﬁnd one solution in d-
+diverse k-set for each problem using δa, δs and δc (which we
+call ta, ts and tc respectively). In general, ta is the small-
+est and ts > tc in most problems. Thus, while it is harder
+to enforce δa than δs and δc (as indicated in Table 5), when
+the encodings for all three distances can be solved for a given
+(d, k), then δa takes less time; this can be due to tighter con-
+straints (more pruning power for the global constraints) and
+simpler global constraint setting.
+
+To test H2, in Table 6, we show the cross-validation be-
+tween different distance measures δa, δs, and δc. In this table,
+
+IJCAI-07
+
+2019
+
+δa
+
+-
+0.485
+0.461
+
+δs
+
+1.262
+-
+0.938
+
+δc
+
+1.985
+0.883
+-
+
+δa
+δs
+δc
+
+and d(cid:3)
+
+are distance measured according to δ(cid:3)(cid:3)
+
+Table 6: Cross-validation of distance measures δa, δs, and δc.
+cell (cid:6)row, column(cid:7) = (cid:6)δ(cid:3), δ(cid:3)(cid:3)(cid:7) indicates that over all combina-
+tions of (d, k) solved for distance δ(cid:3)
+, the average value d(cid:3)(cid:3)/d(cid:3)
+where d(cid:3)(cid:3)
+and δ(cid:3)
+,
+respectively (d(cid:3) ≥ d). For example, (cid:6)δs, δa(cid:7) = 0.485 means
+that over 462 combinations of (d, k) solvable for δs, for each
+d, the average distance between k solutions measured by δa
+is 0.485 ∗ ds. The results indicate that when we enforce d for
+δa, we will likely ﬁnd even more diverse solution sets accord-
+ing to δs (1.26 ∗ da) and δc (1.98 ∗ da). However, when we
+enforce d for either δs or δc, we are not likely to ﬁnd a more
+diverse set of solutions measured by the other two distance
+measures. Nevertheless, enforcing d using δc will likely give
+comparable diverse degree d for δs (0.94 ∗ dc) and vice versa.
+We also observe that ds is highly dependent on the difference
+between the parallel lengths of plans in the set. ds seems to
+be the smallest (i.e ds < da < dc) when all k plans have the
+same/similar number of time steps. This is consistent with
+the fact that δa and δc do not depend on the steps in the plan
+execution trajectory while δs does.
+
+4 Finding Diverse Plans with LPG
+LPG is a local-search-based planner, that incrementally mod-
+iﬁes a partial plan in a search for a plan that contains no
+ﬂaws [Gerevini, Saetti, & Serina, 2003]. The behavior of
+LPG is controlled by an evaluation function that is used to
+select between different plan candidates in a neighborhood
+generated for local search. At each search step, the elements
+in the search neighborhood of the current partial plan π are
+the alternative possible plans repairing a selected ﬂaw in π.
+The elements of the neighborhood are evaluated according to
+an action evaluation function E [Gerevini, Saetti, & Serina,
+2003]. This function is used to estimate the cost of either
+adding or of removing an action node a in the partial plan
+π being generated. In the next two subsections, we present
+some modiﬁcations to LPG for computing diverse plans using
+the action-based plan distance.
+
+4.1 Revised Evaluation Function for Diverse Plans
+In order to manage dDISTANCEkSET problems, the function
+E has been extended to include an additional evaluation term
+that has the purpose of penalizing the insertion and removal
+of actions that decrease the distance of the current partial plan
+π under adaptation from a reference plan π0. In general, E
+consists of four weighted terms, evaluating four aspects of the
+quality of the current plan that are affected by the addition
+(E(a)i) or removal (E(a)r) of a
+
+E(a)i = αE ·Execution cost(a)i +αT ·T emporal cost(a)i+
+
++ αS · Search cost(a)i + αD · |(π0 − π) ∩ πi
+R|
+
+E(a)r = αE·Execution cost(a)r+αT ·T emporal cost(a)r+
+
++ αS · Search cost(a)r + αD · |(π0 − π − a) ∩ πr
+
+R|.
+
+The ﬁrst three terms of the two forms of E are unchanged
+from the standard behavior of LPG. The fourth term, used
+only for computing diverse plans, is the new term estimating
+how the proposed plan modiﬁcation will affect the distance
+
+from the reference plan π0. Each cost term in E is computed
+using a relaxed temporal plan πR [Gerevini, Saetti, & Serina,
+2003].
+
+The πR plans are computed by an algorithm, called Re-
+laxedPlan, formally described and illustrated in [Gerevini,
+Saetti, & Serina, 2003], that we have slightly modiﬁed to pe-
+nalize the selection of actions decreasing the plan distance
+from the reference plan. The speciﬁc change to RelaxedPlan
+for computing diverse plans is very similar to the change de-
+scribed in [Fox et al., 2006], and it concerns the heuristic
+function for selecting the actions for achieving the subgoals
+in the relaxed plans. In the modiﬁed function for Relaxed-
+Plan, we have an extra 0/1 term that penalizes an action b for
+πR if its addition decreases the distance of π + πR from π0 (in
+the plan repair context investigated in [Fox et al., 2006], b is
+penalized if its addition increases such a distance).
+
+R
+
+R
+
+R
+
+| or |(π0 − π − a) ∩ πr
+
+The last term of the modiﬁed evaluation function E is a
+measure of the decrease in plan distance caused by adding or
+removing a: |(π0 − π) ∩ πi
+|, where πi
+contains the new action a. The α-coefﬁcients of the E-terms
+are used to weigh their relative importance.7 The values of
+the ﬁrst 3 terms are automatically derived from the expression
+deﬁning the plan metric for the problem [Gerevini, Saetti, &
+Serina, 2003]. The coefﬁcient for the fourth new term of E
+(αD) is automatically set during search to a value propor-
+tional to d/δa(π, π0), where π is the current partial plan under
+construction. The general idea is to dynamically increase the
+value of αD according to the number of plans n that have
+been generated so far: if n is much higher than k, the search
+process consists of ﬁnding many solutions with not enough
+diversiﬁcation, and hence the importance of the last E-term
+should increase.
+
+4.2 Making LPG Return a Set of Plans
+In order to compute a set of k d-distant plans solving a
+dDISTANCEkSET problem, we run the LPG search multiple
+times, until the problem is solved, with the following two ad-
+ditional changes to the standard version of LPG: (i) the pre-
+processing phase computing mutex relations and other reach-
+ability information exploited during the relaxed plan con-
+struction is done only once for all runs; (ii) we maintain an
+incremental set of valid plans, and we dynamically select one
+of them as the reference plan π0 for the next search. Concern-
+ing (ii), let P = {S1, ..., Sn} be the set of n valid plans that
+have been computed so far, and CPlans(Si) the subset of P
+containing all plans that have a distance greater than or equal
+to d from a reference plan Si ∈ P . The reference plan π0
+used in the modiﬁed heuristic function E is a plan Smax ∈ P
+which has a maximal set of diverse plans in P , i.e.,
+
+Smax = ARGM AX{Si∈P } {|CPlans(Si)|} .
+
+Smax is incrementally computed each time the local search
+ﬁnds a new solution. In addition to being used to identify the
+reference plan in E, Smax is also used for deﬁning the initial
+state (partial plan) of the search process. Speciﬁcally, we ini-
+tialize the search using a (partial) plan obtained by randomly
+removing some actions from a (randomly selected) plan in the
+set CPlans(Smax) ∪ {Smax}.
+
+The process of generating diverse plans starting from a dy-
+namically chosen reference plan continues until at least k
+
+7These coefﬁcients are also normalized to a value in [0, 1] using
+
+the method described in [Gerevini, Saetti, & Serina, 2003].
+
+IJCAI-07
+
+2020
+
+plans that are all d-distant from each other have been pro-
+duced. The modiﬁed version of LPG to compute diverse plans
+is called LPG-d.
+
+4.3 Experimental Analysis with LPG-d
+The distance function δa, using set-difference, can be written
+as the sum of two terms:
+
+δa(Si, Sj) =
+
+|Si − Sj|
+|Si| + |Sj|
+
++
+
+|Sj − Si|
+|Si| + |Sj|.
+
+The ﬁrst term represents the contribution of the actions in Si
+to the plan difference, while the second term indicates the
+contribution of Si to δa. We experimentally observed that in
+some cases the differences between two diverse plans com-
+puted using δa are mostly concentrated in only one of the
+δa components. This asymmetry means that one of the two
+plans can have many more actions than the other one, which
+could imply that the quality of one of the two plans is much
+worse than the quality of the other plan. In order to avoid this
+problem, we can parametrize δa by imposing the two extra
+constraints
+
+δA
+a
+
+≥ d/γ and δB
+a
+
+≥ d/γ
+
+a and δB
+
+where δA
+a are the ﬁrst and second terms of δa, respec-
+tively, and γ is an integer parameter “balancing” the diversity
+of Si and Sj.
+
+In this section, we analyze the performance of the modi-
+ﬁed version of LPG, called LPG-d, in three different bench-
+mark domains from the 3rd and 5th IPCs.8 The main goals of
+the experimental evaluation were (i) showing that LPG-d can
+efﬁciently solve a large set of (d, k)-combinations, (ii) inves-
+tigating the impact of the δa γ-constraints on performance,
+(iii) comparing LPG-d and the standard LPG.
+
+We tested LPG-d using both the default and parametrized
+versions of δa, with γ = 2 and γ = 3. We give detailed
+results for γ = 3 and a more general evaluation for γ = 2
+and the original δa. We consider d that varies from 0.05 to
+0.95, using 0.05 increment step, and with k = 2...5, 6, 8,
+10, 12, 14, 16, 20, 24, 28, 32 (overall, a total of 266 (d, k)-
+combinations). Since LPG-d is a stochastic planner, we use
+the median of the CPU times (in seconds) and the median
+of the average plan distances (over ﬁve runs). The average
+plan distance for a set of k plans solving a speciﬁc (d, k)-
+combination (δav) is the average of the plans distances be-
+tween all pairs of plans in the set. The tests were performed
+on an AMD Athlon(tm) XP 2600+, 512 Mb RAM. The CPU-
+time limit was 300 seconds.
+
+The 1st column of Figure 2 gives results for the largest
+problem in IPC-3 DriverLog-Time (fully-automated track).
+LPG-d solves 109 (d, k)-combinations, including combina-
+tions d ≤ 0.4 and k = 10, and d = 0.95 and k = 2. The
+average CPU time (top plots) is 162.8 seconds. The aver-
+age δav (bottom plots) is 0.68, with δav always greater than
+0.4. With the original δa function LPG-d solves 110 (d, k)-
+combinations, the average CPU time is 160 seconds, and the
+average δav is 0.68; while with γ = 2 LPG-d solves 100 com-
+binations, the average CPU time is 169.5 seconds, and the
+average δav is 0.69.
+
+The 2nd column of Figure 2 gives results for the largest
+problem in IPC-3 Satellite-Strips. LPG-d solves 211
+
+8We tested LPG-d with other domains and problems, obtaining
+
+generally good results, that we omit for lack of space.
+
+(k, d)-combinations; 173 of them require less than 10 sec-
+onds. The average CPU time is 12.1 seconds, and the average
+δav is 0.69. We observed similar results when using the orig-
+inal δa function or the parametrized δa with γ = 2 (in the
+second case, LPG-d solves 198 problems, while the average
+CPU time and the average δav are nearly the same as with
+γ = 3).
+
+The 3rd column of Figure 2 gives results for a middle-size
+problem in IPC-5 Storage-Propositional. LPG-d solves
+225 (k, d)-combinations, 39 of which require less than 10
+seconds, while 128 of them require less than 50 seconds. The
+average CPU time is 64.1 seconds and the average δav is 0.88.
+With the original δa LPG-d solves 240 (k, d)-combinations,
+the average CPU time is 41.8 seconds, and the average δav is
+0.87; with γ = 3 LPG-d solves 206 combinations, the average
+CPU time is 69.4 seconds and the average δav is 0.89.
+
+The local search in LPG is randomized by a “noise” pa-
+rameter that is automatically set and updated during search
+[Gerevini, Saetti, & Serina, 2003]. This randomization is
+one of the techniques used for escaping local minima, but
+it also can be useful for computing diverse plans: if we run
+the search multiple times, each search is likely to consider
+different portions of the search space, which can lead to dif-
+ferent solutions. It is then interesting to compare LPG-d and
+a method in which we simply run the standard LPG until k
+d-diverse plans are generated. An experimental comparison
+of the two approaches show that in many cases LPG-d per-
+forms better. In particular, the new evaluation function E is
+especially useful for planning problems that are easy to solve
+for the standard LPG, and that admit many solutions. In these
+cases, the original E function produces many valid plans with
+not enough diversiﬁcation. This problem is signiﬁcantly alle-
+viated by the new term in E. An example of domain where
+we observed this behavior is logistics.9
+
+5 Related Work
+Researchers including Tate [Tate, Dalton, & Levine, 1998]
+and Myers [Myers, 2005; Myers & Lee, 1999] have articu-
+lated the need for ﬁnding dissimilar plans. Myers, in partic-
+ular, presents an approach to generate diverse plans in the
+context of her HTN planner by requiring the meta-theory
+of the domain to be available and using bias on the meta-
+theoretic elements to control search [Myers & Lee, 1999].
+The metatheory of the domain is deﬁned in terms of pre-
+deﬁned attributes and their possible values covering roles,
+features and measures. Our work differs from hers in two re-
+spects. First, we focus on domain-independent distance mea-
+sures. Second we consider the computation of diverse plans
+in the context of state of the art domain independent planners.
+The problem of ﬁnding similar plans has been considered
+in the context of replanning. A recent effort in this direction
+is [Fox et al., 2006]. Our work focuses on the problem of
+ﬁnding diverse plans by a variety of distance measures.
+
+Outside the planning literature, our closest connection is
+to the work by Hebrard et al 2005, who solve the problem
+
+9E.g., for logistics a (prob3 of Table 3) LPG-d solved 128
+instances, 41 of them in less than 1 CPU second and 97 of them in
+less than 10 CPU seconds; the average CPU time was 16.7 seconds
+and the average δav
+was 0.38. While using the standard LPG, only
+78 instances were solved, 20 of them in less than 1 CPU seconds and
+53 of them in less than 10 CPU seconds; the average CPU time was
+23.6 seconds and the average δav
+
+was 0.27.
+
+IJCAI-07
+
+2021
+
+dedane-eelele
+
+aa-eedan
+
+dedane-eelele
+
+aa-aelledan
+
+dedane-eelele
+
+aa-aePnaldan
+
+-e
+
+-e
+
+d
+
+dedaneeaedaneelele
+
+aa-eedan
+
+d
+
+dedaneeaedaneelele
+
+aa-aelledan
+
+d
+
+dedaneeaedaneelele
+
+aa-aePnaldan
+
+ane
+
+ane
+
+-e
+
+ane
+
+d
+
+d
+
+d
+
+Figure 2: Performance of LPG-d (CPU-time and plan distance) for there problems in DriverLog-Time, Satellite-Strips
+and Storage-Propositional.
+
+of ﬁnding similar/ dissimilar solutions for CSPs without ad-
+ditional domain knowledge. It is instructive to note that un-
+like CSP, where the number of potential solutions is ﬁnite
+(albeit exponential), the number of distinct plans for a given
+problem can be inﬁnite (since we can have inﬁnitely many
+non-minimal versions of the same plan). Thus, effective ap-
+proaches for generating diverse plans are even more critical.
+The challenges in ﬁnding interrelated plans also bear some
+tangential similarities to the work in information retrieval
+[Callan &
+on ﬁnding similar or dissimilar documents (c.f.
+Minka, 2002]).
+
+6 Conclusion
+
+In this paper, we focused on domain-independent approaches
+for ﬁnding diverse plans. We articulated three different
+domain-independent distance measures for comparing plans.
+We then developed effective approaches for using these dis-
+tance measures to bias the performance of two state-of-the-
+art planning approaches — GP-CSP and LPG. The approaches
+we developed for supporting the generation of diverse plans
+in GP-CSP are broadly applicable to other planners based on
+bounded horizon compilation approaches for planning. Sim-
+ilarly, the techniques we developed for LPG, such as biasing
+the relaxed plan heuristics in terms of distance measures, are
+applicable to other heuristic planners. The experimental re-
+sults with GP-CSP explicate the relative difﬁculty of enforc-
+ing the various distance measures, as well as the correlation
+among the individual distance measures (as assessed in terms
+of the sets of plans they ﬁnd). The experiments with LPG
+demonstrate the potential of heuristic planning in producing
+large sets of highly diverse plans.
+
+References
+
+[Boddy et al., 2005] Boddy, M.; Gohde, J.; Haigh, T.; and Harp,
+S. 2005. Course of action generation for cyber security using
+classical planning. In Proc. ICAPS. AAAI.
+
+[Callan & Minka, 2002] Callan, J., and Minka, T. 2002. Novelty
+and redundancy detection in adaptive ﬁltering. In Proc. SIGIR.
+ACM Press.
+
+[Chaﬂe et al., 2006] Chaﬂe, G.; Dasgupta, K.; Kumar, A.; Mittal,
+S.; and Srivastava, B. 2006. Adaptation in Web Services Com-
+position and Execution. In Proc. ICWS.
+
+[Do & Kambhampati, 2001] Do, M. B., and Kambhampati, S.
+2001. Planning as constraint satisfaction: Solving the planning
+graph by compiling it into CSP. AI 132(2):151–182.
+
+[Fox et al., 2006] Fox, M.; Gerevini, A.; Long, D.; and Serina, I.
+In Proc.
+
+2006. Plan stability: Replanning versus plan repair.
+ICAPS.
+
+[Gerevini, Saetti, & Serina, 2003] Gerevini, A.; Saetti, A.; and Se-
+rina, I. 2003. Planning through stochastic local search and tem-
+poral action graphs. Journal of Artiﬁcial Intelligence Research
+(JAIR) 20:pp. 239–290.
+
+[Hebrard et al., 2005] Hebrard, E.; Hnich, B.; O’Sullivan, B.; and
+Walsh, T. 2005. Finding diverse and similar solutions in con-
+straint programming. In Proc. AAAI.
+
+[Kautz & Selman, 1998] Kautz, H., and Selman, B. 1998. Black-
+box: A new approach to the application of theorem proving to
+problem solving.
+In Workshop on Planning as Combinatorial
+Search, AIPS-98, Pittsburgh, PA.
+
+[Myers & Lee, 1999] Myers, K., and Lee, T. J. 1999. Generat-
+ing qualitatively different plans through metatheoretic biases. In
+Proc. AAAI.
+
+[Myers, 2005] Myers, K. 2005. Metatheoretic plan summarization
+and comparison. In Proc. ICAPS WK. Mixed-initiative Planning
+and Scheduling.
+
+[Srivastava, Vanhatalo, & Koehler, 2005] Srivastava, B.; Vanhat-
+alo, J.; and Koehler, J. 2005. Managing the life cycle of plans. In
+Proc. IAAI, pg 1569–1575.
+
+[Tate, Dalton, & Levine, 1998] Tate, A.; Dalton, J.; and Levine, J.
+1998. Generation of multiple qualitatively different plan options.
+In Proc. AIPS-98, Pittsburgh. AIAI.
+
+IJCAI-07
+
+2022
+
+

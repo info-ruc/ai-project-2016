@@ -1,0 +1,831 @@
+Probabilistic Go Theories
+
+Austin Parker, Fusun Yaman∗ , Dana Nau and V.S. Subrahmanian
+
+Dept. of Computer Science,
+
+Institute for Advanced Computer Studies,
+
+University of Maryland, College Park, MD 20742.
+
+and Institute for Systems Research
+{ austinjp,fusun,nau,vs}@cs.umd.edu
+
+Abstract
+
+There are numerous cases where we need to rea-
+son about vehicles whose intentions and itineraries
+are not known in advance to us. For example,
+Coast Guard agents tracking boats don’t always
+know where they are headed. Likewise, in drug en-
+forcement applications, it is not always clear where
+drug-carrying airplanes (which do often show up
+on radar) are headed, and how legitimate planes
+with an approved ﬂight manifest can avoid them.
+Likewise, trafﬁc planners may want to understand
+how many vehicles will be on a given road at a
+given time. Past work on reasoning about vehi-
+cles (such as the “logic of motion” by Yaman et.
+al. [Yaman et al., 2004]) only deals with vehicles
+whose plans are known in advance and don’t cap-
+ture such situations. In this paper, we develop a for-
+mal probabilistic extension of their work and show
+that it captures both vehicles whose itineraries are
+known, and those whose itineraries are not known.
+We show how to correctly answer certain queries
+against a set of statements about such vehicles.
+A prototype implementation shows our system to
+work efﬁciently in practice.
+
+Introduction
+
+1
+There are many applications where one may wish to reason
+about a set of moving vehicles. One example is [Mittu and
+Ross, 2003] who developed (jointly with the US Navy, Lock-
+heed Martin, BBN, and other companies) ways to predict
+where and when an enemy submarine would be in the fu-
+ture (and with what probability) based on knowledge about
+its past movements, terrain conditions, etc. Their predic-
+tions consist of a set of statements of the form “Vehicle v
+will be at location L with some probability in the interval
+[(cid:2), u].” Likewise, BAE Systems and the US Army devel-
+oped a system which makes similar makes similar predic-
+tive statements about where land vehicles will be in the fu-
+ture. Cell phone companies are (and in some cases already
+have) developed methods to predict where cell phone users
+
+∗
+
+Fusun Yaman is currently at the University of Maryland Balti-
+
+more County (fusun@cs.umbc.edu).
+
+will be going in the future — a small number of law en-
+forcement agencies in the US already use such probabilis-
+tic predictions to track selected criminals (e.g.
+in the case
+of a child abduction in the US, an Amber alert is used) and
+such predictions help determine where best to cut them off.
+These are three applications we know of where predictions
+of the form “vehicle v is going to be at location L at time t
+with probability p” are automatically generated and reasoned
+with. There are numerous theoretical models already to pre-
+dict where vehicles will be in the future, when they will be
+there, and with what probability [Chen and Chien., 2001;
+Tsang et al., 1999; Kato et al., 2004]. This paper does not
+reinvent the wheel by showing how to predict when and where
+vehicles will be in the future - this has already been done in
+[Chen and Chien., 2001; Tsang et al., 1999; Kato et al., 2004;
+Mittu and Ross, 2003] and a host of other papers. Rather, we
+focus on how to reason about such predictions.
+
+In this paper, we develop a principled approach to solv-
+ing such problems by extending “go” theories due to Yaman
+et. al. [Yaman et al., 2004; 2005]. Their framework is suit-
+able for reasoning about applications where we know the ve-
+hicles’ intended destinations — however, there are many ap-
+plications such as the three mentioned above where this is
+not known with certainty. A second drawback of the above
+framework is that while temporal indeterminacy is allowed
+via intervals, no probability measure is associated with those
+intervals. This again is appropriate when we are reasoning
+about plans known to us (e.g. ﬂight plans), but is not appro-
+priate when we are reasoning about a vehicle (e.g. an enemy
+vehicle on the battleﬁeld) whose plans are not known to us
+with 100% accuracy.
+
+In this paper, we propose “probabilistic” go (pgo theory
+for short) theories by building on [Yaman et al., 2004]. A pgo
+theory allows us to reason about motion plans that we know
+as well as motion plans that we do not know with 100% cer-
+tainty. The next section provides a syntax for pgo theories.
+The section after that gives a formal model theoretic seman-
+tics. The following section shows how to check consistency
+of pgo theories via linear programming. However, the size
+of the linear program in question may be exponential, leading
+one to initially suspect (wrongly) that consistency checking
+here is NP-complete. We subsequently determine that this
+problem is polynomially solvable (under the assumption that
+we are reasoning only about a ﬁnite future) by constructing
+
+IJCAI-07
+
+501
+
+a polynomially sized set of linear constraints for consistency
+checking and to answer certain kinds of queries called “in”
+queries such as “is vehicle id within a given region at a given
+time with probability over a threshold?” Such queries are ob-
+viously of great utility. The next section describes a prototype
+implementation, together with experimental results showing
+our system to perform well in practice.
+
+2 Syntax of pgo Theories
+We assume the existence of a set ID of vehicle ids. Each
+id ∈ ID has an associated maximal velocity v
++
+id. We also
+assume that time is represented by integers drawn from some
+set T = [0, N] for some integer N. Likewise, we assume
+Space = [0, K] × [0, K
+(cid:2)] is the set of all points (x, y) such
+that x, y are integers and 0 ≤ x ≤ K, 0 ≤ y ≤ K
+(cid:2) for some
+(cid:2). We use ed(p1, p2) to denote the Euclidean
+integers K, K
+distance between two points. We assume the existence of a
+set L ⊆ Space called “locations.” For instance, consider a
+1024 × 1024 region — however, if we are only interested in
+reasoning about “on road” vehicles, then the only locations
+we might be interested in would be the locations along the
+roads — in this case, L would consist of points on the roads.
+Deﬁnition 1 (Reachability). We assume the existence of a
+reachability predicate reachable(id, L1, L2) which is true iff
+vehicle id can move to location L2 from location L1 in one
+unit of time. The reachability predicate must satisfy the ax-
+iom:
+
+reachable(id, L1, L2) ⇒ ed(L1, L2) ≤ v
+
++
+id
+
+We extend reachability to include time t > 0 as follows:
+reachable(id, t, L1, L2) iff either (i) reachable(id, L1, L2)
+and t = 1 or (ii) there is an L3 s.t. reachable(id, L3, L2)
+and reachable(id, t − 1, L1, L3).
+
+Intuitively, the reachability predicate encapsulates many
+aspects of vehicle movement that we do not wish to get into
+in this paper. For example, if a road is a narrow and wind-
+ing road up a mountainside, the vehicle may not be able to
+achieve its maximal speed — in this case, the reachable
+predicate tells us what is achievable and what is not. Like-
+wise, reachable also may tell us that certain locations cannot
+be reached by a particular vehicle, e.g. a car may not be able
+to drive from New York to Paris.
+Deﬁnition 2 (Atoms). Suppose id, id1, id2 ∈ ID, L ∈ L,
+t ∈ T , and p ∈ [0, 1]. Suppose r is a convex region.
+1. pgo(id, L, t, p) is a probabilistic go atom (hereafter a
+pgo atom). Intuitively, this atoms says that id is at loca-
+tion L at time t with probability p.
+
+2. in(id, r, t, p) is a probabilistic in atom. Intuitively, this
+atom says that id will be somewhere in region r at time
+t with probability p or more.
+
+A pgo theory is a ﬁnite set of pgo atoms. Note that in
+atoms cannot appear within a pgo theory but can be used
+in queries. As mentioned earlier, we know of at least three
+applications where pgo theories are automatically generated
+by prediction algorithms: the Lockheed/BBN/US Navy and
+other application for predicting submarine movements, the
+
+BAE/US Army application for predicting locations of enemy
+vehicles, and the law enforcement application based on pre-
+dicting cell phone locations.
+
+3 Semantics of pgo Theories
+We now deﬁne a model theory for pgo theories.
+Deﬁnition 3 (World). A world w is any function from ID×T
+to L such that
+reachable(id, w(id, t), w(id, t + 1)) holds for all id ∈ ID
+and t ∈ T . W denotes the set of all worlds.
+
+Intuitively, w(id, t) tells us where the vehicle id is at time
+
+(cid:2)
+
+t according to world w.
+Deﬁnition 4 (Interpretation). An interpretation is a probabil-
+ity distribution I over W, i.e. I assigns values in the [0, 1]
+interval to worlds w ∈ W such that
+w∈W I(w) = 1. We
+use I to denote the set of all probability distributions over W.
+An interpretation assigns a probability to each possible
+world. We are now ready to deﬁne the concept of satisfac-
+tion of atoms by an interpretation.
+Deﬁnition 5 (Satisfaction). Suppose I is an interpretation. I
+satisﬁes
+
+(cid:2)
+w∈W,w(id,t)=L I(w) = p.
+w∈W,w(id,t)∈r I(w) ≥ p.
+
+1. pgo(id, L, t, p) iff
+(cid:2)
+2. in(id, r, t, p) iff
+I satisﬁes a pgo theory G iff it satisﬁes all atoms in G.
+As usual, a pgo theory G is consistent iff there is at least
+one interpretation that satisﬁes it. An atom a is entailed by G
+iff every interpretation that satisﬁes G also satisﬁes a.
+For a pgo theory G, an id ∈ ID and a t ∈ T , we let Gid,t be
+the set {(li, pi) | ∃ pgo(id, li, t, p1) ∈ G} For instance, if G
+contains only pgo(id, (5, 5), 1, .8), pgo(id, (5, 6), 2, .5), and
+pgo(id, (6, 5), 2, .25), then Gid,1 = {((5, 5), .8)} and Gid,2 =
+{((5, 6), 0.5), ((6, 5), 0.25)}.
+Deﬁnition 6 (Completeness). A pgo theory G is complete for
+(l,p)∈Gid,t p = 1. G is complete iff it is complete
+id at t iff
+for all id at all time points t.
+
+(cid:2)
+
+Intuitively, a pgo theory is complete at time t for vehicle
+id iff every place that the vehicle can possibly be at at that
+time is explicitly mentioned in Gid,t.
+
+4 Checking Consistency of pgo Theories
+In this section, we start by observing that we can check con-
+sistency of pgo theories by solving a set of linear constraints.
+For each world w, let vw be a variable representing the prob-
+ability that the world w is the actual world.
+Deﬁnition 7 (LP constraints for a pgo atom). For pgo atom
+a = pgo(id, L, t, p), let LP(a) be the set of equations:
+
+(cid:2)
+
+w∈W vw = 1,
+
+1.
+2. For all w ∈ W, 0 ≤ vw ≤ 1.
+3.
+If G is a pgo theory, we set LP(G) =
+
+w∈W,w(id,t)=L vw = p,
+
+(cid:2)
+
+(cid:3)
+
+a∈G LP(a).
+
+IJCAI-07
+
+502
+
+The ﬁrst and second constraints force I to be a proper prob-
+ability distribution. The third forces the sum of the probabil-
+ities of the worlds in which a given vehicle id is at location
+L at time t to be exactly p if there is a go-atom that says this.
+The following result give us connections between consistency
+of a pgo theory, and the above set of constraints.
+Proposition 1.
+(i) A pgo theory G is consistent iff LP(G) is solvable.
+(ii) Suppose a = in(id, r, t, p). G (cid:2) a iff the result of
+w∈W,w(id,t)∈r vw subject to the constraints
+minimizing
+LP(G) is greater than or equal to p.
+
+(cid:2)
+
+An obvious problem with the above result is that the size
+of the input to the linear program for LP(G) is on the or-
+der of |L||T|·|ID| × |G|. This is too large for the above algo-
+rithms to tractably solve any reasonably sized problem. One
+may wonder whether consistency checking for pgo-theories
+is NP-complete. It is not, as we will shortly see in the next
+section.
+
+5 Partial Path Probabilities
+LP(G) associates a variable in the linear program with
+each world. Instead, we might want to associate a variable
+(cid:2)] denoting the probability that a vehicle with ID
+p[id, t, L, L
+(cid:2) leaving at time t. We call this a path
+id travels from L to L
+probability variable. It is clear that as long as we only look at
+a bounded time horizon, the number of path probability vari-
+ables is polynomial w.r.t. the number of time points, size of
+Space and the number of vehicles. What we will try to do in
+this section is to reformulate LP(G) in terms of these vari-
+ables so that the resulting set of constraints is polynomial in
+the size of the pgo-theory.
+Deﬁnition
+p[id, t, L, L
+tation I, we say I is compatible with p iff
+
+8
+(cid:2)] deﬁned for every id, t, L, L
+
+Compatibility). Given
+(cid:2) and interpre-
+
+(Interpretation
+
+p[id, t, L, L
+
+(cid:2)] =
+
+(cid:4)
+
+I(w)
+
+w(id,t)=L,w(id,t+1)=L(cid:2)
+
+Theorem 1. Suppose θ is an assignment to all path probabil-
+ity variables. There is an interpretation I compatible with θ
+iff p satisﬁes
+
+(cid:2)
+
+(cid:2)
+
+L∈L
+
+L(cid:2)∈L pθ[id, t, L, L
+
+1. For each t, id,
+(cid:2)
+pθ[id, t, L, L
+2. For each t, id, L, L
+(cid:2)) → ∀t, pθ[id, t, L, L
+3. ¬reachable(id, L, L
+4. For each t, id, L,
+L(cid:2)∈L pθ[id, t − 1, L
+(cid:2)
+
+(cid:2)] ≥ 0.
+
+, L] =
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)].
+L(cid:2)∈L pθ[id, t, L, L
+
+(cid:2)] = 1.
+
+(cid:2)] = 0.
+
+The above theorem provides us the ammunition needed to
+associate a new set of linear constraints with a pgo-theory
+G. Our variables for this LP will correspond to each path
+probability: vid,t,L,L(cid:2).
+Deﬁnition 9 (PLP). For pgo theory G, PLP(G) is the as-
+sociated set of partial path based linear equations. Without
+loss of generality we assume the maximum time point T to be
+larger than any time point mentioned in G.
+
+1. Let PLP(·) be the constraints obtained by replacing
+(cid:2)] with vid,t,L,L(cid:2) in items (1)–(3) of Theo-
+
+2. For pgo-atom a = (id, t, L, p),
+
+let PLP(a) be
+
+pθ[id, t, L, L
+rem 1.
+(cid:2)
+
+L(cid:2)∈L vid,t,L,L(cid:2) = p.
+
+(cid:2)
+
+(cid:2)
+
+L∈r
+
+let PLP(a) be
+
+L(cid:2)∈L vid,t,L,L(cid:2) ≥ p.
+
+3. For in-atom a = in(id, r, t, p),
+For pgo-theory G, PLP(G) = PLP(·) ∪ (cid:3)
+a∈G PLP(a).
+The following important theorem shows that solvability of
+PLP(G) determines consistency of G and that entailment of
+in queries can be determined by solving a linear program with
+PLP(G) as the set of constraints and an objective function
+based on the query.
+Proposition 2. For pgo theory G
+1. PLP(G) has a solution iff G is consistent.
+2. In query in(id, r, t, p) is a logical consequence of G iff
+L(cid:2)∈L vid,t,L,L(cid:2) subject to PLP(G)
+
+(cid:2)
+
+(cid:2)
+
+minimizing
+is greater than or equal to p1.
+
+L∈r
+
+3. Checking consistency of a pgo-theory and checking en-
+tailment of ground in queries are solvable in polynomial
+time.
+
+5.1 PLP’s Size
+PLP(G) is signiﬁcantly smaller than that of LP(G)because
+it only contains |ID| · |T| · |L|2 variables and
+
+|T| · |ID| + |T| · |L|2 + |T| · |ID| · |L| + |G|
+
+equations. The size of this linear program is therefore
+bounded by |ID|2 · |T|2 · |L|4 × |G|.
+In contrast, LP(G)
+had a size of |L||T|·|ID| × |G|.
+Furthermore, it turns out that there are alternate ways of ex-
+pressing PLP(G) which result in more easily solvable linear
+programs.
+5.2 Variable Pruning
+The ﬁrst simpliﬁcation we can make to PLP(G) or any set of
+linear equations comes when we know vid,t,L,L(cid:2) to be zero. In
+such cases, we can safely eliminate vid,t,L,L(cid:2) from PLP(G).
+5.3 An Alternative Linear Program: ALP
+Many pgo-theories only mention some time points from the
+set of all time points T . This can be leveraged to create a
+small linear program which does not reference the unmen-
+tioned time points.
+Deﬁnition 10 (Alternate Linear Program). Let G be a set of
+pgo atoms and id be a vehicle. Let t1 < t2 ··· < tn be
+all the time points such that for every ti there is a pgo atom
+pgo(id, l, ti, p) ∈ G. Without loss of generality, we can as-
+sume tn is not the maximum time point. ALP(G, id) is the
+following alternate set of linear equations:
+1. For each a = pgo(id, l, ti, p) ∈ G such that t1 ≤ ti <
+
+tn, PLP(a) ∈ ALP(G, id).
+1If t is the maximum time point then we need to minimize
+L∈r
+
+L(cid:2)∈L vid,t−1,L(cid:2),L.
+
+P
+
+P
+
+IJCAI-07
+
+503
+
+(cid:2)
+
+L(cid:2)∈L vid,tn−1,L(cid:2),l = p ∈ ALP(G, id).
+
+2. For each a = pgo(id, l, tn, p) ∈ G,
+3. For each t1 ≤ ti ≤ tn,
+4. For each t1 ≤ ti < ti+1 ≤ tn, for each L,L’ such that
+
+L(cid:2)∈L vid,ti,L,L(cid:2) = 1 ∈ ALP(G, id)
+
+L∈L
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)) we have
+
+¬reachable(id, ti+1 − ti, L, L
+vid,ti,L,L(cid:2) = 0 ∈ ALP(G, id).
+L(cid:2)∈L vid,ti−1,L(cid:2),L − (cid:2)
+(cid:2)
+ALP(G, id)
+
+5. For each t1 < ti < tn, for each L we have
+
+L(cid:2)∈L vid,ti,L,L(cid:2) = 0 ∈
+Theorem 2. PLP(G) is solvable iff ALP(G, id) is solvable
+for every id.
+
+This theorem provides us with added efﬁciency in two
+ways. First, it prunes a fair number of variables. Second,
+it divides the linear program into |ID| linear programs, one
+for each vehicle. When the entire linear program is consid-
+ered, the running time is O(r3), where r is the number of
+variables. But, if we consider each vehicle individually, the
+running time is proportional to |ID|· O((r/|ID|)3), giving a
+speedup of O(|ID|2). We can further exploit this trick of di-
+viding the linear program into smaller sub-problems by con-
+sidering complete points in a pgo theory.
+Theorem 3. For pgo theory G and vehicle id complete for
+id at time t, let n be the max time point referenced by the
+0−t be {Gid,t(cid:2)|0 ≤ t
+the theory, let Gid
+t−T be
+{Gid,t(cid:2)|t ≤ t
+< T}. Then (i) ALP(G, id) is solvable iff
+ALP(Gid
+t−T , id) are solvable. (ii) The
+solution to ALP(Gid
+t−T , id) gives a so-
+lution for ALP(G, id).
+
+0−t, id) and ALP(Gid
+
+0−t, id) and ALP(Gid
+
+< t} and let Gid
+
+(cid:2)
+
+(cid:2)
+
+This theorem is particularly useful for in queries. Since
+only one time t is ever referenced by a in query, we can sand-
+wich t between the two nearest complete time, t1 and t2 s.t.
+t1 ≤ t ≤ t2. Then, since we assume in queries to be asked
+only of consistent pgo theories, we are only required to solve
+for the particular Gid
+In the
+best case, the in query will fall on a complete time/id pair,
+meaning that to solve the query we must only use the linear
+constraints in ALP(Gid,t, id) (where t is the in query’s time
+point and id is the query vehicle).
+
+t1−t2 which contains the query.
+
+t1−t2, id).
+
+5.4 ALP Size
+Now, instead of solving PLP, a massive linear program, we
+are solving many smaller ALP(Gid
+For vehicle id in theory G with n mentioned time points of
+which every cth one is complete, and each two consecutive
+time points, t1 and t2, we must solve ALP(Gid
+t1−t2, id). This
+will happen in O(n3) where n is the number of variables.
+The number of variables is bounded by (c + 1) · |L|2. Thus
+computing consistency of G using ALP will happen in time
+|ID| × n/c × O(((c + 1) · |L|2)3). There is an interesting
+phenomenon happening here: the running time of our algo-
+rithms may decrease as the size of the theory grows – so long
+as more complete time points are added.
+
+Figure 1: Time to check consistency of complete theories
+with 2 to 5 pgo atoms per time point when maximum speed
+is 1 and 8.
+
+6 Experimental Section
+We have implemented a prototype pgo system in MatLab on
+a Pentium 4 (3.80GHz) processor running under Windows XP
+and with 2GB of memory. Our system implements all algo-
+rithms described in this paper for both complete and incom-
+plete theories.
+
+We ran several experiments to test the performance of these
+algorithms and identify the important factors that affect the
+performance other than the obvious ones such as number of
+atoms and time points referenced. We performed our exper-
+iments on theories that refer to a single vehicle using ALP
+type linear programs.
+
+The maximum number of pgo atoms per time point in a
+complete theory plays an important role in checking consis-
+tency. This number gives a maximum number of path prob-
+abilities for each time point. Another important factor we
+considered was the maximum speed of the vehicle because
+this affects the maximum number of reachable locations and
+hence the total number of path probability variables in our ﬁ-
+nal linear program. To test the effect of these speed and atom
+density, we created random theories in a 50×50 grid. We var-
+ied the maximum number of atoms per time point from 2 to
+5, with maximum speeds of 1 and 8. The number of distinct
+time points in the theory varied from 10 to 100. We derived
+the speed values as follows: suppose we use the 50 × 50 grid
+to represent the USA. Then speed of 1 will coincide with that
+of a car (70 mph) while a speed of 8 will coincide with that
+of a plane (500 mph).
+Consistency check time for complete theories: Figure 1
+shows the time taken for consistency checking for 8 kinds of
+complete theories. The data points represent the average over
+50 randomly generated theories. As seen in the ﬁgure the ef-
+fect of increasing number of pgo atoms per time point has a
+greater on impact on performance than increasing maximum
+speed. The reader can see that it only takes a few seconds to
+reason about 100 time points.
+Consistency check time for incomplete theories: For in-
+complete theories, the size of the grid has a great impact on
+the time required to check consistency. We say a time point
+
+IJCAI-07
+
+504
+
+Figure 2: Time to check consistency of incomplete theories
+with 2, 3, and 4 pgo atoms per time point, a maximum speed
+of 1 or 8, and Incmax varying from 1 to 2 (displayed as k in
+the graph’s key).
+
+t is incomplete iff the sum of the probability ﬁeld in all pgo
+atoms ends up being less than 1. We investigated how the
+structure of the theory affects the consistency checking algo-
+rithm. Let Incmax be the maximal number of incomplete
+time points followed by a complete time point in a theory.
+For this experiment we created random theories in a 10 by 10
+grid with maximum speed 1, maximum number of pgo atoms
+per complete time point ranging from 2 to 4, Incmax = 1 or
+Incmax = 2 and the number of referenced time points rang-
+ing from 10 to 100. Furthermore every complete time point
+is followed by Incmax incomplete time points in the theory.
+So when Incmax = 1 and the total number of time points
+in the theory is 50, there are 25 incomplete time points in-
+terleaved with 25 complete points. Figure 2 shows the time
+taken to check consistency for 6 kinds of randomly generated
+theories. The data points represent the average of 20 runs
+— note that the y-axis uses a logarithmic scale. As seen in
+the ﬁgure, the effect of increasing the number of pgo atoms
+per time point has a similar effect on the on the performance.
+However, increasing Incmax affects the running time dra-
+matically.
+In-queries. Figure 3 shows the time required to answer “in”
+queries as we vary the temporal density of a complete theory.
+Temporal density of a theory is the ratio of time points refer-
+enced in the theory and the total number of time points. For
+these experiments we set the grid size to 25 by 25 and max-
+imum time points to 500 and number of pgo atoms per time
+point to 3. For example when the theory has a temporal den-
+sity of 1, it has a total of 1500 time points. The data points in
+the graph are an average of 100 runs. The reader can easily
+see that the time taken drops exponentially with an increase
+in the density. Since a rise in density corresponds to an in-
+crease in theory size, these results are particularly interesting
+yet consistent with Theorem 3. It shows our algorithms’ run-
+ning time decreases as the number of referenced time points
+increases. This is sensible: when one is working with prob-
+abilistic data, one should sometimes ﬁnd it easier to answer
+queries as the amount of data increases, because fewer possi-
+ble satisfying interpretations for the data need be considered.
+
+Figure 3: Time to answer in-queries w.r.t. complete theories
+of varying temporal density.
+
+7 Related Work
+There are several spatio-temporal logics [Gabelaia et al.,
+2003; Merz et al., 2003; Wolter and Zakharyaschev, 2000;
+Cohn et al., ] in the literature. These logics extend tempo-
+ral logics to handle space. Most of them involve logical lan-
+guages similar to LTL. There is also much work on qualitative
+spatio-temporal theories(for a survey see [Anthony G. Cohn,
+2001]). The closest work to ours is that of [Muller, 1998a;
+1998b] which describes a formal theory for reasoning about
+motion in a qualitative frame work. The expressive power
+of the theory allows for the deﬁnition of complex motion
+classes. The focus of these works is qualitative - in contrast,
+we deal with uncertainty about where vehicles will be in the
+future. Our methods are rooted in a mix of probability, geom-
+etry and logic rather than just logic alone.
+
+Other related work includes [Shanahan, 1995] which dis-
+cusses the frame problem when constructing a logic-based
+calculus for reasoning about the movement of objects in a
+[Rajagopalan and Kuipers,
+real-valued co-ordinate system.
+1994] focuses on relative position and orientation of objects
+with existing methods for qualitative reasoning in a Newto-
+nian framework. The focus of these works is qualitative - in
+contrast our work is rooted in a mix of geometry and logic
+rather than logic alone.
+
+8 Conclusions
+There are numerous applications where we wish to reason
+about moving objects.
+In some cases, (i) we know the in-
+tended destinations of the moving objects while in others (ii)
+we do not know this for sure. In this paper, we have devel-
+oped the concept of a probabilistic go theory (pgo theory),
+which is capable of handling both cases. This extends the no-
+tion of a go-theory proposed by [Yaman et al., 2004], which
+only handles case (i).
+
+As future work, we intend to examine aggregation tech-
+niques which would allow the creation of minimally sized
+linear programs solving pgo problems. We further intend to
+include queries which reference periods of time. Also, work
+must be done to expand this system to handle multi-object
+
+IJCAI-07
+
+505
+
+[Muller, 1998b] Philippe Muller. Space-time as a primitive
+for space and motion. In FOIS’98, pages 63–76, Amster-
+dam, 1998.
+
+[Rajagopalan and Kuipers, 1994] R.
+
+and
+B. Kuipers. Qualitative spatial reasoning about objects
+in motion: Application to physics problem solving.
+In
+IEEE Conf. on AI for Applications, pages 238–245, San
+Antonio, 1994.
+
+Rajagopalan
+
+[Shanahan, 1995] Murray Shanahan.
+
+ing about spatial occupancy.
+74(1):147–163, 1995.
+
+Default
+
+reason-
+Artiﬁcial Intelligence,
+
+[Tsang et al., 1999] S.H. Tsang, E.G. Hoare, P.S. Hall, and
+N.J. Clarke. Automotive radar image processing to pre-
+dict vehicle trajectory. In Intl. Conf. on Image Processing,
+volume 3, pages 867–870, Kobe Japan, 1999.
+
+[Wolter and Zakharyaschev, 2000] Frank Wolter
+
+and
+Michael Zakharyaschev. Spatio-temporal representation
+and reasoning based on RCC-8.
+In Anthony G. Cohn,
+Fausto Giunchiglia, and Bart Selman, editors, KR2000:
+Principles of Knowledge Representation and Reasoning,
+pages 3–14, San Francisco, 2000. Morgan Kaufmann.
+
+[Yaman et al., 2004] Fusun Yaman, Dana Nau, and V S Sub-
+rahmanian. A logic of motion. In Proceedings of KR2004,
+pages 85–94, 2004.
+
+[Yaman et al., 2005] Fusun Yaman, Dana Nau, and V S Sub-
+In Proceedings of IJ-
+
+rahmanian. Going far, logically.
+CAI2005, 2005.
+
+queries where the vehicles’ locations are not independent of
+one another.
+
+We have presented a syntax and declarative semantics for
+pgo theories, efﬁcient algorithms to check the consistency
+of pgo theories, and efﬁcient algorithms to implement “in”
+queries. Our implementation shows that these algorithms
+work effectively in practice.
+
+9 Acknowledgments
+This work was partly supported by AFOSR grants
+FA95500610405
+ARO grant
+DAAD190310202 and by the Joint Institute for Knowl-
+edge Discovery.
+
+FA95500510298,
+
+and
+
+References
+[Anthony G. Cohn, 2001] Shyamanta M. Hazarika Anthony
+G. Cohn. Qualitative spatial representation and reasoning:
+An overview. Fundam. Inform., 46(1-2):1–29, 2001.
+
+[Chen and Chien., 2001] M. Chen and S. Chien. Dynamic
+freeway travel prediction time using probe vehicle data:
+Link-based vs. path-based. In Conf. of the Transportation
+Research Board, Washington DC., 2001.
+
+[Cohn et al., ] A. G. Cohn, D. Magee, A. Galata, D. Hogg,
+and S. Hazarika. Towards an architecture for cognitive vi-
+sion using qualitative spatio-temporal representations and
+abduction. In C. Freksa, C. Habel, and K.F Wender, edi-
+tors, Spatial Cognition III, Lecture Notes in Computer Sci-
+ence. Springer-Verlag. to appear.
+
+[Gabelaia et al., 2003] David Gabelaia, Roman Kontchakov,
+Agi Kurucz, Frank Wolter, and Michael Zakharyaschev.
+On the computational complexity of spatio-temporal log-
+ics. In I. Russell and S. Haller, editors, Proceedings of the
+16th AAAI International FLAIRS Conference, pages 460–
+464. AAAI Press, 2003.
+
+[Kato et al., 2004] J. Kato, T. Watanabbe T., S. Joga, Y. Liu,
+and H. Hase. An hmm/mrf based stochastic framework
+for robust vehicle tracking. IEEE Transactions on Trans-
+portation Systems, 5(3):142–154, Sep 2004.
+
+[Merz et al., 2003] Stephan Merz, J´ulia Zappe, and Martin
+Wirsing. A spatio-temporal logic for the speciﬁcation
+In Mauro Pezz`e, ed-
+and reﬁnement of mobile systems.
+itor, Fundamental Approaches to Software Engineering
+(FASE 2003), volume 2621 of Lecture Notes in Com-
+puter Science, pages 87–101, Warsaw, Poland, April 2003.
+Springer-Verlag.
+
+[Mittu and Ross, 2003] R. Mittu and R. Ross. Building upon
+the coalitions agent experiment (coax) - integration of mul-
+timedia information in gccs-m using impact. In Proceed-
+ings 9th International Workshop on Multimedia Informa-
+tion Systems, pages 35–44, 2003.
+
+[Muller, 1998a] Philippe Muller. A qualitative theory of mo-
+tion based on spatio-temporal primitives. In Anthony G.
+Cohn, Lenhart Schubert, and Stuart C. Shapiro, editors,
+KR’98: Principles of Knowledge Representation and Rea-
+soning, pages 131–141, San Francisco, California, 1998.
+Morgan Kaufmann.
+
+IJCAI-07
+
+506
+
+

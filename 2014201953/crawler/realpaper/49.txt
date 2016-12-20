@@ -1,0 +1,1641 @@
+Limited Discrepancy Beam Search(cid:3)
+
+David Furcy
+
+University of Wisconsin Oshkosh
+Computer Science Department
+
+Oshkosh, WI 54901-8643
+
+furcyd@uwosh.edu
+
+Sven Koenig
+
+University of Southern California
+Computer Science Department
+Los Angeles, CA 90089-0781
+
+skoenig@usc.edu
+
+Abstract
+
+Beam search reduces the memory consumption of best-
+(cid:2)rst search at the cost of (cid:2)nding longer paths but its
+memory consumption can still exceed the given mem-
+ory capacity quickly. We therefore develop BULB (Beam
+search Using Limited discrepancy Backtracking), a com-
+plete memory-bounded search method that is able to
+solve more problem instances of large search problems
+than beam search and does so with a reasonable runtime.
+At the same time, BULB tends to (cid:2)nd shorter paths than
+beam search because it is able to use larger beam widths
+without running out of memory. We demonstrate these
+properties of BULB experimentally for three standard
+benchmark domains.
+
+1 Introduction
+Best-(cid:2)rst search methods, such as A*, do not scale up to
+large search problems due to their memory consumption, and
+linear-space best (cid:2)rst search methods [Korf, 1993] have unac-
+ceptable runtimes for large search problems. Beam search re-
+duces the memory consumption of best-(cid:2)rst search at the cost
+of (cid:2)nding longer paths. It uses breadth-(cid:2)rst search to build its
+search tree but keeps at most the B states at each level of the
+search tree with the smallest heuristic values, where the value
+of the beam width B is set at the beginning of the search. The
+smaller the beam width, the more states beam search prunes
+at each step of the search and the less memory it needs to
+store each level of the search tree. Unfortunately, more prun-
+ing typically increases the probability of pruning states on
+short paths from the start state to a goal state and thus often
+increases the lengths of the paths found. Excessive pruning
+can even prevent one from (cid:2)nding any path. Thus, the beam
+width has to be large. Our experiments show, for example,
+that beam search with a beam width of 10,000 solves about
+eighty percent of random problem instances of the 48-Puzzle.
+The average path length found is on average about one order
+of magnitude smaller than the one found by variants of WA*
+[Pearl, 1985], which are alternatives to beam search that also
+(cid:3)The Intelligent Decision-Making Group is partly supported by
+NSF awards to Sven Koenig under contracts IIS-0098807 and IIS-
+0350584. The views and conclusions contained in this document are
+those of the authors and should not be interpreted as representing
+the of(cid:2)cial policies, either expressed or implied, of the sponsoring
+organizations, agencies, companies or the U.S. government.
+
+layer 0 = start state
+layer 1
+layer 2
+layer 3
+layer 4
+layer 5
+layer 6
+layer 7
+
+layer 0 = start state
+layer 1
+layer 2
+layer 3
+layer 4
+layer 5
+layer 6
+layer 7
+
+layer 0 = start state
+layer 1
+layer 2
+layer 3
+layer 4
+layer 5
+layer 6
+layer 7
+
+G
+
+a) Breadth−first search
+
+slice 1
+
+slice 1
+
+slice 2
+
+slice 1
+
+slice 2
+
+slice 3
+
+slice 1
+
+slice 2
+
+slice 3
+
+slice 4
+
+slice 1
+
+slice 1
+
+slice 2
+
+slice 2
+G
+
+slice 3
+
+slice 4
+
+slice 5
+
+slice 3
+
+slice 4
+
+slice 5
+
+slice 6
+
+B
+
+b) Beam search
+
+G
+
+c) Depth−first beam search
+
+Figure 1: Visualization of Search Methods
+
+reduce the memory consumption of best-(cid:2)rst search at the
+cost of (cid:2)nding longer paths. We develop BULB (Beam search
+Using Limited discrepancy Backtracking) that is able to solve
+more problem instances of large search problems than beam
+search, and does so with a reasonable runtime. At the same
+time, BULB tends to (cid:2)nd shorter paths than beam search be-
+cause it is able to use larger beam widths without running out
+of memory. It behaves like beam search until it exhausts the
+memory capacity without (cid:2)nding a path.
+It then uses lim-
+ited discrepancy backtracking to retract its previous pruning
+decisions. The choice of a good backtracking strategy is im-
+portant since, for example, beam search with chronological
+backtracking has unacceptable runtimes.
+
+2 Beam Search
+Beam search is any search technique (cid:147)in which a number of
+[...] alternatives (the beam) are examined in parallel. [It] is a
+heuristic technique because heuristic rules are used to discard
+[prune] non-promising alternatives in order to keep the size
+
+Table 1: Beam Search on the 48-Puzzle
+
+B
+
+1
+5
+10
+50
+100
+500
+1,000
+5,000
+10,000
+50,000
+
+Path
+Length
+N/A
+11,737.12
+36,281.64
+25,341.44
+12,129.88
+2,302.86
+1,337.95
+481.30
+440.07
+N/A
+
+Generated
+
+States
+
+Stored
+States
+
+N/A
+147,239
+904,632
+3,211,244
+3,079,594
+2,899,765
+3,346,004
+5,814,061
+10,569,816
+N/A
+
+N/A
+58,680
+362,799
+1,266,902
+1,212,579
+1,148,559
+1,331,451
+2,365,603
+4,312,007
+N/A
+
+Runtime
+(Seconds)
+N/A
+0.090
+0.601
+2.495
+2.296
+2.205
+2.822
+5.500
+11.307
+N/A
+
+Problems
+Solved
+0 %
+100 %
+100 %
+86 %
+86 %
+74 %
+84 %
+86 %
+80 %
+0 %
+
+of the beam as small as possible(cid:148) [Bisiani, 1987]. We assume
+that all actions have a cost of one and study beam-search vari-
+ants of breadth-(cid:2)rst search in this paper. Their objective is to
+reduce the memory consumption of breadth-(cid:2)rst search from
+exponential to linear in the depth of the search tree, as illus-
+trated by the shaded areas of Figure 1 (a) and (b) for breadth-
+(cid:2)rst search and beam search, respectively. Beam search uses
+breadth-(cid:2)rst search to build its search tree but splits each level
+of the search tree into slices of at most B states, where B is
+called the beam width. The number of slices stored in mem-
+ory is limited to one at each level. When beam search expands
+a level, it generates all successors of the states at the current
+level, sorts them in order of increasing heuristic values (from
+left to right in the (cid:2)gure), splits them into slices of at most
+B states each, and then extends the beam by storing the (cid:2)rst
+slice only. Beam search terminates when it generates a goal
+state or runs out of memory.
+
+Table 1 shows experimental results for beam search on the
+48-Puzzle with a memory limitation of 6,000,000 states. We
+created 50 problem instances with random start con(cid:2)gura-
+tions in which the goal con(cid:2)guration had the blank in the
+upper left corner. We used the Manhattan distance as heuris-
+tic function. (We could have used pattern databases instead
+[Korf and Taylor, 1996] but did not since we use them later in
+this paper in the context of 2 additional benchmark domains.)
+The runtime of beam search was always small since it ran out
+of memory in seconds. Beam search with a beam width of 1
+solved none of the problem instances. This is not surprising
+since it is similar to greedy search (gradient descent) and thus
+likely to (cid:2)nd rather long paths unless it gets stuck in dead
+ends because the current state has only successors that are al-
+ready in memory, in which case it does not (cid:2)nd any path at
+all. Beam search with a beam width of 10 solved all of the
+problem instances. As the beam width increased, its memory
+consumption increased, the average path length of the solved
+problem instances decreased, and the number of solved prob-
+lem instances eventually decreased. Beam search with beam
+width 50,000 solved none of the problem instances. This is
+not surprising since beam search with a beam width of in(cid:2)n-
+ity is breadth-(cid:2)rst search and thus guaranteed to (cid:2)nd shortest
+paths unless it runs out of memory and then does not (cid:2)nd
+any path at all, which is likely given the exponential memory
+consumption of breadth-(cid:2)rst search. Consider beam search
+with a large beam width that still solved a substantial number
+of problem instances, say beam search with a beam width of
+10,000 that solved eighty percent of the problem instances.
+The average path length of the solved problem instances was
+an order of magnitude smaller than the one reported in [Furcy,
+
+2004] for several variants of WA*.
+
+3 Improving Beam Search
+We study how to increase the number of solved problem
+instances to one hundred percent while reducing the path
+lengths of the solved problem instances. This cannot be
+done by varying the beam width since increasing it reduces
+the number of solved problem instances while decreasing it
+increases the average path length of the solved problem in-
+stances. Rather, we notice that many of the unsolved problem
+instances are due to misleading heuristic values that prevent
+states from being included in the beam. For example, the
+goal state G is put into the third slice of the seventh layer in
+Figure 1 (b). Beam search thus does not (cid:2)nd the goal state
+since it visits only the (cid:2)rst slice of each layer. Our solution
+to this problem is to backtrack and choose a different slice.
+Figure 1 (c) shows DB (Depth-(cid:2)rst Beam search), our sim-
+plest variant of beam search with backtracking. DB behaves
+like beam search until it exhausts the memory capacity with-
+out (cid:2)nding a path. It then uses chronological backtracking to
+purge existing slices and replace them with others. DB, un-
+fortunately, has unacceptable runtimes, which we explain as
+follows: Chronological backtracking revisits the most recent
+decisions (cid:2)rst, that is, the decisions close to the bottom of the
+search tree. This is problematic since the heuristic values are
+usually the more inaccurate the farther a state is away from
+the goal state and thus the closer it is to the top of the search
+tree. Thus, it is important to revisit decisions close to the
+top of the search tree more quickly. We therefore use limited
+discrepancy search rather than chronological backtracking to
+build a more sophisticated variant of beam search with back-
+tracking.
+
+3.1 Original Limited Discrepancy Search
+LDS (Limited Discrepancy Search) [Harvey and Ginsberg,
+1995] was designed to work on (cid:2)nite binary trees. The suc-
+cessors of a state are sorted in order of increasing heuristic
+values. Thus, the heuristic values always recommend the left
+successor over the right one. Choosing the right successor
+against the recommendation of the heuristic values is called
+a discrepancy. First, LDS searches the tree greedily, that is,
+with no discrepancy. If LDS does not (cid:2)nd a goal state, then it
+made at least one wrong decision due to misleading heuristic
+values. LDS then searches the tree with increasing numbers
+of allowed discrepancies. Figure 2 contains the pseudo code
+of LDS. The top-level function LDS() repeatedly performs
+a limited discrepancy search from the start state (Line 4) by
+calling LDSprobe() with an increasing number of allowed dis-
+crepancies (Line 6), starting with no discrepancy (Line 2).
+Unless the current state is a leaf of the tree (Line 9), LDS-
+probe() generates its successors and recursively calls itself on
+them. If the maximum number of allowed discrepancies is
+zero, then only the sub-tree below the best successor is vis-
+ited with no discrepancy allowed (Line 12). Otherwise, the
+sub-tree under the worst successor is visited with one less
+discrepancy allowed (since one was just consumed, Line 14),
+then the sub-tree under the best successor is visited with the
+same number of allowed discrepancies (since none was con-
+
+end while
+
+discrepancies := 0
+while ( true ) do
+
+cost := LDSprobe(sstart , 0, discrepancies, h(:))
+if ( cost < 1 ) then return cost
+discrepancies := discrepancies + 1
+
+1. procedure LDS(sstart , h(:)): path length
+2.
+3.
+4.
+5.
+6.
+7.
+8. procedure LDSprobe(state, depth, discrepancies, h(:)): path length
+9.
+10.
+11.
+12.
+13.
+14.
+15.
+16.
+
+if ( state is a leaf ) then return 1
+else hbest ; secondi := generateSuccessors(state)
+if ( (best = sgoal ) or (second = sgoal ) ) then return depth + 1
+if ( discrepancies = 0 ) then return LDSprobe(best, depth + 1, 0, h(:))
+else
+
+cost := LDSprobe(second, depth + 1, discrepancies (cid:0) 1, h(:))
+if ( cost < 1 ) then return cost
+return LDSprobe(best, depth + 1, discrepancies, h(:))
+
+Figure 2: Original Limited Discrepancy Search
+
+end while
+
+SET := ;
+for each successor s of state do
+
+discrepancies := 0; hashtable := fsstart g
+while ( true ) do
+
+if ( s = sgoal ) then return depth + 1
+if ( s =2 hashtable ) then SET := SET [ fsg
+
+pathlength := GLDSprobe(sstart , 0, discrepancies, h(:))
+if ( pathlength < 1 ) then return pathlength
+discrepancies := discrepancies + 1
+
+1. procedure GLDS(sstart , h(:)): pathlength
+2.
+3.
+4.
+5.
+6.
+7.
+8. procedure GLDSprobe(state, depth, discrepancies, h(:)): path length
+9.
+10.
+11.
+12.
+13.
+14.
+15.
+16.
+17.
+18.
+19.
+20.
+21.
+22.
+23.
+24.
+25.
+26.
+
+end for
+if ( SET = ; ) then return 1
+if ( hashtable has only one empty slot ) then return 1
+best := arg mins2SET f h(s) g
+if ( discrepancies = 0 ) then
+
+hashtable := hashtable [ fbestg
+pathlength := GLDSprobe(best, depth + 1, 0, h(:))
+
+SET := SET nfbestg
+while ( SET 6= ; ) do
+
+else
+
+state := arg mins2SET f h(s) g
+SET := SET nfstateg
+hashtable := hashtable [ fstateg
+pathlength := GLDSprobe(state, depth + 1, discrepancies (cid:0) 1,
+
+h(:))
+
+27.
+28.
+29.
+30.
+31.
+32.
+33.
+
+hashtable := hashtablenfstateg
+if ( pathlength < 1 ) then return pathlength
+
+end while
+hashtable := hashtable [ fbestg
+pathlength := LDSprobe(best, depth + 1, discrepancies, h(:))
+
+hashtable := hashtablenfbestg
+return pathlength
+Figure 3: Generalized Limited Discrepancy Search
+
+sumed at the current level by following the heuristic recom-
+mendation, Line 16). LDS terminates when it generates the
+goal state (Line 11).
+
+3.2 Generalized Limited Discrepancy Search
+To apply LDS to beam search, we need to generalize it from
+binary trees to arbitrary graphs. First, LDS must be able to
+handle branching factors that are nonuniform and larger than
+two. Second, LDS must be able to avoid cycles. GLDS (Gen-
+eralized Limited Discrepancy Search) addresses the (cid:2)rst is-
+sue by picking a successor s of a given state with a smallest
+heuristic value h(s). Choosing any other successor is counted
+as one discrepancy, and the successors are tried from left to
+right. GLDS addresses the second issue by performing cy-
+cle detection with a hash table and not generating successors
+that are already in the hash table. Figure 3 shows the pseudo
+code for GLDS. The top-level function GLDS() repeatedly
+performs generalized limited discrepancy searches from the
+start state (Line 4) by calling GLDSprobe() with an increasing
+number of allowed discrepancies (Line 6), starting with no
+discrepancy (Line 2). GLDSprobe() performs a generalized
+
+if ( SLICE = ; ) then continue
+pathlength := BULBprobe(depth + 1, discrepancies (cid:0) 1, h(:), B)
+for each s in SLICE do hashtable := hashtablenfsg end for
+if ( pathlength < 1 ) then return pathlength
+
+for each s in SLICE do hashtable := hashtablenfsg end for
+
+hSLICE ; value; index i := nextSlice(depth, index , h(:), B)
+if ( value (cid:21) 0 ) then
+
+else
+
+end while
+
+while ( true ) do
+
+if ( SLICE 6= ; ) then
+
+if ( value < 1 ) then return value
+else break
+
+discrepancies := 0; g(sstart ) := 0; hashtable := fsstart g
+while ( true ) do
+
+pathlength := BULBprobe( 0, discrepancies, h(:), B)
+if ( pathlength < 1 ) then return pathlength
+discrepancies := discrepancies + 1
+
+hSLICE; value; index i := nextSlice(depth, 0, h(:), B)
+if ( value (cid:21) 0 ) then return value
+if ( discrepancies = 0 ) then
+
+if ( SLICE = ; ) then return 1
+pathlength := BULBprobe(depth + 1, 0, h(:), B)
+for each s in SLICE do hashtable := hashtablenfsg end for
+return pathlength
+
+1. procedure BULB(sstart , h(:), B): path length
+2.
+3.
+4.
+5.
+6.
+7.
+8. procedure BULBprobe(depth, discrepancies, h(:), B): path length
+9.
+10.
+11.
+12.
+13.
+14.
+15.
+16.
+17.
+18.
+19.
+20.
+21.
+22.
+23.
+24.
+25.
+26.
+27.
+28.
+29.
+30.
+31.
+32.
+33.
+34.
+35. procedure nextSlice(depth,index ,h(:),B): h array of states, integer, integer i
+36.
+37.
+38.
+39.
+40.
+41.
+42.
+43.
+44.
+45.
+46.
+47.
+48.
+49.
+50.
+51. procedure generateNewSuccessors(stateset, h(:)): array of states
+52.
+53.
+54.
+55.
+56.
+57.
+58.
+59.
+60.
+
+end while
+hSLICE; value; index i := nextSlice(depth, 0, h(:), B)
+if ( value (cid:21) 0 ) then return value
+if ( SLICE = ; ) then return 1
+pathlength := BULBprobe(depth + 1, discrepancies, h(:), B)
+for each s in SLICE do hashtable := hashtablenfsg end for
+return pathlength
+
+currentlayer := fs 2 hashtable j g(s) = depthg
+SUCCS := generateNewSuccessors(currentlayer, h(:))
+if ( (SUCCS = ;) or (index = jSUCCSj) ) then return h;; 1; (cid:0)1i
+if ( sgoal 2 SUCCS ) return h;; depth + 1; (cid:0)1i
+SLICE := ;; i := index
+while ( (i < jSUCCSj) and (jSLICEj < B) ) do
+
+end for
+Sort states in SUCCS in order of increasing h(:)-values
+
+for each successor s of state do
+if ( s =2 hashtable ) then
+
+index := 0
+for each state in stateset do
+
+end while
+return hSLICE; (cid:0)1; ii
+
+SUCCS [index ] := s; index := index + 1
+
+if ( SUCCS [i] =2 hashtable ) then
+
+i := i + 1
+
+end for
+
+return SUCCS
+
+g(SUCCS [i]) := depth; SLICE := SLICE [ fSUCCS [i]g
+hashtable := hashtable [ fSUCCS [i]g
+if ( hashtable is full ) then
+
+for each s in SLICE do hashtable := hashtablenfsg end for
+return h;; 1; (cid:0)1i
+
+Figure 4: BULB
+
+limited discrepancy search from a given state for a given num-
+ber of allowed discrepancies. First, it generates all successors
+of the state that are not already in the hash table (Lines 9-13).
+It backtracks if the goal state is found (Line 11), there are no
+successors (Line 14), or the hash table is full (Line 15). Oth-
+erwise, it identi(cid:2)es the best successor as one with a smallest
+heuristic value (Line 16). If the number of allowed discrep-
+ancies is zero, then GLDSprobe() calls itself on the best suc-
+cessor with no allowed discrepancies (Line 19). Otherwise,
+GLDSprobe() calls itself repeatedly on the remaining succes-
+sors with one less allowed discrepancy (Line 26) and then
+calls itself on the best successor with the same number of al-
+lowed discrepancies (Line 31).
+
+3.3 BULB
+BULB (Beam search Using Limited discrepancy Backtrack-
+ing) combines beam search with GLDS. Figure 4 shows the
+
+beam width
+
+Table 2: Taxonomy of Search Methods
+
+none
+
+type of backtracking
+
+chronological
+
+limited discrepancy
+
+1
+
+greedy search
+
+(gradient descent)
+
+guided
+
+depth-(cid:2)rst search
+
+intermediate
+
+values
+
+1
+
+beam
+search
+
+breadth-(cid:2)rst
+
+search
+
+depth-(cid:2)rst beam search
+
+(DB)
+
+breadth-(cid:2)rst
+
+search
+
+limited discrepancy search
+
+(LDS/GLDS)
+
+beam search using limited
+
+discrepancy backtracking (BULB)
+
+breadth-(cid:2)rst
+
+search
+
+pseudo code for BULB. The top-level function BULB() is
+basically identical to GLDS(). The function BULBprobe()
+performs beam search with generalized limited discrepancy
+search for a given number of allowed discrepancies. It (cid:2)rst
+generates the (cid:2)rst slice of the next level (Line 9).
+If the
+slice contains a goal state, the slice is empty, the subtree has
+been searched exhaustively, or the hash table (which stores
+the beam) is full, then it aborts (Lines 10 and 12). If the num-
+ber of allowed discrepancies is zero (Line 11) and the slice is
+not empty (Line 12), then BULBProbe() calls itself with no
+allowed discrepancies (Line 13), and clears the hash table of
+the slice (Line 14). Otherwise, BULBProbe() clears the hash
+table of the slice (Line 18), calls itself repeatedly on the re-
+maining slices with one less allowed discrepancy (Line 25)
+and then calls itself on the best slice with the same number
+of allowed discrepancies (Line 32). The function nextSlice()
+generates a successor slice for a slice that is already in the
+hash table at a given depth.
+It (cid:2)rst locates the given slice
+(Line 36), generates all successors of its states (Line 37), and
+then locates the slice of the given index within the successors.
+It does this by inserting successors into both an empty slice
+(Line 43) and the hash table (Line 44), starting with the suc-
+cessor at the given index (Line 40), until either B successors
+have been inserted into the slice or the end of the layer has
+been reached (Line 41). If the hash table is full (Line 45),
+then it clears the hash table of the incomplete slice (Line 46)
+and aborts (Line 47). The function generateNewSuccessors()
+generates the successors s of a given set of states that are
+not already in the hash table and sorts them in order of in-
+creasing heuristic values h(s). (The successors can contain
+duplicates.)
+
+3.4 Properties of BULB
+Heuristic search methods that repeatedly (cid:2)ll up and purge
+memory can be rather complicated [Chakrabarti et al., 1989;
+Russell, 1992; Kaindl and Khorsand, 1994; Zhou and
+Hansen, 2002].
+In contrast, BULB is relatively simple be-
+cause it purges contiguous regions of memory and is only an
+approximation algorithm that does not necessarily (cid:2)nd short-
+est paths. Table 2 shows a taxonomy of search methods.
+BULB generalizes beam search to beam search with back-
+tracking, limited discrepancy search to beam widths larger
+than one, and breadth-(cid:2)rst search to beam widths smaller than
+in(cid:2)nity.
+
+(cid:15) The memory consumption of BULB is O(Bd), where
+d is the maximum search tree depth. This is achieved
+by only storing one slice for each level, which requires
+BULB to re-generate all successors of the states of a
+slice every time it backtracks. The resulting small mem-
+ory consumption allows for deeper searches with wider
+
+beams. (Other linear-space search methods often store
+the siblings of states as well, which makes it unnec-
+essary to re-generate the successors of states but in-
+creases the memory consumption substantially.) BULB
+is a memory-bounded search method and thus contin-
+ues its search after memory runs out by purging states
+from memory, resulting in a complete search method.
+This means that BULB (cid:2)nds a path as long as there is
+one with a length of the maximum search tree depth or
+smaller, which approximately equals M=B, where M
+is the memory capacity measured by the maximal num-
+ber of states one can store. BULB thus improves on
+beam search, which is incomplete, and on breadth-(cid:2)rst
+search, which is complete but whose maximum search
+tree depth approximately equals logb(M ), where b is the
+average branching factor of the search tree, and can thus
+solve only smaller search problems than BULB.
+
+(cid:15) The runtime of BULB is often small.
+
+In fact, BULB
+frequently (cid:2)nds a path without any backtracking or with
+only a very limited amount of backtracking. It also elim-
+inates all cycles (loops) and some transpositions (differ-
+ent paths from the start state to a given state), which
+are often responsible for the large runtimes of depth-
+(cid:2)rst search. BULB, as a generalization of breadth-(cid:2)rst
+search, eliminates all cycles since it never generates
+states that are already in the hash table. BULB does not
+make any effort at eliminating transpositions. Neverthe-
+less, BULB, as a generalization of beam search, elim-
+inates some transpositions since it does not re-expand
+states that are already in its beam.
+
+4 Experimental Evaluation
+We now present an experimental study of BULB in three stan-
+dard benchmark domains:
+the N-Puzzle, the 4-Peg Towers
+of Hanoi and the Rubik’s Cube. Note that our (cid:2)gures show
+graphs only for search methods that were able to solve all
+random problem instances since we are interested in increas-
+ing the number of solved problem instances to one hundred
+percent. Additional results are reported in [Furcy, 2004].
+
+4.1 N-Puzzle
+Our (cid:2)rst benchmark domain was the N-Puzzle, as already de-
+scribed in the context of Table 1. Beam search solved all
+problem instances of small N-Puzzles with a small average
+path length and did so in fractions of a second. It is there-
+fore not surprising that neither DB nor BULB signi(cid:2)cantly
+improved on beam search for N smaller than 48. The sit-
+uation was different for the 48-Puzzle. DB did not signi(cid:2)-
+cantly improve on beam search for the 48-Puzzle either. On
+the other hand, BULB was able to solve all problem instances
+with a beam width of 10,000 while beam search was only
+able to solve all problem instances with beam widths of 10
+or smaller. BULB was able to (cid:2)nd paths of average length
+440 with this beam width while beam search was only able
+to (cid:2)nd paths of average length 11,737 with beam widths that
+allowed it to solve all problem instances (for B = 5, which
+is not shown in Table 1). Thus, BULB was able to reduce
+
+a) Path Length
+
+beam search
+BULB
+
+ 100000
+
+ 10000
+
+ 1000
+
+ 1
+
+ 10
+
+ 100
+
+ 1000
+
+ 10000
+
+B (log scale)
+
+b) Memory Usage
+
+beam search
+BULB
+
+ 1e+07
+
+ 1e+06
+
+ 100000
+
+ 10000
+
+ 1
+
+ 10
+
+ 100
+
+ 1000
+
+ 10000
+
+B (log scale)
+
+Figure 5: BULB on the 48-Puzzle (B Varies)
+
+beam search
+BULB
+MSC-KWA*
+MSC-KRTA*
+
+ 10
+
+ 1
+
+ 0.1
+
+)
+e
+l
+a
+c
+s
+ 
+g
+o
+l
+(
+ 
+t
+s
+o
+c
+ 
+n
+o
+i
+t
+u
+l
+o
+S
+
+)
+e
+l
+a
+c
+s
+ 
+g
+o
+l
+(
+ 
+s
+e
+d
+o
+N
+ 
+d
+e
+r
+o
+t
+S
+ 
+f
+o
+ 
+r
+e
+b
+m
+u
+N
+
+)
+e
+l
+a
+c
+s
+ 
+g
+o
+l
+(
+ 
+s
+d
+n
+o
+c
+e
+S
+ 
+n
+i
+ 
+e
+m
+i
+T
+
+ 1000
+
+ 10000
+
+ 100000
+
+Solution Cost (log scale)
+
+Figure 6: Search Methods on the 48-Puzzle (B Varies)
+
+the path length or, synonymously, solution cost by a fac-
+tor of about 25. At the same time, the average runtime of
+BULB was still on the order of 30 seconds on a Pentium 4
+PC clocked at a 2.2 GHz. Figure 5 contains detailed data
+points about BULB. Since BULB generates states in exactly
+the same order as beam search, the graphs of BULB simply
+extend the ones of beam search to larger beam widths. For the
+80-Puzzle and a memory capacity of 3,000,000 states, there
+
+Table 3: Beam Search on the Towers of Hanoi
+Problems
+Solved
+0 %
+68 %
+46 %
+68 %
+70 %
+74 %
+58 %
+0 %
+
+Runtime
+(Seconds)
+N/A
+0.306
+0.581
+0.900
+1.012
+1.855
+2.388
+N/A
+
+Path
+Length
+N/A
+37,775.12
+33,489.26
+8,468.59
+4,629.57
+1,363.59
+831.90
+N/A
+
+Stored
+States
+N/A
+188,860
+334,850
+423,103
+462,443
+678,792
+824,784
+N/A
+
+Generated
+
+States
+
+N/A
+730,901
+1,261,982
+1,619,300
+1,784,654
+2,632,408
+3,196,242
+N/A
+
+B
+
+1
+5
+10
+50
+100
+500
+1,000
+5,000
+
+was no beam width that allowed beam search to solve all 50
+random problem instances but BULB was able to solve them
+for a wide range of beam widths. The smallest average run-
+time of BULB with a beam width that solved all problem in-
+stances was about 12 seconds. It was obtained with a beam
+width of 6 and resulted in an average path length of about
+181,000. A larger beam width of 20,000, that still solved
+all problem instances, increased its average runtime to about
+120 seconds but reduced the average path length to 1,130,
+which is less than 5 times the shortest path length. Figure 6
+shows that BULB was also able to improve the average path
+length of two multi-state commitment search methods for the
+48-Puzzle by at least one order of magnitude with an aver-
+age runtime of only about 20 seconds. These alternatives to
+beam search are MSC-KWA* [Furcy and Koenig, 2005], a
+combination of KWA* [Felner et al., 2003] and MSC-WA*
+[Kitamura et al., 1998], and MSC-KRTA* [Furcy, 2004], a
+combination of KWA* [Felner et al., 2003], MSC-WA* [Ki-
+tamura et al., 1998] and RTA* [Korf, 1990].
+
+4.2 Towers of Hanoi
+Our second benchmark domain was the 4-Peg Towers of
+Hanoi. We created 50 random problem instances with 22
+disks in which the goal state had all disks stacked on one
+peg. We set the memory capacity to 1,000,000 states and
+used a pattern database similar to that of [Felner et al., 2004]
+as the heuristic function. Table 3 shows that, similarly to the
+48-Puzzle, beam search with large beam widths solved many
+problem instances, and the average length of the paths found
+was short. However, there was no beam width that allowed
+beam search to solve all 50 random problem instances (which
+is the reason why Figure 7 contains no graphs for beam
+search) but BULB was able to solve them for a wide range
+of beam widths. The smallest average runtime of BULB with
+a beam width that solved all problem instances was about 1.5
+seconds. It was obtained with a beam width of 40 and re-
+sulted in an average path length of about 10,000. A larger
+beam width of 1,000, that still solved all problem instances,
+increased its average runtime to about 7 seconds but reduced
+the average path length to about 870. Figure 7 contains de-
+tailed data points about BULB.
+
+4.3 Rubik’s Cube
+Our third benchmark domain was the Rubik’s Cube. We cre-
+ated 50 random problem instances in which the goal state was
+the original con(cid:2)guration of the cube. We set the memory ca-
+pacity to 1,000,000 states and used the pattern databases from
+[Korf, 1997] as the heuristic function. Beam search was only
+able to (cid:2)nd paths of average length 55.18 with beam widths
+
+a) Path Length
+
+BULB
+
+100000
+
+10000
+
+1000
+
+l
+
+)
+e
+a
+c
+s
+ 
+
+g
+o
+l
+(
+ 
+t
+s
+o
+C
+n
+o
+
+ 
+
+i
+t
+
+l
+
+u
+o
+S
+
+100000
+
+10000
+
+1000
+
+100
+
+l
+
+)
+e
+a
+c
+s
+ 
+
+g
+o
+l
+(
+ 
+t
+s
+o
+C
+n
+o
+
+ 
+
+i
+t
+
+l
+
+u
+o
+S
+
+100
+
+10
+
+100
+B (log scale)
+
+b) Memory Usage
+
+1000
+
+10
+
+10
+
+1e+07
+
+1e+06
+
+l
+
+)
+e
+a
+c
+s
+ 
+
+g
+o
+l
+(
+ 
+s
+e
+d
+o
+N
+d
+e
+r
+o
+S
+
+t
+
+ 
+
+ 
+f
+
+o
+
+ 
+r
+e
+b
+m
+u
+N
+
+BULB
+
+1e+08
+
+l
+
+)
+e
+a
+c
+s
+ 
+
+g
+o
+l
+(
+ 
+s
+e
+d
+o
+N
+d
+e
+r
+o
+S
+
+t
+
+ 
+
+ 
+f
+
+o
+
+ 
+r
+e
+b
+m
+u
+N
+
+1e+07
+
+1e+06
+
+a) Path Length
+
+beam search
+BULB
+
+100
+
+1000
+B (log scale)
+
+b) Memory Usage
+
+10000
+
+beam search
+BULB
+
+100000
+
+10
+
+100
+B (log scale)
+
+1000
+
+100000
+
+10
+
+100
+
+1000
+B (log scale)
+
+10000
+
+Figure 7: BULB on the Towers of Hanoi (B Varies)
+
+Figure 8: BULB on the Rubik’s Cube (B Varies)
+
+Table 4: Beam Search on the Rubik’s Cube
+
+Path
+Length
+53,909.26
+3,882.35
+1,679.76
+394.84
+259.80
+78.02
+52.33
+21.40
+N/A
+
+Generated
+
+States
+7,146,960
+2,570,677
+2,223,466
+2,596,065
+3,398,726
+4,895,297
+6,332,050
+10,848,794
+N/A
+
+Stored
+States
+539,084
+194,036
+167,795
+196,182
+257,058
+373,602
+486,767
+866,741
+N/A
+
+B
+
+10
+50
+100
+500
+1,000
+5,000
+10,000
+50,000
+100,000
+
+Runtime
+(Seconds)
+14.965
+5.224
+4.349
+5.168
+6.798
+9.977
+13.087
+23.256
+N/A
+
+Problems
+Solved
+38 %
+98 %
+98 %
+100 %
+98 %
+100 %
+98 %
+10 %
+0 %
+
+that allowed it to solve all problem instances (for B = 7; 000,
+which is not shown in Table 4), which is similar to the av-
+erage path length found by a recent powerful Rubik’s Cube
+solver based on macro-operators, even though this Rubik’s
+Cube solver uses both a larger number of pattern databases to
+build the macro-operators and a post-processing step on the
+paths it (cid:2)nds [Hern·adv¤olgyi, 2001]. Beam search solved all
+50 problem instances for several beam widths but BULB was
+able to solve them for all tested beam widths. BULB with a
+beam width of 30,000 solved all problem instances and found
+an average path length of 30.14 with an average runtime of
+about 40 seconds. This average path length is already smaller
+than the one of the Rubik’s Cube solver mentioned above,
+even though BULB is a domain-independent search method
+without any pre- or post-processing and used only about 120
+
+MBytes of memory in our experiments (86 MBytes for the
+pattern database and 32 MBytes for the hash table). BULB
+with a beam width of 40,000 found a path of length 25.78
+with an average runtime of about 2 minutes. A larger beam
+width of 50,000, that still solved all problem instances, in-
+creased its average runtime to about 7 minutes but reduced
+the average path length to about 22.74. Figure 8 contains de-
+tailed data points about BULB.
+
+5 Related Work
+Existing variants of beam search differ from BULB in that
+they either 1) use no backtracking at all or 2) use chrono-
+logical backtracking.
+In the (cid:2)rst category, diversity beam
+search [Shell et al., 1994] deals with imperfect heuristic val-
+ues by introducing diversity at all levels of the search tree.
+It differs from BULB in that it is incomplete and requires
+additional knowledge to measure the level of dissimilarity
+among states. Divide-and-conquer beam search [Zhou and
+Hansen, 2004] does not store all of the beam in memory. In-
+stead, it purges some of its slices from memory and uses a
+divide-and-conquer strategy to reconstruct the path after it
+(cid:2)nds a goal state, which makes backtracking impossible, at
+least on the parts of the beam that have been purged from
+memory. In the second category, band search [Chu and Wah,
+1992] is the search method most similar to BULB. It differs
+
+from BULB in that it extends beam search with chronological
+backtracking and is designed for search trees. It does not de-
+tect loops and therefore performs best for small search prob-
+lems. Complete anytime beam search [Zhang, 1998] does not
+extend beam search but depth-(cid:2)rst search. It uses chronologi-
+cal backtracking (with a beam width of one) while iteratively
+weakening its pruning rule. Like all depth-(cid:2)rst search meth-
+ods, it performs best on (cid:2)nite trees of shallow depths with
+large goal densities (such as travelling salesperson problems),
+which are very different from our benchmark domains.
+
+6 Conclusion
+In this paper, we developed BULB (Beam search Using Lim-
+ited discrepancy Backtracking), a memory-bounded search
+method that generalizes beam search to beam search with
+backtracking,
+limited discrepancy search to beam widths
+larger than one, and breadth-(cid:2)rst search to beam widths
+smaller than in(cid:2)nity. BULB makes beam search complete
+(provided that there is suf(cid:2)cient memory to store the beam
+along a shortest path from the start state to a goal state), tends
+to (cid:2)nd shorter paths than beam search because it is able to
+use larger beam widths without running out of memory, and
+can be transformed into an admissible anytime algorithm, for
+example, by letting it continue its search after it has found a
+path, resulting in an anytime extension of beam search that is
+similar in spirit to the anytime extension of WA* described
+in [Hansen et al., 1997]. BULB outperformed beam search
+and variants of WA* in our experiments, solved all of our
+test problems for the 80-Puzzle, and resulted in a state-of-the-
+art Rubik’s Cube solver without any pre- or post-processing,
+even though it is a domain-independent search method. It is
+future work to enhance BULB with more complex variants
+of beam search, for example, variants that change the beam
+width during the search.
+It is also future work to enhance
+BULB with more complex variants of backtracking, for ex-
+ample, variants that give a higher priority to decisions close
+to the top of the search tree than decisions close to the bot-
+tom of the search tree, variants that use depth-bounded dis-
+crepancy search [Walsh, 1997] or variants that calculate the
+discrepancies differently.
+
+References
+[Bisiani, 1987] R. Bisiani. Beam search. In S. Shapiro, editor, En-
+cyclopedia of Arti(cid:2)cial Intelligence, pages 56(cid:150)58. Wiley & Sons,
+1987.
+
+[Chakrabarti et al., 1989] P. Chakrabarti, S. Ghose, A. Acharya,
+and S. de Sarkar. Heuristic search in restricted memory. Arti-
+(cid:2)cial Intelligence, 41(2):197(cid:150)221, December 1989.
+
+[Chu and Wah, 1992] L.-C. Chu and B. Wah. Band search: An ef-
+(cid:2)cient alternative to guided best-(cid:2)rst search. In Proceedings of
+the International Conference on Tools for Arti(cid:2)cial Intelligence,
+pages 154(cid:150)161. IEEE Computer Society Press, November 1992.
+[Felner et al., 2003] A. Felner, S. Kraus, and R. Korf. KBFS: K-
+best-(cid:2)rst search. Annals of Mathematics and Arti(cid:2)cial Intelli-
+gence, 39:19(cid:150)39, 2003.
+
+[Felner et al., 2004] A. Felner, R. Meshulam, R. Holte, and R. Korf.
+Compressing pattern databases. In Proceedings of the National
+Conference on Arti(cid:2)cial Intelligence, pages 638(cid:150)643, 2004.
+
+[Furcy and Koenig, 2005] D. Furcy and S. Koenig. Scaling up WA*
+with commitment and diversity. In Proceedings of the Interna-
+tional Joint Conference on Arti(cid:2)cial Intelligence, 2005.
+
+[Furcy, 2004] D. Furcy. Speeding up the Convergence of Online
+Heuristic Search and Scaling Up Of(cid:3)ine Heuristic Search. PhD
+thesis, College of Computing, Georgia Institute of Technology,
+Atlanta (Georgia), 2004. Available as Technical Report GIT-
+COGSCI-2004/04.
+
+[Hansen et al., 1997] E.
+
+S.
+
+Hansen,
+
+and
+V. Danilchenko.
+Anytime heuristic search: First results.
+Technical Report CMPSCI 97(cid:150)50, Department of Computer
+Science, University of Massachusetts, Amherst (Massachusetts),
+1997.
+
+Zilberstein,
+
+[Harvey and Ginsberg, 1995] W. Harvey and M. Ginsberg. Lim-
+ited discrepancy search. In Proceedings of the International Joint
+Conference on Arti(cid:2)cial Intelligence, pages 607(cid:150)615, 1995.
+
+[Hern·adv¤olgyi, 2001] I. Hern·adv¤olgyi. Searching for macro oper-
+ators with automatically generated heuristics. In Proceedings of
+the Canadian Conference on Arti(cid:2)cial Intelligence, pages 194(cid:150)
+203, 2001.
+
+[Kaindl and Khorsand, 1994] H. Kaindl
+and A. Khorsand.
+Memory-bounded bidirectional search.
+In Proceedings of the
+National Conference on Arti(cid:2)cial Intelligence, pages 1359(cid:150)1364,
+1994.
+
+[Kitamura et al., 1998] Y. Kitamura, M. Yokoo, T. Miyaji, and
+S. Tatsumi. Multi-state commitment search. In Proceedings of
+the International Conference on Tools for Arti(cid:2)cial Intelligence,
+pages 431(cid:150)439, 1998.
+
+[Korf and Taylor, 1996] R. Korf and L. Taylor. Finding optimal so-
+lutions to the twenty-four puzzle. In Proceedings of the National
+Conference on Arti(cid:2)cial Intelligence, pages 1202(cid:150)1207, 1996.
+
+[Korf, 1990] R. Korf. Real-time heuristic search. Arti(cid:2)cial Intelli-
+
+gence, 42(2-3):189(cid:150)211, 1990.
+
+[Korf, 1993] R. Korf. Linear-space best-(cid:2)rst search. Arti(cid:2)cial In-
+
+telligence, 62(1):41(cid:150)78, 1993.
+
+[Korf, 1997] R. Korf. Finding optimal solutions to Rubik’s cube us-
+ing pattern databases. In Proceedings of the National Conference
+on Arti(cid:2)cial Intelligence, pages 700(cid:150)705, 1997.
+
+[Pearl, 1985] J. Pearl. Heuristics: Intelligent Search Strategies for
+
+Computer Problem Solving. Addison-Wesley, 1985.
+
+[Russell, 1992] S. Russell. Ef(cid:2)cient memory-bounded search meth-
+In Proceedings of the European Conference on Arti(cid:2)cial
+
+ods.
+Intelligence, pages 1(cid:150)5, 1992.
+
+[Shell et al., 1994] P. Shell, J. Rubio, and G. Barro.
+
+search through diversity.
+ference on Arti(cid:2)cial Intelligence, pages 1323(cid:150)1328, 1994.
+
+Improving
+In Proceedings of the National Con-
+
+[Walsh, 1997] T. Walsh. Depth-bounded discrepancy search.
+
+In
+Proceedings of the International Joint Conference on Arti(cid:2)cial
+Intelligence, pages 1388(cid:150)1393, 1997.
+
+[Zhang, 1998] W. Zhang. Complete anytime beam search. In Pro-
+ceedings of the National Conference on Arti(cid:2)cial Intelligence,
+pages 425(cid:150)430, 1998.
+
+[Zhou and Hansen, 2002] R. Zhou and E. Hansen. Memory-
+bounded A* graph search. In International FLAIRS Conference,
+2002.
+
+[Zhou and Hansen, 2004] R. Zhou and E. Hansen. Breadth-(cid:2)rst
+heuristic search. In Proceedings of the International Conference
+on Automated Planning and Scheduling, pages 92(cid:150)100, 2004.
+
+

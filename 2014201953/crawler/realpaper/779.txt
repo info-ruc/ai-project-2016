@@ -1,0 +1,1105 @@
+On Reversing Actions: Algorithms and Complexity
+
+∗
+
+Thomas Eiter
+
+Esra Erdem
+
+Vienna University of Technology
+
+Sabancı University
+
+eiter@kr.tuwien.ac.at
+
+esraerdem@sabanciuniv.edu
+
+Wolfgang Faber
+
+University of Calabria
+
+faber@mat.unical.it
+
+Abstract
+
+Reversing actions is the following problem: After
+executing a sequence of actions, which sequence of
+actions brings the agent back to the state just before
+this execution (an action reversal). Notably, this
+problem is different from a vanilla planning prob-
+lem since the state we have to get back to is in gen-
+eral unknown. It emerges, for example, if an agent
+needs to ﬁnd out which action sequences are un-
+doable, and which ones are committed choices. It
+has applications related to plan execution and mon-
+itoring in nondeterministic domains, such as recov-
+ering from a failed execution by partially undoing
+the plan, dynamically switching from one executed
+plan to another, or restarting plans. We formal-
+ize action reversal in a logic-based action frame-
+work and characterize its computational complex-
+ity. Since unsurprisingly, the problem is intractable
+in general, we present a knowledge compilation
+approach that constructs ofﬂine a reverse plan li-
+brary for efﬁcient (in some cases, linear time) on-
+line computation of action reversals. Our results
+for the generic framework can be easily applied for
+expressive action languages such as C+ or K.
+
+1 Introduction
+Reasoning about actions is an important area within knowl-
+edge representation and reasoning. Several logic-based lan-
+guages for representing actions have been proposed (see
+e.g., [Gelfond and Lifschitz, 1998; Giunchiglia et al., 2004;
+Son and Baral, 2001; Eiter et al., 2004]), and various rea-
+soning problems about actions have been considered. The
+most prominent among them are temporal projection (infer-
+ence about the state after a sequence of actions occurred),
+reasoning about the initial state after a sequence of actions
+occurred, and plan generation (generate a sequence of actions
+which takes the agent from an initial state to a goal state).
+
+We study another reasoning problem about actions, namely
+the problem of undoing the effects of an execution of an
+
+∗This work was supported by FWF (Austrian Science Fund) un-
+der project P16536-N04. The work of the second author was carried
+out while she visited TU Wien. The third author was funded by an
+APART grant of the Austrian Academy of Sciences.
+
+action sequence, by executing other actions. For exam-
+ple, after doing the action go(home , oﬃce),
+the action
+go(oﬃce, home) may reverse its effects and bring the agent
+back to her previous state. If this holds regardless of the state
+in which the agent was before doing go(home , oﬃce) and
+afterwards, then go(oﬃce , home) is called a reverse action
+for go(home, oﬃce). If, more generally, a sequence of ac-
+tions R = B1, . . . , Bm is guaranteed to bring the agent back
+to the state before executing a sequence AS = A1, . . . , Bn,
+then R is called a reverse plan for AS. For example, R =
+go(oﬃce, pub), go(pub, home) may be a reverse plan for
+AS = go(home, bus stop), go(bus stop, oﬃce).
+
+Undo actions are well-studied in the area of databases,
+where they are a standard method for error recovery.
+In
+a more general context of plan execution and recovery,
+[Hayashi et al., 2002; 2004] use undo actions for execution of
+plans by mobile agents in a dynamic environment. However,
+the undo actions (one for each action) need to be speciﬁed
+(manually) by the user. It therefore is desirable to have tools
+which automatically generate undo actions, or more gener-
+ally, reverse plans. This raises the following questions: given
+an action domain and an action A, does there exist a reverse
+action for A? More generally, given a sequence of actions
+AS, does there exist a reverse plan for AS? If so, how can a
+reverse action or plan be efﬁciently computed? From a com-
+putational point of view, can reverse actions or plans be fruit-
+fully exploited for efﬁcient backtracking in action execution?
+Backtracking may be considered for various reasons, like
+to restart a plan (e.g., when the execution of the plan fails due
+to some undesired effects of an action in a nondeterministic
+environment), or to switch from the current plan to one which
+is better (or safer) in the light of new information. When
+the current state and the state we want to backtrack to are
+known, then the problem amounts to a vanilla planning prob-
+lem, which is intractable in general. However, the problem is
+different if the backtrack state is unknown.
+
+Motivated by these questions, we study computational as-
+pects of action reversals. The main contributions of this paper
+are as follows.
+• We formally deﬁne the notions of a reverse action and
+a reverse plan for actions. Rather than to commit to a
+particular action language capable of modelling nondeter-
+ministic effects, such as C+ [Giunchiglia et al., 2004] or
+K [Eiter et al., 2004], we use here a generic transition-based
+
+IJCAI-07
+
+336
+
+framework for representing actions as in [Rintanen, 1999;
+Turner, 2002], using propositional logic as a speciﬁcation lan-
+guage. Besides nondeterminism, it also accommodates con-
+current actions and dynamic worlds. We extend the deﬁni-
+tions to conditional reversals, considering also partial knowl-
+edge about the current state and the state before the execution.
+• We thoroughly analyze the complexity of action reversals,
+and characterize the complexity of recognizing and deciding
+existence of reverse actions and plans, both for plain as well
+as for conditional reversals.
+• Unsurprisingly, action reversal is intractable in general.
+For monitoring applications, we therefore present a knowl-
+edge compilation method. It constructs ofﬂine a reverse plan
+library from which reversals can be online computed in poly-
+nomial (often, linear) time for important classes of instances.
+
+Our results shed light on the complexity of action rever-
+sals, and can be easily customized to particular action lan-
+guages like C+ or K. Our algorithms for reverse plan assem-
+bly suggest action reversal as a complementary method for
+efﬁcient backtracking (if no reverse plan exists, choose some
+other method). For further in-depth material and proofs for
+all results of this paper, we refer to [Eiter et al., 2006].
+
+2 Action Representation Framework
+Following [Turner, 2002], let A be a set of action symbols and
+let F be a disjoint set of ﬂuent symbols, which are viewed as
+propositional atoms. The set of states of an action domain is
+encoded by the models of a propositional formula state(F )
+over F . Let act(F , A, F (cid:2)) be a formula over F ∪ A ∪ F (cid:2)
+,
+where F (cid:2) = {f (cid:2) | f ∈ F }. Then
+
+tr(F , A, F (cid:2)) = state(F) ∧ act(F , A, F (cid:2)) ∧ state(F (cid:2))
+
+(1)
+
+.
+
+et
+
+to F (cid:2)
+
+encodes the set of transitions that corresponds to its models.
+That is, in a transition, the start state corresponds to an as-
+signment S to F ,1 the (concurrent) action execution (or oc-
+currence) to an assignment A to A, and the end state to an
+assignment S(cid:2)
+Example 1 [Giunchiglia
+a
+puppy into water makes the puppy wet, and drying
+a puppy with a towel makes it dry. With the ﬂu-
+ents F = {inWater , wet}, and the action symbols
+A = {putIntoWater, dryWithTowel },
+the states can be
+described by the formula state(F) = inWater ⊃ wet .
+Since there are three assignments to F satisfying state(F)
+({inWater , wet }, {¬inWater , wet}, {¬inWater , ¬wet })
+{inWater , wet }, {wet}, {}. The
+there are three states:
+action occurrences can be deﬁned through
+
+Putting
+
+2004]
+
+al.,
+
+act(F , A, F (cid:2)) =
+
+(cid:2) ≡ inWater ∨ putIntoWater) ∧
+
+(inWater
+(wet
+(dryWithTowel ⊃ (¬inWater ∧ ¬putIntoWater ))
+
+(cid:2) ≡ (wet ∧ ¬dryWithTowel ) ∨ putIntoW ater) ∧
+
+(cid:2)} satisﬁes tr(F , A, F (cid:2));
+¬putIntoWater , ¬inWater
+it describes a transition from the state S =
+therefore,
+{wet} to the state S(cid:2) = {} by executing the action A =
+{dryWithTowel }. 2
+
+(cid:2), ¬wet
+
+The meaning of a domain description can be represented
+by a transition diagram, which is a directed labelled graph
+whose nodes are the states and whose edges correspond to
+action occurrences. A trajectory of length n is an alter-
+nating sequence S0, A0, S1, . . . , Sn−1, An−1, Snof states Si
+A1→, . . . ,
+and action occurrences Ai, such that S0
+An−1→ Sn is a labelled path in the graph. The trajectory
+Sn−1
+(cid:2)n−1
+can be obtained from a corresponding model of the formula
+trn(F , A) =
+t=0 tr(Ft, At, Ft+1) where each Fi (resp.,
+each Ai) results by adding time stamp i to each f ∈ F (resp.,
+each a ∈ A).
+
+A0→ S1
+
+An action sequence of length n is a sequence AS = (cid:10)A0,
+. . . , An−1(cid:11), where each Ai (0 ≤ i < n) is a (concurrent)
+action occurrence. We use |AS| to denote the length of A.
+Note that in general, |AS| is different from the total number
+of single action occurrences in AS.
+denotes
+
+(cid:2)
+f ∈F f ≡ f (cid:2)
+
+In what follows, F ≡ F (cid:2)
+
+.
+
+3 Execution Reversals
+After an agent executes an sequence (cid:10)A0, . . . , Ai(cid:11), it may be
+sometimes desirable that the effects of the whole or part of
+the action sequence be undone, such that the agent is back in
+the state Sj, j < i, which she had reached after executing the
+actions A0, . . . , Aj−1.
+
+An action can be undone by executing one of its “reverse
+actions” or by executing a “reverse plan”. We deﬁne a re-
+verse of an action below relative to a given action description.
+Deﬁnition 1 An action A(cid:2)
+is a reverse action for A, if, for all
+F and F (cid:2)
+
+, the formula revAct(F , F (cid:2); A, A(cid:2)), deﬁned as
+
+tr(F , A, F (cid:2)) ⊃
+
+(tr(F (cid:2), A(cid:2), F) ∧ ∀F (cid:2)(cid:2) (tr(F (cid:2), A(cid:2), F (cid:2)(cid:2)) ⊃ F ≡ F (cid:2)(cid:2)))
+
+is a tautology (i.e., ∀F ∀F (cid:2)
+
+revAct(F , F (cid:2); A, A(cid:2)) holds).
+
+. Take any two states S, S(cid:2)
+
+The formula above expresses the following condition about
+(described by the
+respectively) such that
+at state S(cid:2)
+
+actions A and A(cid:2)
+assignments to ﬂuents in F and F (cid:2)
+executing A at S leads to S(cid:2)
+always leads to S.
+
+. Then executing A(cid:2)
+
+Many of the benchmarks used in planning are from the
+transportation domain (logistics, blocks world, grid, etc.).
+E.g., moving from x to y is the reverse action of moving from
+y to x, putting down an object is the reverse of picking it up.
+Deﬁnition 2 A reverse plan for an action A is a sequence
+(cid:10)A(cid:2)
+m−1(cid:11), m ≥ 0, of actions such that, for all F and
+F (cid:2)
+revPlan(F , F (cid:2); A, [A(cid:2)
+
+0, . . . , A(cid:2)
+, the following formula is true:
+
+0, . . . , A(cid:2)
+
+m−1]) =
+
+By the last line, dryWithTowel is executable if inWater
+is false, but not concurrently with putIntoWater . For ex-
+ample, the assignment {¬inWater , wet , dryWithTowel ,
+
+tr(F , A, F (cid:2)) ⊃
+j=1F (cid:2)
+∀m
+i=1Fi ∃m
+
+j
+
+1“Assignment to S” means an assignment of truth values to the
+
+symbols in S.
+
+IJCAI-07
+
+337
+
+(cid:3)
+F0 ≡ F (cid:2) ⊃
+(cid:4)(cid:2)m−1
+(trm(F , A(cid:2)) ⊃ Fm ≡ F)
+
+(cid:5)(cid:6)
+(trt(F , A(cid:2)) ⊃ tr(Ft, A(cid:2)
+
+t=0
+
+.
+
+t, F (cid:2)
+
+t+1)) ∧
+
+0, . . . , A(cid:2)
+
+The formula above expresses the following condition about
+an action A and an action sequence (cid:10)A(cid:2)
+m−1(cid:11). Take
+any two states S, S(cid:2)
+(described by the assignments to ﬂu-
+) such that executing A at S leads to S(cid:2)
+ents in F resp. F (cid:2)
+.
+Then the action sequence (cid:10)A(cid:2)
+m−1(cid:11) is executable at
+state S(cid:2)
+, and it always leads to S. The executability condi-
+tion of (cid:10)A(cid:2)
+m−1(cid:11) is described above by the formula on
+the second line. Note that revPlan(F , F (cid:2); A, [A(cid:2)
+0]) is equiva-
+lent to revAct(F , F (cid:2); A, A(cid:2)
+0). For instance, a reverse plan for
+booking online a room may be ﬁrst calling the hotel in which
+the room is reserved, and then cancelling the reservation.
+
+0, . . . , A(cid:2)
+
+0, . . . , A(cid:2)
+
+We can further generalize the notion of reversing by con-
+sidering action sequences, rather than actions, to be reversed.
+There are two motivations for this generalization: It might
+not always be possible to ﬁnd reverse plans for single actions,
+but only for sequences of actions. Also, a reverse plan for an
+action sequence might be shorter than a reverse plan obtained
+by concatenating reverse plans for subsequences.
+Deﬁnition 3 A sequence (cid:10)A(cid:2)
+m−1(cid:11) (m ≥ 0) of ac-
+tions is a reverse plan for an action sequence (cid:10)A0, . . . , Ak−1(cid:11)
+(k > 0), if, for all F and F (cid:2)
+multiRev(F , F (cid:2); [A0, . . . , Ak−1], [A(cid:2)
+
+, the following formula is true:
+
+0, . . . , A(cid:2)
+
+(cid:4)
+F ≡ F0 ∧ trk(F , A) ∧ F (cid:2) ≡ Fk
+
+0, . . . , A(cid:2)
+(cid:5)
+
+m−1]) =
+⊃
+
+(cid:3)
+
+∃k
+i=0Fi
+j=0F (cid:2)
+∀m
+
+j ∃m
+
+h=1
+
+F (cid:2)(cid:2)
+h
+
+F (cid:2)
+0 ≡ F (cid:2) ⊃
+(cid:2)m−1
+∧(trm(F (cid:2), A(cid:2)) ⊃ F (cid:2)
+
+(cid:4)
+(cid:6)
+t, A(cid:2)
+trt(F (cid:2), A(cid:2)) ⊃ tr(F (cid:2)
+m ≡ F)
+.
+
+t=0
+
+(cid:5)
+t+1)
+
+t, F (cid:2)(cid:2)
+
+The formula above is very similar to revPlan(F , F (cid:2); A, [A0,
+. . . , Am−1]). The only difference is that, in the premise of the
+formula, a trajectory is considered instead of a single tran-
+sition. Note that multiRev (F , F (cid:2); [A0], [A(cid:2)
+m]) is
+equivalent to revPlan(F , F (cid:2); A0, [A(cid:2)
+0, . . . , A(cid:2)
+
+0, . . . , A(cid:2)
+m]).
+
+So far, a reverse plan has been deﬁned for an action se-
+quence at any state reachable by that sequence. However,
+at some such states, an action sequence may not admit any
+reverse plan. That is, an action sequence may have a re-
+verse plan under some conditions, that do not necessarily hold
+at every reachable state. Furthermore, if some information
+about the state which we want to reach by reversing actions
+is available, e.g., values of some ﬂuents obtained by sens-
+ing, then a reverse plan might be possible depending on this
+information. To make execution reversals applicable in such
+situations, we generalize reverse plans to “conditional reverse
+plans” as follows.
+Deﬁnition 4 A sequence (cid:10)A(cid:2)
+m−1(cid:11) (m ≥ 0) of
+actions is a φ; ψ-reverse plan for an action sequence
+(cid:10)A0, . . . , Ak−1(cid:11) (k > 0) if, for any F and F (cid:2)
+
+0, . . . , A(cid:2)
+
+, the formula
+
+ψ(F) ∧ φ(F (cid:2)) ⊃
+
+multiRev(F , F (cid:2); [A0, . . . , Ak−1], [A(cid:2)
+
+0, . . . , A(cid:2)
+and and ψ(F) over F .
+
+m−1])
+
+is true, where φ(F (cid:2)) is over F (cid:2)
+
+For the case where ψ(F) ≡ (cid:16), we simply write φ-reverse
+plan for φ; ψ-reverse plan. For instance, a conditional reverse
+plan for booking a room may be ﬁrst calling the hotel in which
+the room is reserved, and then cancelling the reservation, with
+the condition that another room is available at another hotel.
+
+A question which comes up naturally is whether it is possi-
+ble to formulate conditions, which are necessary or sufﬁcient
+for the existence of a reverse action for a given action. In the
+following, we brieﬂy discuss two conditions, of which one is
+necessary, while the other one is sufﬁcient.
+
+and S(cid:2)(cid:2)
+
+0, . . . , A(cid:2)
+
+Let us ﬁrst focus on the necessary condition. Imagine the
+following situation: The action A, which is to be reversed,
+results in the same state S when executed in two different
+, i.e., tr(S(cid:2), A, S) and tr(S(cid:2)(cid:2), A, S) both hold.
+states S(cid:2)
+It is then impossible to ﬁnd a reverse plan (cid:10)A(cid:2)
+m−1(cid:11)
+If we could, then if some S0, . . . , Sm existed such
+for A.
+that trm(S, A(cid:2)), then both Sm = S(cid:2)
+and Sm = S(cid:2)(cid:2)
+would
+hold, which is impossible, as we assumed that S(cid:2) (cid:17)= S(cid:2)(cid:2)
+. This
+necessary condition can be stated more generally as follows:
+Proposition 1 If a φ; ψ-reverse plan for A = (cid:10)A0, . . . ,
+An−1(cid:11) exists, then, for every two sequences S = S0, . . . , Sn
+and S(cid:2) = S(cid:2)
+0, trn(S, A),
+trn(S(cid:2), A), φ(Sn), φ(S(cid:2)
+0) hold, it holds
+that Sn (cid:17)= S(cid:2)
+n.
+
+n of states such that S0 (cid:17)= S(cid:2)
+
+n), ψ(S0), and ψ(S(cid:2)
+
+0, . . . , S(cid:2)
+
+We have found also a sufﬁcient condition, motivated by the
+following property of functions: A function f is involutory iff
+f (f (x)) = x for each x in the domain of f . We say that an
+action sequence A0, . . . , Am−1 is (ψ-)involutory, if, for every
+state S (satisfying ψ), the following hold:
+
+• for every sequence S = S0, . . . , Sm of states such
+that trm(S, A) holds, there exist a sequence Sm =
+S(cid:2)
+0, . . . , S(cid:2)
+
+m = S of states such that trm(S(cid:2), A) holds;
+
+• for every two sequences S = S0, . . . , Sm and Sm =
+m of states such that trm(S, A) ∧ trm(S(cid:2), A)
+
+S(cid:2)
+0, . . . , S(cid:2)
+holds, it holds that S(cid:2)
+
+m = S.
+
+Therefore, an action is involutory, if executing the action
+twice in any state, where the action is executable, always re-
+sults in the starting state. An example of an involutory action
+is a toggle action: If a simple light switch is toggled twice, it
+will always be in the same state as before. Then a sufﬁcient
+condition can be stated as follows:
+Proposition 2 A ψ-involutory action sequence AS is always
+(cid:16); ψ-reversible, and a (cid:16); ψ-reverse plan is AS itself.
+
+4 Complexity Results
+
+We study the complexity of the following problems related to
+the computation of execution reversals with respect to a given
+action domain description:
+
+(P1) for two given action sequences AS and R, and given
+formulas φ and ψ over ﬂuent symbols, recognizing whether
+R is a φ; ψ-reverse plan for AS;
+
+(P2) for a given action sequence AS, deciding whether
+there exist an action sequence R of a polynomially bounded
+length, and formulas φ and ψ over ﬂuent symbols, such that R
+is a φ; ψ-reverse plan for AS, and that φ(S(cid:2)) holds for some
+state S(cid:2)
+reached by AS from some state S such that ψ(S)
+holds;
+
+(P3) for a given action sequence AS and formulas φ and ψ
+over ﬂuent symbols, deciding whether there exists an action
+sequence R of polynomially bounded length such that R is a
+φ; ψ-reverse plan for AS.
+
+IJCAI-07
+
+338
+
+Problem |R| = 1
+coNP
+
+(P1)
+
+(P2)
+
+(P3)
+
+2
+
+Σp
+Σp
+
+2
+
+|R| = 2
+
+|R| > 2
+
+2
+
+Πp
+Σp
+Σp
+
+2
+
+3
+
+2
+
+Πp
+Σp
+Σp
+
+3
+
+3
+
+Table 1: Complexities of (P1)–(P3), in terms of completeness
+
+For our discussion of the computational complexities of
+these problems, recall the following sequence of classes from
+the polynomial hierarchy: First, Σp
+0 = P; and for all
+k ≥ 1, Σp
+k−1 . Each complex-
+ity class at each level k (k ≥ 1) of the hierarchy, includes all
+complexity classes at lower levels. For further background on
+complexity, we refer the reader to [Papadimitriou, 1994].
+
+0 = Πp
+k = coNPΣp
+
+k = NPΣp
+
+k−1 and Πp
+
+The complexity results for problems (P1)–(P3) are summa-
+rized in Table 1. According to these results, checking whether
+an action sequence is a φ; ψ-reverse plan for another action
+sequence (i.e., (P1)) is easier than ﬁnding a φ; ψ-reverse plan
+for an action sequence (i.e., (P2) and (P3)). Finding a φ; ψ-
+reverse plan, where φ and ψ are given is harder than ﬁnding a
+φ; ψ-reverse plan for arbitrary φ and ψ for |R| = 2, but is of
+the same complexity in all other cases. These problems get
+more difﬁcult when the length of R increases: Problems (P1)
+and (P3) get more difﬁcult when |R| ≥ 2, while problem (P2)
+gets more difﬁcult when |R| > 2.
+
+Intuitively, the Σp
+
+3-completeness of (P2) and (P3) is due to
+
+the following intermingled sources of complexity:
+
+(i) the exponentially many action sequences R of a polyno-
+mially-bounded length and, in case of (P2), the exponentially
+many formulas φ and ψ which need to be considered,
+
+(ii) the test that for all states S and S(cid:2)
+
+such that φ(S(cid:2)) and
+ψ(S) hold and S(cid:2)
+is reached from S after execution of AS,
+every execution of R which starts in S(cid:2)
+ends in S, and (iii)
+the test that each partial execution of R starting in some state
+S(cid:2)
+as in (ii) can be continued with the next action, i.e., the
+execution is not “stuck.”
+
+Membership of problem (P1) in Πp
+
+2. Problem (P3) is thus in Σp
+
+2 is straightforward from
+Deﬁnitions 3 and 4. The φ;ψ-reverse plan property is easily
+rewritten to a preﬁx quantiﬁed Boolean formula (QBF) with
+∀∃ pattern; evaluating such a formula is well-known to be
+in Πp
+3, since a φ;ψ-reverse plan
+can ﬁrst be guessed and then checked with a Πp
+2 oracle. In
+problem (P2), φ and ψ are w.l.o.g. conjunctions of literals
+and can be guessed along with the plan; the extra condition is
+checkable with an NP oracle. Hardness is shown by suitable
+reductions of evaluating QBFs.
+
+When limiting the length of the reverse plan, some quan-
+tiﬁers vanish. Informally, when |R| = 1, source (iii) disap-
+pears, and similarly when |R| = 2 for (P2). The reason is
+that if R = (cid:10)A1(cid:11) and if the current state S(cid:2)
+and the state S to
+which we want to get back are known, then in the light of (ii)
+we just need to check whether (cid:10)S(cid:2), A1, S(cid:11) is a valid transition,
+which is polynomial. In the case of (P2) and R = (cid:10)A1, A2(cid:11),
+we similarly just need to check after reaching S(cid:2)(cid:2)
+by
+executing A1 whether (cid:10)S(cid:2)(cid:2), A2, S(cid:11) is a valid transition. Com-
+bined with other properties, this yields the Σp
+2 upper bound.
+
+from S(cid:2)
+
+In problems (P1) and (P3), we do not check that the for-
+and
+
+mulas φ and ψ are actually satisﬁed at some states S(cid:2)
+
+S, respectively, such that S(cid:2)
+is reached from S be execution
+of AS (if no such states exist, the problem is trivially solved).
+Checking this condition changes the complexity of (P1) when
+|R| = 1 from coNP to DP
+(which is the “conjunction” of NP
+and coNP); it does not change the complexity of (P3).
+
+The complexity of problems can be lower under some con-
+ditions. For example, if the reverse plan is short (i.e., has
+a length bounded by a constant) and contains no parallel ac-
+tions, and φ, ψ are formulas from a polynomial size set of for-
+mulas, then only a polynomial number of candidates for φ; ψ-
+reverse plans need to be checked for (P3). If the executability
+of actions can be determined in polynomial time then (P1)
+gets coNP-complete, and (P2) and (P3) get Σp
+
+2-complete.
+
+Tractable cases. Also tractability can be gained in certain
+cases. For example, if φ and ψ are conjunctions of literals
+which have a single model and the description of transitions
+tr(F , A, F (cid:2)) is such that for given ﬂuent values S (resp., S(cid:2)
+)
+and action occurrences A all ﬂuent values S(cid:2)
+(resp., S) such
+that tr(S, A, S(cid:2)) holds can be determined in polynomial time,
+then ﬁnding a short φ; ψ-reverse plan without parallel actions
+for a short action sequence is feasible in polynomial time.
+Thus in particular, reversal of the current state in the exe-
+cution of an action sequence is possible in polynomial time
+under these conditions.
+
+5 Computation of Reverse Plans
+We compute reverse plans in the spirit of knowledge com-
+pilation [Cadoli and Donini, 1997]: ﬁrst we compute ofﬂine
+reverse plans for some action sequences, and then use this
+information online to construct a concrete reverse plan for a
+given action sequence.
+In the ofﬂine phase, the computed
+reverse plans for action sequences are collected in a library.
+This library may not contain all possible reverse plans for all
+action sequences (since exponentially many of them exist),
+but a polynomial number of reverse plans for short action se-
+quences (typically, of a few steps, and the reverse plans are
+short themselves). From these short reverse plans, one might
+efﬁciently compose online reverse plans for longer action se-
+quences. For example, a reverse plan (cid:10)B2, B1(cid:11) for the action
+sequence (cid:10)A1, A2(cid:11) can be composed of the two reverse ac-
+tions B1 and B2 that undo the effects of two actions A1 and
+A2, respectively. As we show later, such a construction of
+a reverse plan for an action sequence, from the reverse plan
+library, can be done efﬁciently.
+
+We deﬁne reverse plan items and libraries as follows.
+
+Deﬁnition 5 A reverse plan item (RPI) is a tuple of the form
+(AS, R, φ, ψ) such that R is a φ; ψ-reverse plan for the
+(nonempty) action sequence AS, where φ = φ(F) and ψ =
+ψ(F). An RPI is single-step, if |AS| = 1, i.e., AS consists of
+a single action, and unconditional, if φ = ψ = true.
+Deﬁnition 6 A reverse plan library L is a (ﬁnite) set of RPIs;
+it is called single-step (resp., unconditional), if each RPI in it
+is single-step (resp., unconditional).
+
+There are various ways to compute RPIs to ﬁll a reverse
+plan library. Thanks to the logical framework and deﬁnitions
+of reverse actions and plans, it is fairly straightforward to en-
+code the problem of actually ﬁnding an RPI (AS, R, φ, ψ) by
+
+IJCAI-07
+
+339
+
+Algorithm REVERSE(AS, Π, L)
+Input: Action sequence AS = (cid:10)A0, . . . , Ai−1(cid:11), i ≥ 0,
+
+sequence of formulas (percepts) Π = π0(F), . . . ,
+πi(F), reverse plan library L;
+
+Output: Reverse plan RP for AS from Π and L or “no”
+
+for each j = 0, ..., i−1 do S[j] := ⊥;
+S[i] := (cid:16);
+
+/* trivially, Si is reversible to itself */
+
+(01)
+(02)
+(03) RP := REVERSE1(i);
+(04)
+(05)
+
+if RP = “no” then return “no”
+else return (RP ,S[0])
+
+Figure 1: Algorithm REVERSE to compute execution rever-
+sals using a multi-step plan library.
+
+solving QBFs, which has been proposed as a problem solving
+method in the planning domain earlier, e.g., [Rintanen, 1999].
+Another possibility is to reduce the problem to solving con-
+formant planning problems deﬁned relative to a modiﬁcation
+of D. Due to space reasons, we cannot give the details, and
+instead focus on the more interesting problem of online re-
+verse plan computation.
+
+At runtime, when we do try to assemble a reverse plan,
+we can think of three increasingly expressive scenarios, de-
+pending on available state information in form of percepts πj
+about some states Sj, j = 0, 1, . . . , i, of the execution:
+
+1. There is no information about the current state, Si, and
+past states S0, S1, . . . , Si−1. In this situation, only uncon-
+ditional reversal plans, assembled from unconditional RPIs,
+might be used.
+
+2. (Partial) information about the current state Si is avail-
+able, expressed by a formula πi(F) such that Si is one of its
+models, but no information about the past states. In this case,
+we can also make use of conditional RPIs.
+
+3. (Partial) information about the whole execution history
+is available, formalized in terms of a sequence Π = π0, . . . ,
+πi of formulas over ﬂuent symbols, such that the state Sj is
+a model of πj(F), for each j = 0, 1, . . . , i. Here, we might
+exploit an even larger set of RPIs.
+
+Clearly, scenario 3 generalizes the other ones; due to space
+
+limitations, we thus focus here on this general scenario.
+
+When we consider a multi-step plan library,
+
+i.e., not
+necessarily a single-step plan library, ﬁnding a reverse plan
+RP is trickier since RP may be assembled from L in many
+different ways, and state conditions might exclude some
+of them. For instance, take AS = (cid:10)A, B, C(cid:11), and L =
+{((cid:10)A, B(cid:11), (cid:10)D(cid:11), φ1, (cid:16)), ((cid:10)C(cid:11), (cid:10)E(cid:11), φ2, (cid:16)), ((cid:10)A(cid:11), (cid:10)F (cid:11), φ3, (cid:16)),
+((cid:10)B, C(cid:11), (cid:10)G(cid:11), φ4, (cid:16))}. We can assemble the action sequence
+(cid:10)A, B, C(cid:11) from (cid:10)A, B(cid:11) and (cid:10)C(cid:11), or from (cid:10)A(cid:11) and (cid:10)B, C(cid:11).
+However, in the former case, φ1 might be false at the state
+resulting from reversing C by E, while, in the latter case, φ3
+might be true at the state resulting from reversing the action
+sequence (cid:10)B, C(cid:11) by the action G. Thus, we need to consider
+choices and constraints when building a reverse plan.
+
+Fortunately, this is not a source of intractability, and a re-
+verse plan from L can be found in polynomial time (if one
+exists) by the algorithm REVERSE in Figure 1.
+
+The auxiliary array S in the algorithms is used for keeping
+
+Algorithm REVERSE1(j)
+
+Integer j, 0 ≤ j ≤ i (=|AS|);
+
+Input:
+Output: Reverse plan RP for (cid:10)A0, . . . , Aj−1(cid:11)
+from π0, . . . , πj , or “no” if none exists
+if j = 0 then return  ; /* empty plan */
+for each (As, R, φ, ψ) ∈ L s.t. As is a sufﬁx
+
+(01)
+(02)
+
+of (cid:10)A0, . . . , Aj−1(cid:11) and S[j−|A|s] = ⊥ do
+
+if πj ⊃ φ and πj−|AS| ⊃ ψ then
+begin
+
+S[j−|As|] := (cid:16);
+RP := REVERSE1(j−|As|);
+if RP (cid:17)= “no” then return R + RP
+
+/* reversing to Sj possible */
+
+(03)
+(04)
+(05)
+(06)
+(07)
+(08)
+(09)
+
+end
+
+return “no”
+
+Figure 2: Algorithm REVERSE1, in the scope of REVERSE.
+
+information to which states Sj a reversal is established. The
+main algorithm, REVERSE, initializes every S[j] (j < i) of S
+to ⊥ since this is false initially. The recursive algorithm RE-
+VERSE1 updates S whenever new knowledge is gained. For
+instance, if the action Ai−1 can be reversed at state Si, then
+we know that a reversal to Si−1 exists and modify S[i − 1] ac-
+cordingly. Having this information available in S helps us to
+ﬁnd a reverse plan for the action sequence AS from L. Also,
+it prevents us to explore the same search space over and over.
+The algorithm REVERSE starts constructing a reverse plan
+for an action sequence (cid:10)A0, . . . , Aj−1(cid:11) by considering its suf-
+ﬁxes As. For efﬁciently determining all As in L, we can em-
+ploy search structures such as a trie (or indexed trie) to repre-
+sent L: consider each node of the trie labelled by an action, so
+that the path from the root to the node would describe an ac-
+tion sequence in reverse order. If the node describes an action
+sequence As such that (As, R, φ, ψ) is in L, then the node is
+linked to a list of all RPIs of form (As, R(cid:2), φ(cid:2), ψ(cid:2)) in L.
+
+The next theorem bounds the running time of algorithm
+
+REVERSE and states its correctness.
+Theorem 3 (i) REVERSE(AS, Π, L)
+
+running time
+O(|AS|(|L| · eval max(A) + min(ASmax(L), |AS|))),
+where eval max(Π, L) bounds the time to evaluate πj ⊃
+φ and πj ⊃ ψ for any πj in Π and formulas φ, ψ in L;
+and ASmax(L) = max{|As| | (As, R, φ, ψ) ∈ L}.
+
+has
+
+(ii) REVERSE(AS, Π, L) correctly outputs, relative to L, a
+reverse plan RP for AS and Π or it determines that
+such a reverse plan does not exist.
+
+Corollary 4 REVERSE(AS, Π, L) is polynomial, if all per-
+cepts in Π are DNFs and all formulas in L are k-term DNFs,
+i.e.,
+
+ti,j where k is bounded by a constant, or CNFs.
+
+(cid:7)k
+
+j=1
+
+We remark that in an application setting, |AS| as well as
+reverse plan R are expected to be small (bounded by a con-
+stant) and percepts πi and the formulas φ, ψ consist of a few
+literals. In this case, the running time is O(|L|) i.e., linear
+in the size of the reverse plan library L. If, moreover, only
+few of the entries in the reverse plan library match, then the
+running time can be drastically shorter.
+
+IJCAI-07
+
+340
+
+6 Related Work
+
+Our work on undoing the execution of an action sequence has
+been partly motivated by [Hayashi et al., 2002; 2004], where
+the user has to provide the reversal information. Here, we
+describe a method which allows for automatic discovery of
+this knowledge. Moreover, we describe a ﬂexible online as-
+sembly of reverse plans from a reverse plan library. While
+[Hayashi et al., 2002; 2004] just consider single actions and
+associated reverse actions, this library may contain arbitrary
+conditional action sequences, which the reverse plan algo-
+rithm can ﬂexibly use. Our work is further motivated by ap-
+proaches to plan recovery in logic-based monitoring frame-
+works [De Giacomo et al., 1998; Soutchanski, 1999; 2003;
+Fichtner et al., 2003]. However, they either do not consider
+action reversals or deﬁne it in a different way, usually com-
+bined with goal reachability.
+
+The idea of backtracking for recovery in execution mon-
+itoring is similar in spirit to “reverse execution” in program
+debugging [Zelkowitz, 1973; Agrawal et al., 1991], where all
+actions are undone to reach a “stable” state. Our method is
+more general, since no execution history is required a priori.
+Undoing and redoing actions on the database is at the heart of
+recovery in database management systems. However, also in
+this context, a log of the action history is available, and so the
+problem is signiﬁcantly different.
+
+The complexity of planning in different action languages
+and the framework considered here has been studied e.g. in
+[Baral et al., 2000; Liberatore, 1997; Turner, 2002; Rintanen,
+1999; Eiter et al., 2004]. Conformant planning is deciding,
+given an action domain and formulas init (F) and goal (F)
+describing the initial state (not necessarily unique) and a
+goal state, respectively, whether there exists some action se-
+quence AS whose execution in every initial state makes goal
+true. This problem is related to ﬁnding a reverse plan, and
+has similar complexity for plans of polynomial length (Σp
+3-
+completeness). However, the problem is different: In ac-
+tion reversal, we lack a (known) goal to establish. More-
+over, conformant planning is Σp
+3-complete already for plans
+of length 1, and recognizing conformant plans of this length
+is Πp
+2-complete [Turner, 2002], differing from the results in
+Table 1.
+
+7 Conclusion
+
+2 respectively Σp
+
+We formally deﬁned undo actions and reverse plans for an ac-
+tion sequence, in the logic-based framework for action repre-
+sentation from [Turner, 2002]. As we have shown, determin-
+ing an undo action or reverse plan for an action sequence is
+intractable in general (more precisely, complete for the class
+Σp
+3 in the Polynomial Hierarchy). The in-
+tractability is explained, on the one hand, by the intractability
+of propositional logic underlying the framework, and, on the
+other hand, by the intrinsic complexity of non-determinism;
+nonetheless, tractability is gained under suitable restrictions.
+To cope with intractability, we presented a knowledge compi-
+lation approach by which undo actions and reverse plans can
+be efﬁciently constructed (under suitable conditions, in lin-
+ear time) from a reverse plan library. An implementation of
+
+the compilation algorithms, including the generation of con-
+ditional reverse plan libraries, is currently in progress.
+
+References
+[Agrawal et al., 1991] H. Agrawal, R. A. DeMillo, and E. H.
+Spafford. An execution backtracking approach to program
+debugging. IEEE Software, 8(3):21–26, 1991.
+
+[Baral et al., 2000] C. Baral, V. Kreinovich, and R. Trejo.
+Computational complexity of planning and approximate
+planning in the presence of incompleteness. Artiﬁcial In-
+telligence, 122(1-2):241–267, 2000.
+
+[Cadoli and Donini, 1997] M. Cadoli and F. M. Donini. A
+Survey on Knowledge Compilation. AI Communications,
+10(3-4):137–150, 1997.
+
+[De Giacomo et al., 1998] G. De Giacomo, R. Reiter, and
+M. Soutchanski. Execution monitoring of high-level robot
+programs. In Proc. KR, pp. 453–465, 1998.
+
+[Eiter et al., 2006] T. Eiter, E. Erdem, and W. Faber. Undo-
+ing the effects of action sequences. Tech. Report INFSYS
+RR-1843-04-05, TU Wien, A-1040 Vienna, Austria, 2006.
+[Eiter et al., 2004] T. Eiter, W. Faber, N. Leone, G. Pfeifer,
+and A. Polleres. A logic programming approach to knowl-
+edge-state planning: Semantics and complexity. TOCL,
+5(2):206–263, 2004.
+
+[Fichtner et al., 2003] M. Fichtner, A. Großmann,
+
+and
+Intelligent execution monitoring in dy-
+
+M. Thielscher.
+namic environments. Fund. Inform., 57(2–4), 2003.
+
+[Gelfond and Lifschitz, 1998] M. Gelfond and V. Lifschitz.
+
+Action Languages. ETAI, 2(3-4):193–210, 1998.
+
+[Giunchiglia et al., 2004] E. Giunchiglia, J. Lee, V. Lifs-
+chitz, N. McCain, and H. Turner. Nonmonotonic Causal
+Theories. Artiﬁcial Intelligence, 153(1-2):49–104, 2004.
+
+[Hayashi et al., 2002] H. Hayashi, K. Cho, and A. Ohsuga.
+Mobile agents and logic programming. In Proc. MA, pp.
+32–46, 2002.
+
+[Hayashi et al., 2004] H. Hayashi, K. Cho, and A. Ohsuga.
+A new HTN planning framework for agents in dynamic
+environments. In Proc. CLIMA, pp. 108–133, 2004.
+
+[Liberatore, 1997] P. Liberatore. The complexity of the lan-
+
+guage A. Electron. Trans. Artif. Intell., 1:13–38, 1997.
+
+[Papadimitriou, 1994] C. H. Papadimitriou. Computational
+
+Complexity. Addison-Wesley, 1994.
+
+[Rintanen, 1999] J. Rintanen.
+
+Constructing Conditional
+
+Plans by a Theorem-Prover. JAIR, 10:323–352, 1999.
+
+[Son and Baral, 2001] T.C. Son and C. Baral. Formalizing
+Sensing Actions – A Transition Function Based Approach.
+Artiﬁcial Intelligence, 125(1–2):19–91, 2001.
+
+[Soutchanski, 1999] M. Soutchanski. Execution monitoring
+of high-level temporal programs. In Proc. IJCAI Workshop
+on Robot Action Planning, 1999.
+
+[Soutchanski, 2003] M. Soutchanski. High-level robot pro-
+gramming and program execution. In Proc. ICAPS Work-
+shop on Plan Execution, 2003.
+
+[Turner, 2002] H. Turner. Polynomial-length planning spans
+
+the polynomial hierarchy. In Proc. JELIA, pp. 111–124.
+
+[Zelkowitz, 1973] M. V. Zelkowitz. Reversible execution.
+
+Communications of ACM, 16(9):566, 1973.
+
+IJCAI-07
+
+341
+
+

@@ -1,0 +1,857 @@
+A Simple-Transition Model for Relational Sequences
+
+School of Electrical Engineering and Computer Science
+
+Alan Fern
+
+Oregon State University
+
+Corvallis, OR 97331
+afern@cs.orst.edu
+
+Abstract
+
+We use “nearly sound” logical constraints to in-
+fer hidden states of relational processes. We in-
+troduce a simple-transition cost model, which is
+parameterized by weighted constraints and a state-
+transition cost. Inference for this model, i.e. ﬁnd-
+ing a minimum-cost state sequence, reduces to a
+single-state minimization (SSM) problem. For re-
+lational Horn constraints, we give a practical ap-
+proach to SSM based on logical reasoning and
+bounded search. We present a learning method that
+discovers relational constraints using CLAUDIEN
+[De Raedt and Dehaspe, 1997] and then tunes their
+weights using perceptron updates. Experiments in
+relational video interpretation show that our learned
+models improve on a variety of competitors.
+
+1 Introduction
+We consider hidden-state inference from the observations of
+relational processes, i.e. processes where states and obser-
+vations are described by properties of and relations among
+objects (e.g. people and blocks). To deal with the enormous
+state and observation spaces, we utilize “nearly-sound” (i.e.
+rarely violated) logical constraints on the states and obser-
+vations. Such constraints can often be acquired via machine
+learning and/or a human expert, and we give a framework for
+combining them for relational sequential inference.
+
+We introduce the simple-transition cost model (in Sec-
+tion 3), which is parameterized by a set of weighted log-
+ical constraints and a state-transition cost. The cost of a
+state sequence given an observation sequence is the weight
+of unsatisﬁed constraints plus a transition cost for each state
+change. Sequential inference corresponds to computing the
+minimum-cost state sequence. Here we study both learning
+and inference for this model.
+
+First, in Section 4, we (efﬁciently) reduce sequential infer-
+ence to a single-state minimization (SSM) problem. We then
+show, in Sections 5 and 6, how to leverage nearly-sound rela-
+tional Horn constraints in order to compute SSM with prac-
+tical efﬁciency. We also study the possibility of exploiting
+efﬁcient SSM in richer models. We show that for a simple en-
+richment to our model, there is no efﬁcient reduction unless
+P=NP. In Section 7, we discuss learning a relational simple-
+transition model using the logical discovery engine CLAU-
+DIEN [De Raedt and Dehaspe, 1997] and a variant of Collins’
+
+generalized perceptron algorithm [Collins, 2002]. Finally, in
+Section 8, we evaluate our approach in a relational video-
+interpretation domain. Our learned models improve on the ac-
+curacy of an existing trainable system and an approach based
+on more mainstream approximate inference.
+2 Problem Setup
+For simplicity, we describe our problem setup and approach
+for propositional (rather than relational) processes, where in
+the spirit of dynamic Bayesian networks (DBNs) [Murphy,
+2002], states are described by a ﬁxed set of variables. In Sec-
+tion 6, we extend to the relational setting.
+
+A sequential process is a triple (X ; Y; P), where the ob-
+servation space X and state space Y are sets that contain
+all possible observations and states. P is a probability dis-
+tribution over the space of ﬁnite sequences constructed from
+members of X £ Y. Each such sequence contains a pair of
+an observation sequence (o-sequence) and a state sequence
+(s-sequence). For a sequence Q = (q1; : : : ; qT ), we let
+Qi:j = (qi; : : : ; qj) for i • j. We will use uppercase for se-
+quences and lowercase for single states and observations. A
+process is propositionalwhen its states are represented using
+a set of n statevariables over the ﬁnite domain Ds, yielding
+Y = (Ds)n. The value of the i’th variable in state s is de-
+noted by s(i). We will not need to assume a representation
+for observations until Section 6
+
+We assume that
+
+the utility of an inferred s-sequence
+S primarily derives from the sequence of distinct states,
+rather than identifying the exact state transition points.
+Let COMPRESS(S) denote the sequence obtained by re-
+moving consecutive repetitions in S.
+For example,
+COMPRESS(a; a; a; b; b; a; c; c) = a; b; a; c. Our empirical
+goal is to map an o-sequences O to an s-sequence S such that
+COMPRESS(S) is the distinct sequence of states that gener-
+ated O. Indeed, in our video domain, the exact locations of
+state transitions are often ambiguous (as judged by a human)
+and unimportant for recognizing activity—e.g. in Figure 1 it
+is unimportant to know exactly where the transition occurs.
+Example 1. The process in our video-interpretation domain
+corresponds to a hand playing with blocks. Figure 1 shows
+key frames where a hand picks up a red block from a green
+block. The goal is to observe the video and then infer the
+underlying force-dynamic states, describing the support rela-
+tions among objects. States are represented as sets of force-
+dynamic facts, such as ATTACHED(HAND; RED). Observa-
+tions are represented as sets of low-level numeric facts, such
+
+Frame 1
+
+Frame 3
+
+Frame 14
+
+Frame 21
+
+Figure 1: Key frames in a video segment showing a hand picking up a red block from a green block. The object tracker’s output is
+shown by the polygons. The video segment has two distinct force-dynamic states given by: fGROUNDED(HAND); GROUNDED(GREEN);
+CONTACTS(GREEN; RED)g (frames 1 and 3) and fGROUNDED(HAND); GROUNDED(GREEN); ATTACHED(HAND; RED)g (frames 14 and
+20). The transition occurs between frames 3 and 14. See Example 2 regarding the predicates GROUNDED, CONTACTS, and ATTACHED.
+
+as DISTANCE(GREEN; RED) = 3, that are derived from an
+object tracker’s noisy output. For a ﬁxed set of objects, the
+process can be represented propositionally with a variable
+for each possible fact. However, our system must handle any
+number of objects, requiring a relational process representa-
+tion described in Section 6.
+
+3 The Simple-Transition Cost Model
+Our framework utilizes an additive conditional cost model
+C(SjO) to represent the cost of labeling o-sequence O1:T by
+s-sequence S1:T
+
+C(S1:T jO1:T ) = X
+
+Ca(sijoi) + X
+
+Ct(si; si¡1)
+
+(1)
+
+1•i•T
+
+1<i•T
+
+with real-valued atemporal-costand transition-costfunctions
+Ca and Ct. This is the cost cost model implicit in (con-
+ditional) hidden Markov models (HMMs). Ca(sijoi) is the
+cost of labeling oi by state si, and Ct(si; si¡1) is the cost of
+transitioning from state si¡1 to si. As in [Lafferty et al.,
+2001], our work extends to Ca’s with “non-local” observa-
+tion dependencies. Sequential inference involves computing
+arg minS1:T C(S1:T jO1:T ) for a given O1:T .
+
+C(S1:T jO1:T ) is a simple-transitionmodel(STM) with pa-
+rameters hCa; Ki if the atemporal-cost function is Ca and
+Ct(si; si¡1) = K¢–(si 6= si¡1), where K is a real, and –(p) = 1
+if p is true else 0. This model charges an equal cost for
+all state transitions, even though generally some transitions
+types are more likely than others.
+If this likelihood infor-
+mation is critical for inference, then an STM alone will not
+sufﬁce. However, we believe that there are interesting pro-
+cesses where accurate inference does not require exploiting
+non-simple transition structure. For example, in our video
+domain, states persist for many observations and can be reli-
+ably inferred by integrating just those observations, without
+considering transition type. For such processes, it is impor-
+tant to study simple but sufﬁcient models, as there can be
+considerable computational advantages.
+
+4 Inference for Simple-Transition Models
+Viewing an STM as an HMM we can apply the Viterbi algo-
+rithm [Forney, 1973] to compute a minimum-cost s-sequence
+S1:T in O(T ¢ jYj2) time. In fact, by leveraging the simple-
+transition structure, Viterbi can be improved to O(T ¢ 2 ¢ jYj)
+time. However, these algorithms are impractical for us since
+they are exponential in the number of state variables n (i.e.
+jYj = jDsjn), which will typically be large for our re-
+lational processes. Likewise, for STMs, general-purpose
+
+graphical-modeling techniques such as variable elimination
+and junction-tree algorithms are exponential in n (i.e. the in-
+duced tree width [Dechter, 1999] is linear in n).
+
+Reduction to SSM. Sequential inference for an STM
+hK; Cai reduces to the single-stateminimization(SSM)prob-
+lem, which is deﬁned as computing the SSM function
+(cid:190)(O1:j) = mins P1•i•j Ca(sjoi). The SSM function gives
+the minimum cost of labeling O1:j by a single state (i.e.
+no state transitions). For an o-sequence O1:T we denote
+the minimum cost over all s-sequences as C ⁄(O1:T ) =
+minS1:T C(S1:T jO1:T ). For STMs, C ⁄(O1:T ) can be ex-
+pressed in terms of (cid:190) as follows (for proof see Fern [2004]).
+C ⁄(O1:T ) = min
+[C ⁄(O1:j) + K ¢ –(j > 0) + (cid:190)(Oj+1:T )] (2)
+0•j<T
+
+Equation 2 minimizes over j, where j + 1 is viewed as
+the ﬁnal state-transition point. The minimum cost over s-
+sequences with ﬁnal transition j + 1 equals the minimum-
+cost sequence up to j, plus a transition cost K (unless j = 0),
+plus the SSM cost for the remaining sufﬁx (no transitions oc-
+cur after j). This decomposition is possible because STMs
+weigh all transition types equally, decoupling the minimiza-
+tion problems before and after j.
+
+Equation 2 yields an efﬁcient reduction to SSM based on
+dynamic programming, which we call the SSM-DP algo-
+rithm. Simply compute C ⁄(O1:j) in the order j = 1; 2; : : : ; T
+for a total of T 2 SSM computations.
+It is straightfor-
+ward to store information for extracting the minimum-cost s-
+sequence, which we denote by SSM-DP(O1:T ; (cid:190); K). Thus,
+efﬁcient SSM computation implies efﬁcient sequential infer-
+ence for STMs. The complexity of SSM depends on the par-
+ticular representation used for Ca.
+In Section 5, we lever-
+age nearly-sound logical constraints to provide practically ef-
+ﬁcient SSM.
+
+Though SSM-DP provides the potential for handling large
+state spaces, a naive implementation requires T 2 SSM com-
+putations, which is often unacceptable. However, signif-
+icant and sound pruning of the computation is possible—
+e.g.
+in Equation 2, ignore any j when a k exists such that
+C(S1:kjO1:k) • C(S1:jjOi:j) + (cid:190)(Oj+1:k). In our application,
+pruning reduces the empirical number of SSM computations
+to O(T ). See Fern [2004] for details.
+
+Sufﬁcient SSM Computation. In practice we do not need
+exact SSM for all o-sequences. Rather we need only to com-
+pute a sufﬁcient SSM approximation deﬁned below. O1:j is
+a critical o-sequence of process P if for some o-sequence
+drawn from P, O1:j is a maximal subsequence generated
+by a single state. Let (cid:190) be the SSM function for an STM
+
+that accurately predicts s-sequences of P. We say (cid:190) 0 is a
+sufﬁcient SSM approximation to (cid:190) for P if both 1) for all
+o-sequences O1:T , (cid:190)(O1:T ) • (cid:190)0(O1:T ), and 2) (cid:190)0(O0) =
+(cid:190)(O0) for any critical o-sequence O0 of P. It can be shown
+that for o-sequences drawn from P, SSM-DP(O1:T ; (cid:190); K) =
+SSM-DP(O1:T ; (cid:190)0; K). Thus we can achieve accurate infer-
+ence using (cid:190)0. In Section 5 we show how to efﬁciently com-
+pute such an approximation.
+
+Non-Simple Models. Given our focus on SSM it is natu-
+ral to consider efﬁcient SSM reductions for non-simple mod-
+els.
+Intuitively, if a model distinguishes between different
+transition types, we may need to consider states other than
+just SSM solutions (like Viterbi but unlike SSM-DP), possi-
+bly resulting in exponential behavior in n even given efﬁcient
+SSM. Below we show that an efﬁcient reduction is unlikely
+for a modest extension to STMs, giving a boundary between
+efﬁcient and inefﬁcient models under efﬁcient SSM.
+
+i
+
+6= s(j)
+
+We extend STMs by allowing the model to assign higher
+costs to transitions where more state variables change, unlike
+STMs which can only detect whether a change occurred. A
+cost model C, with atemporal component Ca, is a counting-
+transitionmodelif Ct(si; si¡1) = K ¢ P1•j•n –(s(j)
+i¡1),
+i.e. transition cost is linear in the count of propositions that
+change. We say C allows efﬁcient SSM if the SSM func-
+tion for Ca is computable in time polynomial in its input o-
+sequence size and number of state variables.
+Theorem 1. Given as input a counting-transition model C,
+an observation sequence O, and a cost bound ¿ , the prob-
+lem of deciding whether C ⁄(O1:T ) < ¿ is NP-complete, even
+under the assumption that C allows efﬁcient SSM.
+Proof: (sketch) See Fern [2004] for full proof. Inference in
+2-d grid Potts models, a class of Markov random ﬁelds, is NP-
+hard [Veksler, 1999]. We ﬁrst give a non-trivial extension of
+this result to the smaller class of 2-d grid Potts models with
+equally weighted “horizontal edges”. Next, we reduce this
+problem to counting-transition model inference. Intuitively,
+the state variables at time i represent the Potts model nodes
+in column i. Finally, we show that the constructed model
+allows efﬁcient SSM via variable elimination. 2
+5 Constraint-Based SSM
+We now give a constraint-based representation for atemporal-
+cost functions and study the corresponding SSM problem.
+For simplicity, we assume that states have n binary state vari-
+ables, i.e. Ds = ftrue; falseg. We also assume a set of m
+binary observation tests, each one mapping observations to
+ftrue; falseg. Non-binary extensions are straightforward.
+
+Propositional Horn Constraints. A propositional Horn
+constraint ` is a logical implication (body ! head), where
+body is a conjunction of state variables and observation tests,
+and head is a state variable or false. Given an observation o
+and state s, we let `[o] (`[s]) denote the result of substituting
+observation tests (state variables) in ` with the truth values
+under o (under s). If a constraint has no variables, then it is
+interpreted as the truth value of the variable-free expression.
+Thus, `[o][s] is the truth value of ` under o and s, and we
+say that o and s satisfy ` iff `[o][s] is true. A set of Horn
+constraints is satisﬁable iff there exists a state and observa-
+tion that jointly satisfy each constraint. For horn constraints,
+testing satisﬁability and ﬁnding satisfying assignments are
+polynomial-time computable [Papadimitriou, 1995].
+
+Constraint-Based Cost Functions. We parameterize an
+atemporal-cost function using a set of weighted Horn con-
+straints ' = fh`1; c1i; : : : ; h`v; cvig, with Horn constraints
+`i and non-negative weights ci representing the cost of vi-
+olating `i. The non-negativity requirement will be impor-
+tant for inference. The sum of costs in ' is denoted by
+COST(') and we say ' is satisﬁable if its set of constraints
+is satisﬁable. Atemporal cost is deﬁned as Ca(sjo; ') =
+Ph`;ci2' c ¢ –(:`[o][s]), i.e. the total cost of unsatisﬁed con-
+straints. In this work, we will assume that ' contains “nearly
+sound” constraints, meaning that each constraint is usually
+satisﬁed by the state/observation pairs generated by our pro-
+cess. Our primarily non-theoretical goals do not require a
+formal notion of nearly sound (e.g. PAC).
+
+Given ' and an o-sequence O1:j, we deﬁne the combined
+constraint set as ¡(O1:j ; ') = S1•i•j Sh`;ci2'h`[oi]; ci,
+which involves only state variables and captures all of the
+state constraints “implied” by ' and O1:j. The SSM func-
+tion for Ca is now given by
+
+(cid:190)(O1:jj') = min
+
+s X
+
+Ca(sjoi; ')
+
+1•i•j
+
+= min
+
+s X
+
+h`;ci2¡(O1:j ;')
+
+c ¢ –(:`[s])
+
+(3)
+
+(4)
+
+which is equivalent
+
+to solving maximum satisﬁability
+(MAX-SAT)[Jiang et al., 1995] for ¡(O1:j; '), where MAX-
+SAT asks for an s such that the weight of satisﬁed constraints
+is maximum. While the number of SSM variables is ﬁxed,
+the constraint set grows with sequence length. Fortunately, in
+practice we can signiﬁcantly reduce this set by pruning and
+merging. PRUNE(') contains members of ' that do not have
+false in the constraint’s body. MERGE(') combines logi-
+cally equivalent members of ' into one constraint by sum-
+ming weights. MAX-SAT solutions are invariant under both
+operators. Thus, we solve SSM via MAX-SAT for the smaller
+constraint ¡⁄(O1:j; ') = MERGE(PRUNE(¡(O1:j; '))).
+
+A Dual MAX-SAT Approach. MAX-SAT is NP-hard
+even for Horn constraints [Jaumard and Simeone, 1987].
+Rather than use general-purpose approximate techniques, we
+give a MAX-SAT approach that leverages our setting of
+nearly-sound Horn constraints. Let … = ¡⁄(O1:j; ') and ƒ
+be the set containing all satisﬁable subsets of …. An equiv-
+alent dual form of Equation 4 is (cid:190)(O1:jj') = COST(…) ¡
+max…02ƒ COST(…0), which asks for a maximum-cost mem-
+ber of ƒ. This motivates the following MAX-SAT ap-
+proach that searches through constraint subsets rather than
+than variable assignments. Conduct a cost-sensitive breadth-
+ﬁrst search through subsets of … for a satisﬁable subset—i.e.
+starting at … consider … subsets in order of non-increasing
+cost until ﬁnding a satisﬁable one. Any satisfying assignment
+for this set is a MAX-SAT solution provided all weights are
+non-negative. For negative weights a satisfying assignment
+for a consistent constraint set may not be a MAX-SAT solu-
+tion. Although we can always replace a negatively weighted
+constraint h`; ci by h:`; ¡ci, :` may not be horn, possibly
+making SAT hard. Hence we require non-negative weights.
+
+Since testing satisﬁability is efﬁcient for Horn constraints,
+the time required by the dual approach primarily depends on
+the number of search nodes we consider. This number is
+
+Table 1: Force-dynamic state predicates Rs (top) and observation
+predicates Ro (bottom) for our application.
+
+ATTACHED(x; y) x supports y by attachment
+GROUNDED(x)
+support of x is unknown
+CONTACTS(x; y) x supports y by contact
+
+x’s speed is s
+
+DIRECTION(x,d) x is moving in direction d
+SPEED(x,s)
+ELEVATION(x,e) x’s elevation is e
+MORPH(x,c)
+DISTANCE(x,y,d) distance between x and y is d
+¢DIST(x,y,dd)
+COMPASS(x,y,c)
+ANGLE(x,y,a)
+
+change in distance is dd
+compass direction of y to x is c
+angle between x and y is a
+
+x’s shape-change factor is c
+
+bounded by the number of subsets of … that have a cost greater
+than (cid:190)(O1:jj'), which can be exponentially large. Thus, we
+compute an approximation (cid:190)¿ to (cid:190) by ﬁrst searching through
+subsets of … for a maximum of ¿ steps. We return a solu-
+tion if one is found and otherwise return an upper-bound to
+(cid:190)(O1:jj') resulting from a greedy hill-climbing search.
+
+Though (cid:190)¿ will not be correct for all inputs, we know from
+Section 4, that it need only be a sufﬁcient approximation to
+guarantee correct sequential inference. When our constraints
+are nearly sound, (cid:190)¿ will tend to be sufﬁcient even for small
+¿ . That is, (cid:190)¿ will equal (cid:190) for critical o-sequences. Recall
+that when O1:j is a critical o-sequence it must be generated
+by a single state s. Thus, s will satisfy most constraints in
+¡⁄(O1:j; ') and our search need only remove a small number
+of constraints (the unsatisﬁed ones) to ﬁnd a satisﬁable sub-
+set. In addition, as described in the full paper, the MERGE op-
+eration tends to place high weight on the satisﬁed constraints,
+which often leads in removing unsatisﬁed constraints ﬁrst.
+6 Extending to Relational Processes
+In the spirit of knowledge-base model construction [Wellman
+et al., 1992], we extend to relational processes by compil-
+ing “relational schemas” to propositional models and use the
+ideas from previous sections.
+
+Relational Processes. A process (X ; Y; P) is relational
+when the observation and state spaces X and Y are given by
+specifying a domain set of objects D, a state-predicate set
+Rs, and an observation-feature set Fo, each having a speci-
+ﬁed number of arguments. An observationfact has the form
+“f = v”, where f is an observation feature applied to objects
+and v is a number. A statefact is a predicate from Rs applied
+to objects. See Example 1 for example facts from our video
+domain. Observations (states) are ﬁnite sets of observation
+(state) facts, representing all the facts that are true, and X (Y)
+contains all such sets. States are restricted to only involve ob-
+jects that appear in the corresponding observation. We often
+view relational states as propositional. Given a ﬁnite D 0 (cid:181) D,
+denote by Y[D0] the propositional state space over n binary
+variables, one variable for each of the n = O(jD 0jq) state
+facts involving only objects in D0, where q is the maximum
+state-predicate arity.
+Example 2.
+In our video domain we infer force-dynamic
+state sequences from videos of a hand playing with blocks.
+D contains all hands and blocks we might encounter. There
+are three force-dynamic state predicates and eight observa-
+tion features, shown in Table 1. Figure 1 depicts two distinct
+force-dynamic states. Observations are sets of observation
+facts calculated for the objects and object pairs based on the
+
+PERCEPTRON(TRN; f`1; : : : ; `vg; ¿; M )
+K ˆ 0; ~C = ~0;
+repeat M times,
+
+for-each hO; Si 2 TRN
+
+' ˆ fh`1; c1i; : : : ; h`v; cvig
+^S ˆ SSM-DP(O; (cid:190)¿
+r (¢j'); K)
+if ^S 6= S,
+
+~C ˆ [ ~C + ~V ( ^S; O) ¡ ~V (S; O)]+
+K ˆ [K + TRANS( ^S) ¡ TRANS(S)]+
+
+return h ~C; Ki
+Figure 2: Generalized Perceptron Pseudocode.
+s.t. c0
+i = max(0; ci).
+object tracker output.
+
+[ ~C]+ = ~C 0
+
+Relational Horn Constraints. A stateatomis a state pred-
+icate or the relation “6=” applied to variables. An observation
+atom has the form “(f1 r f2)”, where r 2 f=; •g, and fi is
+a number or an observation feature applied variables. A re-
+lationalHornconstraint has the form (body ! head), where
+body is a conjunction of state and/or observation atoms, and
+head is a state atom or false and may only contain vari-
+ables that appear in body. For example, (DISTANCE(x; y) •
+5) ^ (6 • Speed(y)) ! ATTACHED(x; y) is a relational
+Horn constraint for predicting object attachment based on an
+observation. A relational Horn constraint ` is a schema for
+propositional constraints. Any way of (consistently) replac-
+ing variables in ` with objects gives a (propositional) ground
+instance of `. Given a set of objects D0, GROUND(`; D0)
+contains all ground instances with only objects in D 0.
+
+Relational Cost Models. A relational simple-transition
+model is a pair h'; Ki, with transition-cost K and non-
+negatively weighted relational Horn constraints ' =
+fh`1; c1i; : : : ; h`v; cvig. Given a relational o-sequence O1:T
+with objects D0, we know that states may only involve facts
+constructed from D0, and thus we need only consider the
+propositional state space Y[D0]. To infer an s-sequence
+over Y[D0] we use the set of propositional constraints
+'p = Sh`;ci2' S`02GROUND(`;D0)h`0; ci to deﬁne an atempo-
+ral cost function Ca(sjo; 'p) as in Section 5. We then return
+the lowest-cost S1:T given by SSM-DP(O1:T ; (cid:190)¿
+r (¢j'); K),
+r (O1:jj') = (cid:190)¿ (O1:jj'p) is a relational SSM func-
+where (cid:190)¿
+tion with search bound ¿ . That is (cid:190)¿
+r is computed by compi-
+lation to a propositional SSM function (cid:190)¿ and then using our
+bounded-search dual MAX-SAT approach.
+
+A naive implementation of this approach can be expensive
+since 'p can be large. Fortunately, in practice, our relational
+representation allows us to avoid constructing most of the set.
+We use efﬁcient forward-chaining logical inference to con-
+struct ¡⁄(O1:T ; 'p), the input to MAX-SAT, without explic-
+itly constructing 'p. Space constraints preclude details.
+7 Learning a Relational STM
+We learn relational STMs by ﬁrst running the relational
+learner CLAUDIEN [De Raedt and Dehaspe, 1997] on a train-
+ing set of labeled o-sequences, acquiring “nearly sound” re-
+lational Horn constraints that are satisﬁed by the training data
+(producing 300-400 constraints for our domain). Next, using
+a new training set we jointly tune the constraint weights and
+transition-cost K using a variant of Collins’ voted percep-
+
+tron algorithm [Collins, 2002]. The algorithm extends Rosen-
+blatt’s perceptron for binary labels [Rosenblatt, 1958] to han-
+dle structured labels such as sequences, and has convergence
+and generalization properties similar to Rosenblatt’s.
+
+The algorithm requires representing cost using a lin-
+ear combination of n features, which we do as follows.
+Given O1:T and S1:T involving just objects in the ﬁ-
+nite D0, and a relational STM hfh`1; c1i; : : : ; h`v; cvig; Ki,
+the violation-count feature of `i
+is Vi(O1:T ; S1:T ) =
+P1•i•T P`02GROUND(`i;D0) –(:`0[oi][si]), i.e.
+the number
+of unsatisﬁed instances of `i. We let ~V (O1:T ; S1:T ) be the
+v-dimensional vector of violation-count features and ~C =
+[c1; : : : ; cv] is the weight vector. The transition count fea-
+ture TRANS(S1:T ) is equal to the number of state transitions
+in S1:T . These v + 1 features represent the STM cost as
+C(S1:T jO1:T ) = ~V (O1:T ; S1:T ) ¢ ~C + TRANS(S1:T ) ¢ K.
+
+The algorithm (see Figure 2) cycles through the training
+data and when an incorrect s-sequence ^S is inferred in place
+of S, the weights are adjusted to increase cost for ^S and de-
+crease cost for S. The input is a training set TRN, relational
+Horn constraints f`1; : : : ; `vg, an SSM search bound ¿ , and
+the number M of iterations. The output is the learned weights
+~C and transition cost K.
+Ideally we want this STM to al-
+low for accurate sequential inference when using the search-
+r . Unlike Collins we re-
+bounded relational SSM function (cid:190)¿
+quire non-negative weights for inference. Thus, we set a
+weight to zero if a normal perceptron update would result
+in a negative value. This variant has not yet been shown to
+possess the convergence and generalization properties of the
+unconstrained version. However, this variant of Rosenblatt’s
+perceptron has been shown to converge [Amit et al., 1989].
+8 Experimental Results
+We apply our technique to force-dynamic state inference from
+real video. The LEONARD system [Siskind, 2001] uses these
+states to recognize events, such as “a hand picked up a block”
+(see Figure 1). Recently [Fern and Givan, 2004] devel-
+oped a trainable system for this problem using the forward
+greedy merge (FGM) algorithm, which outperformed prior
+techniques. FGM also utilizes Horn constraints, but assumes
+that they are sound, rather than nearly sound. Since this is
+not true for CLAUDIEN-learned constraints, which were also
+used by FGM, that work utilized two steps to improve per-
+formance: 1) Constraint pruning yields a much smaller but
+(hopefully) “sufﬁcient” constraint set, reducing the chance of
+constraint violations. 2) Sequence-cleaningpreprocessing is
+an ad-hoc step that removes observations where constraint vi-
+olations are “detected”. See [Fern and Givan, 2004] for de-
+tails. While these steps allowed for good performance, the
+soundness assumption limits the approach’s applicability, as
+such preprocessing will not always be effective. The moti-
+vation for the work in this paper was to develop a “softened”
+more robust framework for utilizing nearly-sound constraints.
+Procedure. Our corpus of 210 videos from [Siskind, 2003]
+contains 7 event types (30 movies each) involving a hand
+playing with up to three blocks (e.g. assembling a tower).
+We use the hand-labeled training sets of size 14 (TRN-14)
+and 21 (TRN-21) from [Fern and Givan, 2004]. The remain-
+ing videos are labeled with their compressed s-sequences (the
+output of COMPRESS), which is the label we wish to predict.
+
+For each training set, we learn relational STMs for three SSM
+search bounds ¿ = 0; 100; 1000. Seven training instances are
+used by CLAUDIEN to acquire constraints and the perceptron
+algorithm is run for 100 iterations on the remaining instances.
+We evaluate each iteration’s model according to the % of test
+videos for which SSM-DP’s compressed inferred s-sequence
+is correct (using the same ¿ as for learning).
+
+We compare against FGM used with an without sequence
+cleaning and always with pruning. We also compare against a
+system that is closer to mainstream graphical modeling tech-
+niques, which uses the counting-transition model of Section
+4, and WALKMAXSAT [Jiang et al., 1995] for approximate
+inference. The model is identical to our relational STMs, us-
+ing the same CLAUDIEN-learned constraints, except that it
+has a non-simple transition structure. For sequential inference
+we construct a single large MAX-SAT problem correspond-
+ing to the transition-counting model and use WALKMAXSAT
+to ﬁnd an approximate solution. We tune the model’s weights
+using the perceptron algorithm with WALKMAXSAT (rather
+than SSM-DP) for inference.
+
+Performance Across Iterations. Table 2 shows, for each
+training set, the testing error of our learned STMs for ¿ =
+0; 100; 1000 (shown as SSM-DP(¿ )), over the ﬁrst eight per-
+ceptron iterations. There is always a rapid improvement after
+iteration one, followed by a period of ﬂuctuating or constant
+performance. The ﬂuctuation continues out to iteration 100
+(not shown), but never improves over the best performance
+shown. In practice, one could use cross-validation to select a
+good model, or consider “weight averaging” [Collins, 2002].
+Note that the best performance on the smaller training set
+TRN-14 is superior to TRN-21. Our explanation for this is
+that by using relatively small training sets, the results can be
+signiﬁcantly affected by a small number of particularly noisy
+movies (presumably in TRN-21). Experiments not shown,
+provide evidence for this by training on subsets of TRN-21.1
+Bounding Search. The search bound ¿ = 0 means that
+SSM is (approximately) solved via hill-climbing. Surpris-
+ingly we can learn weights for which hill-climbing performs
+well.
+Increasing the search bound improves performance
+with respect to the best model across iterations, particularly
+for TRN-14. The last column shows the frames processed
+per second when inferring states for our corpus.
+Inference
+time apparently does not increase linearly with ¿ , indicating
+that the SSM search typically end much before reaching the
+bound. Increasing ¿ to 10,000, doubles inference time, but
+neither improves nor hurts results.
+
+Other Techniques. We signiﬁcantly outperform WALK-
+MAXSAT (further iterations did not help), which we allowed
+a generous search time, using search cutoff 106 with 103 ran-
+dom restarts (other settings did not improve). Further exper-
+iments suggest that WALKMAXSAT does not scale well for
+our problems. Using learned STM weights for the counting-
+transition model, WALKMAXSAT reliably infers correct s-
+sequences for short videos, but is very poor for long videos.
+WALKMAXSAT gave equally poor results when used to learn
+
+1Runtime of CLAUDIEN (interpreted Prolog) on TRN-21 was
+about six days. Thus, it was not feasible to average results across
+many training sets. In another full experiment (21 movies), we ob-
+served similar (slightly better) performance for SSM-DP, and similar
+relative performance to the other systems.
+
+Table 2: % error on test movies across training iterations. The last column gives frames processed per second (FPS) by the best
+model in each row on our video corpus.
+
+TRN-14 (Iteration)
+
+SSM-DP(0)
+SSM-DP(100)
+SSM-DP(1000)
+WALKMAXSAT
+FGM = FGM+SC
+
+7
+
+8
+
+1
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+94 24 3.2 2.1 2.1 2.6 2.1 2.6 94 6.3 6.9 5.8 4.8 12 17 3.7 15
+93 32 2.6 2.6 2.1 2.1 2.1 2.1 93 3.2 3.7 3.7 3.2 10 21 8.5 14
+93 31 4.2 1.6 1.1 1.1 1.1 1.1 93 3.2 3.7 3.7 3.2 10 21 8.5
+8
+96 46 51 54 50 43 50 58 95 47 50 60 49 50 45 52 1.4
+29
+
+15 = 3.2
+
+17 = 6.3
+
+TRN-21 (Iteration)
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+FPS
+
+STMs rather than counting-transition models. This suggests
+the poor performance is primarily due to the ineffectiveness
+of this general-purpose inference technique for our models.
+We conjecture that other approximate techniques such as
+(loopy) belief propagation and Gibbs sampling will also yield
+inferior performance. Indeed, Gibbs sampling is very similar
+to WALKMAXSAT. Evaluating this conjecture is future work.
+FGM without sequence cleaning (shown as FGM) is an or-
+der of magnitude worse than STMs (which never use clean-
+ing). We signiﬁcantly improve on FGM with sequence clean-
+ing (FGM+SC) on TRN-14 and yield equal performance on
+TRN-21. FGM is faster, close to frame rate. A reimplemen-
+tation of our LISP prototype will likely achieve frame rate.
+
+9 Related Work
+Segment models [Ostendorf et al., 1996] subsume our STM
+formulation. We are not aware of prior work that has lever-
+aged or noted the SSM reduction for large state spaces. Per-
+haps this is because prior segment modeling work typically
+utilizes non-simple transition structure (perhaps sometimes
+unnecessarily) and to our knowledge has not been applied to
+large state spaces.
+
+Our “model schema” approach for handling relational data
+is now standard in probabilistic modeling [De Raedt and Ker-
+sting, 2004]. Most closely related are relational Markov net-
+works (RMNs) [Taskar et al., 2002]. A relational STM can
+be viewed as deﬁning a log-linear conditional RMN, where
+the RMN “clique feature templates” correspond to relational
+Horn constraints and a transition template. RMNs are very
+general and thus the existing techniques do not fully exploit
+the structure of relational STMs. Instead RMN-like propos-
+als rely on general-purpose approximate inference (e.g. be-
+lief propagation), with unclear practical implications. Like-
+wise dynamic probabilistic relational models [Sanghai et al.,
+2003] provide a generic schema-based approach specialized
+to relational sequence data. Again the generality precludes
+leveraging the STM structure.
+
+Acknowledgments
+This work was supported in part by NSF grants 9977981-IIS and
+0093100-IIS.
+
+References
+[Amit et al., 1989] D. Amit, K. Wong, and C. Campbell. Percep-
+tron learning with sign-constrained weights. Journal of Physics
+A: Mathematical and General, 22:2039–2045, 1989.
+
+[Collins, 2002] M. Collins. Discriminative training methods for
+hidden Markov models: Theory and experiments with the per-
+ceptron algorithm. In Conf. on Empirical Methods in NLP, 2002.
+
+[De Raedt and Dehaspe, 1997] L. De Raedt and L. Dehaspe.
+
+Clausal discovery. Machine Learning, 26:99–146, 1997.
+
+[De Raedt and Kersting, 2004] L. De Raedt and K. Kersting. Prob-
+
+abilistic logic learning. ACM-SIGKDD Explor., 5, 2004.
+
+[Dechter, 1999] R. Dechter. Bucket elimination: A unifying frame-
+
+work for reasoning. AIJ, 113(1-2), 1999.
+
+[Fern and Givan, 2004] A. Fern and R. Givan. Relational sequential
+
+inference with reliable observations. In ICML, 2004.
+
+[Fern, 2004] Alan Fern. Learning Models and Formulas of a Tem-
+poral Event Logic. PhD thesis, Purdue University, August 2004.
+[Forney, 1973] G. Forney. The Viterbi algorithm. Proceedings of
+
+the IEEE, 61(3):268–278, 1973.
+
+[Jaumard and Simeone, 1987] B. Jaumard and B. Simeone. On the
+complexity of the maximum satisﬁability problem for Horn for-
+mulas. Information Processing Letters, 26:1–4, 1987.
+
+[Jiang et al., 1995] Y. Jiang, H. Kautz, and B. Selman. Solving
+problems with hard and soft constraints using a stochastic algo-
+rithm for MAX-SAT. In Joint Workshop on AI and OR, 1995.
+
+[Lafferty et al., 2001] J. Lafferty, A. McCallum, and F. Pereira.
+Conditional random ﬁelds: Probabilistic models for segmenting
+and labeling sequence data. In ICML, pages 282–289, 2001.
+
+[Murphy, 2002] Kevin Murphy. Dynamic Bayesian Networks: Rep-
+resentation, Inference and Learning. PhD thesis, UC Berkeley,
+Computer Science, July 2002.
+
+[Ostendorf et al., 1996] M. Ostendorf, V. Digalakis, and O. Kim-
+ball. From HMMs to segment models: a uniﬁed view of stochas-
+tic modeling for speech recognition. IEEE Trans. on Speech and
+Audio Proc., 1996.
+
+[Papadimitriou, 1995] Christos H. Papadimitriou. Computational
+
+Complexity. Addison-Wesley Publishing, 1995.
+
+[Rosenblatt, 1958] F. Rosenblatt. The Perceptron: A probabilistic
+model for information storage and organization in the brain. Psy-
+chological Review, 65:386–408, 1958.
+
+[Sanghai et al., 2003] S. Sanghai, P. Domingos, and D. Weld. Dy-
+
+namic probabilistic relational models. In IJCAI, 2003.
+
+[Siskind, 2001] J. Siskind. Grounding lexical semantics of verbs in
+visual perception using force dynamics and event logic. JAIR,
+15:31–90, 2001.
+
+[Siskind, 2003] J. Siskind. Reconstructing force-dynamic models
+
+from video sequences. AIJ, 151(1–2):91–154, 2003.
+
+[Taskar et al., 2002] B. Taskar, P. Abbeel, and D. Koller. Discrimi-
+
+native probabilistic models for relational data. In UAI, 2002.
+
+[Veksler, 1999] O. Veksler. Efﬁcient Graph-based Energy Mini-
+mization Methods in Computer Vision. PhD thesis, Cornell Uni-
+versity, Computer Science, July 1999.
+
+[Wellman et al., 1992] M. Wellman, J. Breese, and R. Goldman.
+From knowledge bases to decision models. Knowledge Engi-
+neering Review, 5, 1992.
+
+
