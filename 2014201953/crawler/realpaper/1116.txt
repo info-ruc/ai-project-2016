@@ -1,0 +1,1602 @@
+Compiling Bayesian Networks Using Variable Elimination ∗
+
+Mark Chavira and Adnan Darwiche
+
+Computer Science Department
+
+University of California, Los Angeles
+Los Angeles, CA 90095-1596
+{chavira,darwiche}@cs.ucla.edu
+
+Abstract
+
+Compiling Bayesian networks has proven an ef-
+fective approach for inference that can utilize both
+global and local network structure.
+In this pa-
+per, we deﬁne a new method of compiling based
+on variable elimination (VE) and Algebraic Deci-
+sion Diagrams (ADDs). The approach is impor-
+tant for the following reasons. First, it exploits lo-
+cal structure much more effectively than previous
+techniques based on VE. Second, the approach al-
+lows any of the many VE variants to compute an-
+swers to multiple queries simultaneously. Third,
+the approach makes a large body of research into
+more structured representations of factors relevant
+in many more circumstances than it has been pre-
+viously. Finally, experimental results demonstrate
+that VE can exploit local structure as effectively
+as state–of–the–art algorithms based on condition-
+ing on the networks considered, and can sometimes
+lead to much faster compilation times.
+
+Introduction
+
+1
+Variable elimination [Zhang and Poole, 1996; Dechter, 1996]
+(VE) is a well–known algorithm for answering probabilistic
+queries with respect to a Bayesian network. The algorithm
+runs in time and space exponential in the treewidth of the net-
+work. Advantages of VE include its generality and simplicity.
+In this paper, we consider two aspects of VE. The ﬁrst is how
+to effectively utilize local structure in the form of determin-
+ism [Jensen and Andersen, 1990] and context–speciﬁc inde-
+pendence [Boutilier et al., 1996] to perform inference more
+efﬁciently. The second consideration is how to answer mul-
+tiple queries simultaneously. For example, given particular
+evidence, we would like to be able to simultaneously com-
+pute probability of evidence and a posterior marginal on each
+network variable. And we would like to be able to repeat this
+process for many different evidence sets.
+
+Many proposals have been extended to utilize local struc-
+ture in the context of VE. Although the standard version of the
+algorithm uses tables to represent factors, the algorithm can
+
+∗
+
+This work has been partially supported by Air Force grant
+
+#FA9550-05-1-0075-P00002 and JPL/NASA grant #1272258.
+
+sometimes run more efﬁciently by using a more structured
+representation like ADDs [R.I. Bahar et al., 1993], afﬁne
+ADDs [Sanner and McAllester, 2005], representations com-
+posed of confactors [Poole and Zhang, 2003], sparse repre-
+sentations [Larkin and Dechter, 2003], and a collection of
+others. Such a representation makes use of local structure
+to skip certain arithmetic operations and to represent factors
+more compactly. However, the effectiveness of these ap-
+proaches has been sometimes limited in practice, because the
+overhead they incur may very well outweigh any gains.
+
+There has been less work to answer multiple queries si-
+multaneously using VE as is done by the jointree algorithm
+[Jensen et al., 1990; Lauritzen and Spiegelhalter, 1988]; but
+see [Cozman, 2000] for an exception. Theoretical results
+in [Darwiche, 2000] demonstrate that by keeping a trace,
+one can use VE as a basis for compilation. This algorithm,
+which we will refer to as tabular compilation, will compile
+a Bayesian network ofﬂine into an arithmetic circuit (AC).
+Tabular compilation runs in time and space exponential in
+treewidth; the resulting AC has size exponential in treewidth;
+and once ofﬂine compilation is complete, the AC can be used
+online to answer many queries simultaneously in time lin-
+ear in its size. However, the applicability of this approach
+is limited, because tabular compilation provides no practical
+advantage over jointree.
+
+An important observation is that when compiling using
+VE, we need not use tables, but can instead use one of the
+more structured representations of factors. This observation
+is seemingly innocent, but it has two critical implications.
+First, the usual cost incurred when using structured repre-
+sentations gets pushed into the ofﬂine phase, where it can be
+afforded. Second, the usual advantage realized when using
+more structured representations means that the size of the re-
+sulting AC will not necessarily be exponential in treewidth.
+The smaller AC translates directly into more efﬁcient online
+inference, where efﬁciency matters most. We see that the pro-
+posed approach is important for four key reasons. First, it
+exploits local structure much more effectively than previous
+techniques based on VE. Second, the approach allows any of
+the many VE variants to compute answers to multiple queries
+simultaneously. Third, the approach makes a large body of
+research into more structured representations of factors rele-
+vant in many more circumstances than it has been previously.
+Finally, experimental results demonstrate that on the consid-
+
+IJCAI-07
+
+2443
+
+ered networks, VE can exploit local structure as effectively as
+state–of–the–art algorithms based on conditioning as applied
+to a logical encoding of the networks, and can sometimes lead
+to much faster compilation times.
+
+To demonstrate these ideas, we propose a new method
+of compiling based on VE and algebraic decision diagrams
+(ADDs). We will refer to this method of compiling as ADD
+compilation.
+It is well known that ADDs can represent
+the initial conditional probability distributions (factors) of a
+Bayesian network more compactly than tables. However, it is
+not clear whether ADDs will retain this advantage when pro-
+ducing intermediate factors during the elimination process,
+especially in the process of compilation which involves no
+evidence. Note that the more evidence we have, the smaller
+the ADDs for intermediate factors.
+
+Experimental results will demonstrate several important
+points with respect to ADD compilation. The ﬁrst point deals
+with AC sizes. ADD elimination (no compilation) can out-
+perform tabular elimination (no compilation) when there are
+massive amounts of local structure, but can dramatically un-
+derperform tabular elimination otherwise. However, ADD
+compilation produces ACs that are much smaller than those
+produced by tabular compilation, even in many cases where
+there are lesser amounts of local structure. Second, because
+of the smaller AC size, online inference time is capable of
+outperforming jointree by orders of magnitude. Finally, ADD
+compilation can be much faster in some cases than a state–of–
+the–art compilation technique, which reduces the problem to
+logical inference [Darwiche, 2002].
+
+This paper is organized as follows. We begin in Section 2
+by reviewing VE, elimination using ADDs, and compilation
+into ACs. Next, Section 3 shows how a trace can be kept dur-
+ing elimination employing ADDs to compile a network into
+an AC. We then discuss in Section 4 implications for com-
+piling using structured representations of factors. We present
+experimental results in Section 5 and conclude in Section 6.
+
+2 Background
+In this section, we brieﬂy review VE, elimination using
+ADDs, and compilation into ACs.
+
+2.1 Variable Elimination
+Variable elimination is a standard algorithm for computing
+probability of evidence with respect to a given a Bayesian
+network [Zhang and Poole, 1996; Dechter, 1996]. For space
+reasons, we mention only a few points with regard to this al-
+gorithm. First, the algorithm acts on a set of factors. Each
+factor involves a set of variables and maps instantiations of
+those variables to real–numbers. The initial set of factors
+are the network’s conditional probability distributions (usu-
+ally tables). Elimination is driven by an ordering on the vari-
+ables called an elimination order. During the algorithm, two
+factor operations are performed many times: factors are mul-
+tiplied and a variable is summed out of a factor. These factor
+operations reduce to performing many multiplication and ad-
+dition operations on real–numbers. Although tables are the
+most common representation for factors, any representation
+that supports multiplication and summing–out can be used.
+
+X
+
+Z
+
+Y
+
+Z
+
+.1 .9
+
+.5
+
+X Y
+x1
+y1
+y1
+x1
+y2
+x1
+x1
+y2
+y1
+x2
+y1
+x2
+x2
+y2
+y2
+x2
+
+Z f(.)
+0.9
+z1
+0.1
+z2
+0.9
+z1
+0.1
+z2
+0.1
+z1
+0.9
+z2
+0.5
+z1
+0.5
+z2
+
+Figure 1: An ADD over variables X, Y, Z and the corre-
+sponding table it represents. Dotted edges point to low–
+children and solid edges point to high–children.
+
+2.2 Elimination using ADDs
+An ADD is a graph representation of a function that maps in-
+stantiations of Boolean variables to real–numbers [R.I. Bahar
+et al., 1993]. Figure 1 depicts an ADD and the corresponding
+table (function) it represents. In the worst case, an ADD has
+the same space complexity as a table representing the same
+function. Moreover, the factor operations of multiplication
+and summing–out are implemented on ADDs in polynomial
+time. There are four points that are important with respect
+to ADDs. First, because multiplication and summing–out are
+available for ADDs, we can use ADDs during VE instead of
+tables. Second, because ADDs can leverage local structure,
+an ADD can be much smaller than the corresponding table.
+Third, for the same reason, when applied to ADDs, the fac-
+tor operations of multiplication and summing–out can result
+in far fewer arithmetic operations on numbers than the same
+factor operations acting on tables. Finally, the constants in-
+volved in using ADDs are much larger than those involved
+in using tables, so much so that elimination using ADDs will
+often take much longer than elimination using tables, even
+when the ADD performs fewer arithmetic operations on num-
+bers, and so much so that we may run out of memory when
+using ADDs, even in cases where tabular elimination does
+not. We will discuss later how we can deal with many–valued
+variables within an ADD.
+2.3 Compiling into ACs
+The notion of using arithmetic circuits (ACs) to perform
+probabilistic inference was introduced in [Darwiche, 2000;
+2003]. With each Bayesian network, we associate a cor-
+responding multi-linear function (MLF) that computes the
+probability of evidence. For example, the network in Fig-
+ure 2—in which variables A and B are Boolean, and C has
+three values—induces the following MLF:
+
+λa1λb1λc1θa1θb1θc1|a1,b1 + λa1λb1λc2θa1θb1θc2|a1,b1+
+. . .
+λa2λb2λc2θa2θb2θc2|a2,b2 + λa2λb2λc3θa2θb2θc3|a2,b2
+The terms in the MLF are in one-to-one correspondence
+with the rows of the network’s joint distribution. Assume
+that all indicator variables λx have value 1 and all parameter
+variables θx|u have value Pr(x|u). Each term will then be a
+
+IJCAI-07
+
+2444
+
+A
+
+B
+
+Compile
+
+*
+
++
+
+
+
+a
+
+1
+
+*
+
+
+
+a
+
+2
+
+
+
+a
+
+1
+
+*
+
++
+
+*
+*
+
+*
+
++
+
+*
+
+C
+
+
+
+c
+
+
+
+c
+
+|a
+
+b
+
+1
+
+1
+
+2
+
++
+
+*
+
+*
+
+*
+
+
+
+b
+
+1
+
+
+
+b
+
+1
+
+*
+
+*
+
+*
+
+
+
+b
+
+2
+
+
+
+a
+
+2
+
++
+
++
+
+
+
+b
+
+2
+
+*
+
+*
+
+*
+
++
+
+*
+
+*
+
+*
+
+*
+
+|a
+
+b
+
+1
+
+1
+
+1
+
+
+
+c
+
+|a
+
+b
+
+1
+
+2
+
+2
+
+
+
+c
+
+|a
+
+b
+
+1
+
+1
+
+3
+
+
+
+c
+
+|a
+
+b
+
+1
+
+2
+
+1
+
+
+
+c
+
+2
+
+
+
+c
+
+1
+
+
+
+c
+
+
+
+c
+
+|a
+
+b
+
+1
+
+2
+
+3
+
+
+
+c
+
+|a
+
+b
+
+2
+
+1
+
+2
+
+
+
+c
+
+|a
+
+b
+
+3
+
+2
+
+1
+
+
+
+c
+
+3
+
+|a
+
+b
+
+2
+
+1
+
+1
+
+
+
+c
+
+|a
+
+b
+
+2
+
+2
+
+2
+
+
+
+c
+
+|a
+
+b
+
+2
+
+2
+
+3
+
+
+
+c
+
+|a
+
+b
+
+2
+
+2
+
+1
+
+Figure 2: A Bayesian network and a corresponding AC.
+
+product of probabilities which evaluates to the probability of
+the corresponding row from the joint. The MLF will add all
+probabilities from the joint, for a sum of 1.0. To compute the
+probability Pr(e) of evidence e, we need a way to exclude
+certain terms from the sum. This removal of terms is accom-
+plished by carefully setting certain indicators to 0 instead of
+1, according to the evidence.
+
+The fact that a network’s MLF computes the probability of
+evidence is interesting, but the network MLF has exponential
+size. However, if we can factor the MLF into something small
+enough to ﬁt within memory, then we can compute Pr(e) in
+time that is linear in the size of the factorization. The factor-
+ization will take the form of an AC, which is a rooted DAG
+(directed acyclic graph), where an internal node represents
+the sum or product of its children, and a leaf represents a con-
+stant or variable. In this context, those variables will be indi-
+cator and parameter variables. An example AC is depicted in
+Figure 2. We refer to this process of producing an AC from a
+network as compiling the network.
+
+Once we have an AC for a network, we can compute Pr(e)
+by assigning appropriate values to leaves and then comput-
+ing a value for each internal node in bottom-up fashion. The
+value for the root is then the answer to the query. We can
+also compute a posterior marginal for each variable in the
+network by performing a second downward pass [Darwiche,
+2003]. Hence, many queries can be computed simultaneously
+in time linear in the size of the AC. Another main point is that
+this process may then be repeated for as many evidence sets
+as desired, without recompiling.
+
+3 ADD Compilation
+We have seen how ADDs can be used in place of tables during
+VE and how compilation produces an AC from a network. In
+this section, we combine the two methods to compile an AC
+using a VE algorithm that employs ADDs to represent factors.
+The core technique behind our approach is to work with
+ADDs whose sinks point to ACs (their roots) instead of point-
+ing to constants. We will refer to these ADDs as symbolic
+ADDs. Given a Bayesian network, we convert each condi-
+tional probability table (CPT) into a symbolic ADD called
+a CPT ADD. To do so, we ﬁrst convert the CPT into a nor-
+mal ADD and then replace each constant n within a sink by a
+pointer to an AC consisting of a single node labeled with con-
+
+return cache(α1, α2)
+α ← new ADD leaf node
+
+Algorithm 1 M ultiply(α1 : SymADD, α2 : SymADD):
+returns SymADD.
+1: swap α1 and α2 if P os(α1) > P os(α2)
+2: if cache(α1, α2) (cid:2)= null then
+3:
+4: else if α1 and α2 are leaf nodes then
+5:
+6: Ac(α) ← new AC ∗ node with children Ac(α1) and Ac(α2)
+7: else if P os(α1) = P os(α2) then
+α ← new internal node
+8:
+V ar(α) ← V ar(α1)
+9:
+Lo(α) ← M ultiply(Lo(α1), Lo(α2))
+10:
+11: Hi(α) ← M ultiply(Hi(α1), Hi(α2))
+12: else
+α ← new internal node
+13:
+V ar(α) ← V ar(α1)
+14:
+Lo(α) ← M ultiply(Lo(α1), α2)
+15:
+16: Hi(α) ← M ultiply(Hi(α1), α2)
+17: end if
+18: cache(α1, α2) ← α
+19: return α
+
+stant n. For each variable X in the network, we also construct
+an indicator ADD, which acts as a placeholder for evidence
+to be entered during the online inference phase. Assuming
+that variable X is binary with values x1 and x2, the indicator
+ADD for X will consist of one internal node, labeled with
+variable X, and having two sink children. The child corre-
+sponding to x1(x2) will be a sink labeled with a pointer to a
+single–node AC that is itself labeled with indicator λx1(λx2).
+Figure 3(a) shows a simple Bayesian network and Figure 3(b)
+shows the corresponding symbolic ADDs.
+
+Working with symbolic ADDs requires a modiﬁcation to
+the standard ADD operations, but in a minimal way. We ﬁrst
+point out that ADD operations are typically implemented re-
+cursively, reducing an operation over two ADDs into opera-
+tions over smaller ADDs, until we reach boundary conditions:
+ADDs that correspond to sinks. It is these boundary condi-
+tions that need to be modiﬁed in order to produce symbolic
+ADD operations. For example, Algorithm 1 speciﬁes how
+to multiply two symbolic ADDs. When applied to an internal
+ADD node, the functions P os, Lo, and Hi return the position
+of the variable labeling the node in the ADD variable order,
+the low–child (corresponding to f alse), and the high–child
+(corresponding to true), respectively. When applied to an
+ADD sink, the functions P os and Ac return ∞ and a pointer
+to the AC that labels the sink, respectively. Finally, cache is
+the standard computed table used in ADD operations. The
+main observation is that the algorithm is identical to that for
+multiplying normal ADDs (see [R.I. Bahar et al., 1993]), ex-
+cept for Line 6. When multiplying normal ADDs, this line
+would label the newly created sink with a constant that is the
+product of the constants labeling α1 and α2. When multi-
+plying symbolic ADDs, we instead label the new sink with a
+pointer to an AC that represents an analogous multiplication.
+This AC will consist of a new multiply node having children
+that are the ACs pointed to by α1 and α2. The algorithm for
+summing–out a variable from a symbolic ADD is constructed
+from the algorithm for summing–out a variable from a normal
+
+IJCAI-07
+
+2445
+
+X
+
+X
+
+Y
+
+X
+
+Y
+
+X
+
+Y
+
+X Y
+y1
+x1
+y2
+x1
+y1
+x2
+x2
+y2
+
+Pr(y|x)
+
+0.0
+1.0
+0.5
+0.5
+
+X Pr(x)
+0.1
+x1
+0.9
+x2
+
+.1
+
+.9
+
+0
+
+1
+
+.5
+
+
+
+x1
+
+
+
+x2
+
+
+
+y1
+
+
+
+y2
+
+CPT ADD
+
+CPT ADD
+
+Indicator
+
+Indicator
+
+for X
+
+for Y
+
+ADD for X
+
+ADD for Y
+
+(a)
+
+(b)
+
+Figure 3: (a) A simple Bayesian network and (b) symbolic ADDs representing the network.
+
+Algorithm 2 Compile(N : Bayesian Network): returns AC.
+1: Ψ ← the set of indicator and CPT ADDs for N
+2: π ← ordering on the variables (π(i) is ith variable in order)
+3: for i in 1 . . . number of variables in N do
+4:
+5: Ψ ← (Ψ − P ) ∪ {Σπ(i)
+6: end for
+7: β ← (cid:2)
+α
+α∈Ψ
+8: return Ac(β)
+
+P ← {α ∈ Ψ : α mentions variable π(i)}
+
+α}
+
+α∈P
+
+(cid:2)
+
+ADD in an analogous way, by modifying the code that labels
+newly created sinks. In this case, instead of labeling with a
+constant representing a sum, we instead label with a pointer
+to an new addition node.
+
+We now describe the compilation process in Algorithm 2.
+Line 1 begins by representing the Bayesian network using
+symbolic ADDs as described previously. We then gener-
+ate an ordering on the variables using a minﬁll heuristic on
+Line 2. Lines 3–7 perform variable elimination in the stan-
+dard way, using the multiply and sum–out operations of sym-
+bolic ADDs. Afterward, we are left with a trivial symbolic
+ADD: a sink labeled with a pointer to an AC. This AC is a
+factorization of the network MLF and a compilation of the
+given network! Each internal node of the AC is labeled with
+a multiplication or addition operation, and each leaf is labeled
+with a constant or an indicator variable. The AC represents a
+history or trace of all arithmetic operations performed during
+the elimination process.
+
+For the above procedure to scale and produce the results
+we report later, it has to be augmented by a number of key
+techniques that we describe next.
+
+ADD variable order: ADDs require a ﬁxed variable order
+which is independent of the elimination order we have dis-
+cussed. For that, we use the reverse order used in the elimina-
+tion process. This ensures that when a variable is eliminated
+from an ADD, it appears at the bottom of the ADD. The sum–
+out operation on ADDs is known to be much more efﬁcient
+when the summed out variable appears at the bottom.
+
+Unique table: We maintain a cache, called a unique table
+in the ADD literature, to ensure that we do not generate re-
+
+dundant AC nodes. Each entry is an AC node that has been
+constructed, indexed the node’s label and its children. Before
+we ever construct a new AC node, we ﬁrst consult the unique
+table to see if a similar node has been constructed before. If
+this is the case, we simply point to the existing node instead
+of constructing a duplicate node. As is standard practice, we
+also use a unique table for the ADD nodes.
+
+Multi–valued variables: When a network variable X has
+more than two values, we deﬁne its ADD variables as follows.
+For each value xi of X, we create ADD variable Vxi. We
+translate instantiations of X in the straightforward way. For
+example, we translate X = x2 as Vx2 = true and Vxi
+=
+false for i (cid:4)= 2. Moreover, we construct an ADD over Vxi
+which enforces the constraint that exactly one Vxi can be true.
+We multiply this ADD into every CPT and indicator ADD
+that mentions X. Finally, when eliminating (summing–out) a
+multi–valued variable X, we sum out all corresponding ADD
+variables Vxi simultaneously.
+
+Converting a CPT into an ADD: The straightforward
+way to construct the ADD of a CPT is to construct an ADD
+for each row of the CPT and then add the resulting ADDs.
+This method was extremely inefﬁcient for large CPTs (over a
+thousand parameters). Instead, we construct a tree–structured
+ADD whose terminals correspond to the CPT rows, and then
+use the standard reduce operation of ADDs to produce a DAG
+structure.
+
+Simpliﬁcations: In certain cases, simpliﬁcations are pos-
+sible. For example, when multiplying two ADD nodes, if one
+of the nodes α is a sink labeled with a pointer to an AC node
+which which is itself labeled constant 0, then we can simply
+return α without doing more work. Similar simpliﬁcations
+exist for constant 1 and for the summing–out operation.
+
+Figure 4 depicts the elimination process when applied to
+the symbolic ADDs of Figure 3(b) using elimination order
+Y, X. The ﬁrst step is to multiply the set of symbolic ADDs
+involving Y , which consists of Y ’s CPT ADD and Y ’s indi-
+cator ADD. Figure 4(a) shows the result. Observe that each
+ADD sink points to an AC that represents the multiplication
+of two ACs, one pointed to by a sink from Y ’s CPT ADD and
+one pointed to by a sink from Y ’s indicator ADD. Also ob-
+serve that when one of the ACs involved in the multiplication
+
+IJCAI-07
+
+2446
+
+is a sink labeled with 0 or 1, the resulting AC is simpliﬁed.
+Figure 4(b) next shows the result of summing–out Y from the
+symbolic ADD in Figure 4(a). Here, each ADD node labeled
+with Y and its children have been replaced with a sink which
+points to an addition node. A simpliﬁcation has also occurred.
+Figure 4(c) shows the result of multiplying symbolic ADDs
+involving variable X in two steps: ﬁrst Figure 4(b) by X’s
+indicator ADD and then the result by X’s CPT ADD. Finally,
+Figure 4(d) shows the result of summing–out X from Fig-
+ure 4(c). At this point, since there is only one remaining sym-
+bolic ADD, we have our compilation.
+
+Implications
+
+4
+There has been much research into using alternatives to tabu-
+lar representations of factors in VE. The motivation for such
+research is that tabular elimination makes use only of global
+network structure (its topology). It may therefore miss oppor-
+tunities afforded by local structure to make inference more ef-
+ﬁcient. Structured representations of factors typically exploit
+local structure to lessen the space requirements required for
+inference and to skip arithmetic operations on numbers (mul-
+tiplications and additions) required for inference.
+In some
+cases, structured representations of factors have been success-
+ful in performing inference when tabular elimination runs out
+of memory, and in some cases, structured representations al-
+low for faster inference than tabular elimination. However,
+the time and space overhead involved in using more struc-
+tured representations of factors may very well outweigh the
+beneﬁts. This is particularly true when there are not exces-
+sive amounts of local structure present in the network. Ta-
+ble 1 demonstrates the performance of elimination (no com-
+pilation) using both tables and ADDs applied to the set of net-
+works we will be considering later in the paper. All ADD op-
+erations were performed using the publicly available CUDD
+ADD package (http://vlsi.colorado.edu/∼fabio/CUDD). We
+see that in only two cases does ADD elimination outperform
+tabular elimination. Both of the networks involved, bm-5-
+3 and mm-3-8-3, contain massive amounts of determinism.
+In the remaining cases, ADD elimination is actually slower
+than tabular elimination, often by an order of magnitude or
+more. The large number of examples where structured repre-
+sentations of factors are slower than tabular elimination have
+limited their applicability.
+
+The main observation behind this paper is that even when
+elimination using a more structured representation of factors
+is slower than tabular elimination, structured representations
+become very powerful in the context of compilation. Compi-
+lation is an ofﬂine process, and so extra time can be afforded.
+In fact, the combination of structured representations with
+compilation is ideal, since the very purpose of compilation is
+to spend time ofﬂine in an effort to identify opportunities for
+savings that can be used repeatedly during online inference.
+Hence, in the context of compilation, the disadvantages of
+using structured representations are much less severe (virtu-
+ally disappearing) and the advantages are retained.1 Although
+
+1Note that the use of more structured representations of factors
+is usually asymptotically no worse than the use of tabular represen-
+tations, which is particularly true for ADDs.
+
+Network
+alarm
+barley
+bm-5-3
+diabetes
+hailﬁnder
+link
+mm-3-8-3
+mildew
+munin1
+munin2
+munin3
+munin4
+pathﬁnder
+pigs
+st-3-2
+tcc4f
+water
+
+Tabular
+Time (ms)
+31
+307
+4,892
+949
+48
+1,688
+2,166
+72
+155
+204
+350
+406
+51
+69
+186
+29
+76
+
+ADD
+Time (ms)
+360
+14,049
+658
+33,220
+515
+2,658
+843
+92,602
+1,255
+3,170
+5,049
+4,361
+5,213
+597
+362
+153
+1,015
+
+Improvement
+0.086
+0.022
+7.435
+0.029
+0.093
+0.635
+2.569
+0.001
+0.124
+0.064
+0.069
+0.093
+0.010
+0.116
+0.514
+0.190
+0.075
+
+Table 1: Time to perform VE (no compilation) using tables
+and using ADDs.
+
+overhead is incurred during the ofﬂine phase, each arithmetic
+operation saved makes the size of the resulting AC smaller,
+yielding more efﬁcient online inference. These observations
+make research into structured representations of factors ap-
+plicable in many more circumstances than it has been pre-
+viously. Another major advantage of adding compilation to
+elimination is that one can compute online answers to many
+queries simultaneously and very quickly as is done by the
+jointree algorithm; see [Darwiche, 2003] for details.
+
+5 Experimental Results
+In this section, we present experimental results of applying
+ADD compilation and compare ADD compilation to tabu-
+lar compilation, Ace compilation, and jointree. All ADD
+operations were performed using the CUDD ADD package
+(http://vlsi.colorado.edu/∼fabio/CUDD), modiﬁed to work
+with symbolic ADDs. Ace (http://reasoning.cs.ucla.edu/ace)
+is a state–of–the–art compiler that encodes Bayesian net-
+works as logical knowledge bases and then applies condi-
+tioning to the result. Ace has been shown to be extremely
+effective on networks having large amounts of local structure
+[Chavira et al., May 2006; 2005], able to compile many net-
+works with treewidths in excess of one–hundred. Ace was
+also shown in [Chavira and Darwiche, 2005] to perform on-
+line inference orders of magnitude more efﬁciently than join-
+tree when applied to networks having treewidth small enough
+for jointree to work and having lesser amounts of local struc-
+ture. On these networks, Ace online inference is very efﬁ-
+cient, but some compile times are in excess of one thousand
+seconds. The networks with which we experimented are a su-
+perset of these networks from [Chavira and Darwiche, 2005].
+Experiments ran on a 2GHz Core Duo processor with 2GB
+of memory, using the networks in Table 2.2 To make the
+experiments as fair as possible, for each network, we ﬁrst
+
+2Because Ace was not available for the test platform, Ace compi-
+lation was carried out on a 1.6GHz Pentium M with 2GB of memory.
+
+IJCAI-07
+
+2447
+
+X
+
+X
+
+X
+
+Y
+
+Y
+
++
+
+*
+
+*
+
+*
+
+*
+
+0
+
+
+
+y2
+
+.5
+
+
+
+y1
+
+(a)
+
+
+
+y1
+
+.5
+
+
+
+y2
+
+(b)
+
++
+
+*
+
+*
+
+.1
+
+
+
+x1
+
+*
+
+*
+
+*
+
+*
+
+*
+
+*
+
+.9
+
+.9
+
+.1
+
++
+
+
+
+x2
+
+
+
+x1
+
++
+
+
+
+x2
+
+*
+
+*
+
+*
+
+*
+
+
+
+y1
+
+.5
+
+
+
+y2
+
+
+
+y1
+
+.5
+
+
+
+y2
+
+(c)
+
+(d)
+
+Figure 4: Symbolic ADDs produced after (a) multiplying factors involving Y , (b) summing–out Y , (c) multiplying factors
+involving X, and (d) summing–out X.
+
+generated an elimination order π, and all experiments were
+performed with respect to π. The second column in Ta-
+ble 2 shows the maximum cluster size of a jointree gener-
+ated from π, which gives an indication of difﬁculty with re-
+spect to structure–based methods. We compiled each network
+using jointree, Ace 1.2, ADD VE, and tabular VE, in each
+case driven by π. We evaluate a compilation algorithm based
+on compilation time, compilation size, and online inference
+time. We ﬁrst discuss compilation time, which includes read-
+ing the network, compiling, and writing the AC to disk.
+
+Columns 3–5 compare Ace compilation time to ADD com-
+pilation time. We see that on these networks, neither algo-
+rithm dominates the other. Our experiments show that Ace
+compilation often ran faster than ADD compilation in the
+following cases: when the networks had very low treewdith
+(alarm, hailﬁnder, tcc4f) and when the networks had massive
+amounts of determinism (bm-5-3, mm-3-8-3, and st-3-2). We
+also found Ace compilation times to be signiﬁcantly lower
+on networks (not shown) having very high treewidth (e.g.,
+the blockmap and mastermind networks from [Chavira et al.,
+May 2006]), many of which ADD compilation could not han-
+dle. However, ADD compilation times are signiﬁcantly more
+efﬁcient on precisely those networks on which Ace has trou-
+ble. In particular, networks with treewidths in the range 14-
+30 having lesser amounts of local structure (barley, diabetes,
+link, mildew, and the munin networks). On these types of
+networks, Ace compilation can require thousands of seconds
+and ADD compilation can run an order of magnitude faster.
+Perhaps the most striking example is barley, on which Ace
+required over two hours while ADD compilation required a
+little over two minutes. Ace compilation also ran out of mem-
+ory on link, which compiled successfully using ADDs.
+
+We next discuss compilation sizes, which we measure us-
+ing the number of edges of the AC produced. The AC size
+is important, because it determines the time and space re-
+quirements for online inference, which is linear in this size.
+The AC size also provides the main indicator for the extent to
+which local structure was exploited. AC sizes produced us-
+ing ADDs and using Ace turned out to be very close, showing
+that both methods seem to exploit local structure to a similar
+
+extent. Columns 6–8 compare sizes of ACs that would be
+produced using tabular compilation to those produced using
+ADD compilation (the size of the AC embedded in a jointree
+[Park and Darwiche, 2004] would be about equal to the size of
+the AC produced by tabular compilation). ADD compilation
+sizes can be multiple orders of magnitude smaller than those
+produced by tabular compilation. The difference is most pro-
+nounced on networks having massive amounts of local struc-
+ture (bm-5-3, mm-3-8-3, st-3-2), but is also striking in some
+other cases. For example, on munin1, munin4, pathﬁnder,
+and water, ADD compilation sizes were over 40, 11, 17, and
+93 times smaller, respectively. We see here the massive ad-
+vantage of utilizing more structured representations of factors
+when compiling via VE.
+
+Because ACs produced using Ace were about the same size
+as those produced using ADDs, online inference times for
+the two compilation algorithms were also very similar. The
+last three columns in Table 2 compare online inference using
+ADD compilations and jointree (tabular compilation online
+times would be about equal to jointree online times). For each
+network, we generated 16 sets of evidence. For each evidence
+set, we then computed probability of evidence and a poste-
+rior marginal on each network variable. Note that answering
+these queries would be very difﬁcult using standard VE (with-
+out compilation), because of the large number of queries in-
+volved. Each reported number is the sum of times for all 16
+evidence sets. Here we see an online time advantage to ADD
+compilation about equal to its large space advantage over tab-
+ular compilation, which makes sense, since neither tabular
+compilation nor jointree make use of local structure. Once
+again we see the massive advantage that can be achieved by
+utilizing structured representations of factors during compi-
+lation.
+
+6 Conclusion
+In this paper, we combined three ideas: variable elimination,
+compilation, and structured representations of factors. The
+result is an algorithm that retains the advantages of these ap-
+proaches while minimizing their shortcomings. The approach
+is important for the following reasons: (1) it utilizes local
+
+IJCAI-07
+
+2448
+
+Table 2: Comparing Ace compilation times to ADD compilation times, tabular compilation size to ADD compilation size, and
+jointree online inference time to ADD online inference time. Imp. stands for factor of improvement.
+
+Network
+
+alarm
+barley
+bm-5-3
+diabetes
+hailﬁnder
+link
+mildew
+mm-3-8-3
+munin1
+munin2
+munin3
+munin4
+pathﬁnder
+pigs
+st-3-2
+tcc4f
+water
+
+Max
+Clust.
+7.2
+22.8
+19.0
+17.2
+11.7
+21.0
+21.4
+19.0
+26.2
+18.9
+17.3
+19.6
+15.0
+17.4
+21.0
+10.0
+20.8
+
+Ofﬂine Compile Time (s)
+
+Ace ADD-VE
+3.9
+0.3
+122.8
+8,190.2
+0.8
+6.0
+110.3
+1,710.0
+1.2
+0.7
+699.7
+-
+218.9
+3,125.2
+1.5
+11.9
+316.7
+1,005.1
+31.7
+198.4
+17.6
+188.4
+37.8
+205.0
+4.9
+5.8
+10.0
+23.1
+2.4
+0.5
+1.1
+0.9
+3.0
+20.7
+
+Imp.
+0.1
+66.7
+0.1
+15.5
+0.5
+-
+14.3
+0.1
+3.2
+6.3
+10.7
+5.4
+0.9
+2.3
+0.2
+0.8
+0.1
+
+Tabular-VE
+3,534
+66,467,777
+75,591,750
+34,728,957
+72,755
+127,262,777
+16,094,592
+36,635,566
+1,260,407,123
+20,295,426
+16,987,088
+76,028,532
+796,588
+4,925,388
+19,374,934
+33,408
+15,996,054
+
+AC Edge Count
+ADD-VE
+3,030
+24,653,744
+14,836
+17,219,042
+25,992
+89,097,450
+3,352,330
+108,428
+31,409,970
+5,662,218
+3,503,242
+6,869,760
+44,468
+2,558,680
+22,070
+22,612
+170,428
+
+Imp.
+1.2
+2.7
+5095.2
+2.0
+2.8
+1.4
+4.8
+337.9
+40.1
+3.6
+4.8
+11.1
+17.9
+1.9
+877.9
+1.5
+93.9
+
+Online Inference Time (ms)
+Jointree ADD-VE
+32
+35,209
+83
+20,421
+70
+175,769
+4,522
+198
+37,451
+7,180
+4,945
+8,683
+102
+2,814
+82
+73
+251
+
+166
+65,226
+89,593
+29,316
+245
+223,542
+10,077
+34,001
+669,915
+17,857
+13,351
+42,754
+1,332
+3,020
+17,536
+281
+16,676
+
+Imp.
+5.2
+1.9
+1079.4
+1.4
+3.5
+1.3
+2.2
+171.7
+17.9
+2.5
+2.7
+4.9
+13.1
+1.1
+213.9
+3.8
+66.4
+
+structure more effectively than previous approaches based on
+VE; (2) it allows any variant of VE to answer multiple queries
+simultaneously; (3) it makes a large body of research into
+structured representations of factors more relevant than it had
+been previously; and (4) it demonstrates that variable elim-
+ination can utilize local structure as effectively as state–of–
+the–art approaches based on conditioning (applied to a log-
+ical encoding of the Bayesian network), and can sometimes
+lead to much faster compilation times.
+
+References
+[Boutilier et al., 1996] Craig Boutilier, Nir Friedman, Mois´es
+Goldszmidt, and Daphne Koller. Context–speciﬁc independence
+in Bayesian networks. In UAI, pages 115–123, 1996.
+
+[Chavira and Darwiche, 2005] Mark Chavira and Adnan Darwiche.
+In IJCAI,
+
+Compiling Bayesian networks with local structure.
+pages 1306–1312, 2005.
+
+[Chavira et al., 2005] Mark Chavira, David Allen, and Adnan Dar-
+wiche. Exploiting evidence in probabilistic inference. In UAI,
+pages 112–119, 2005.
+
+[Chavira et al., May 2006] Mark Chavira, Adnan Darwiche, and
+Manfred Jaeger. Compiling relational Bayesian networks for ex-
+act inference. IJAR, 42(1–2):4–20, May 2006.
+
+[Cozman, 2000] Fabio Gagliardi Cozman. Generalizing Variable
+Elimination in Bayesian Networks. In Workshop on Probabilistic
+Reasoning in Artiﬁcial Intelligence, Atibaia, Brazil, November
+2000.
+
+[Darwiche, 2000] Adnan Darwiche. A differential approach to in-
+
+ference in Bayesian networks. In UAI, pages 123–132, 2000.
+
+[Darwiche, 2002] Adnan Darwiche. A logical approach to factoring
+
+belief networks. In Proceedings of KR, pages 409–420, 2002.
+
+[Darwiche, 2003] Adnan Darwiche. A differential approach to in-
+ference in Bayesian networks. Journal of the ACM, 50(3):280–
+305, 2003.
+
+[Dechter, 1996] Rina Dechter. Bucket elimination: A unifying
+framework for probabilistic inference. In UAI, pages 211–219,
+1996.
+
+[Jensen and Andersen, 1990] Frank Jensen and Stig K. Andersen.
+Approximations in Bayesian belief universes for knowledge
+based systems.
+In UAI, pages 162–169, Cambridge, MA, July
+1990.
+
+[Jensen et al., 1990] F. V. Jensen, S.L. Lauritzen, and K.G. Olesen.
+Bayesian updating in recursive graphical models by local com-
+putation. Computational Statistics Quarterly, 4:269–282, 1990.
+[Larkin and Dechter, 2003] David Larkin and Rina Dechter.
+Bayesian inference in the presence of determinism.
+In C. M.
+Bishop and B. J. Frey (eds), editors, AI-STAT, Key West, FL.,
+2003.
+
+[Lauritzen and Spiegelhalter, 1988] S. L. Lauritzen and D. J.
+Spiegelhalter. Local computations with probabilities on graph-
+ical structures and their application to expert systems. Journal of
+Royal Statistics Society, Series B, 50(2):157–224, 1988.
+
+[Park and Darwiche, 2004] James Park and Adnan Darwiche. A
+differential semantics for jointree algorithms. Artiﬁcial Intelli-
+gence, 156:197–216, 2004.
+
+[Poole and Zhang, 2003] D. Poole and N.L. Zhang. Exploiting con-
+textual independence in probabilistic inference. Journal of Arti-
+ﬁcial Intelligence, 18:263–313, 2003.
+
+[R.I. Bahar et al., 1993] R.I. Bahar, E.A. Frohm, C.M. Gaona, G.D.
+Hachtel, E. Macii, A. Pardo, and F. Somenzi. Algebraic Deci-
+sion Diagrams and Their Applications. In IEEE /ACM Interna-
+tional Conference on CAD, pages 188–191, Santa Clara, Califor-
+nia, 1993. IEEE Computer Society Press.
+
+[Sanner and McAllester, 2005] Scott
+
+and David A.
+McAllester. Afﬁne algebraic decision diagrams (aadds) and their
+application to structured probabilistic inference. In IJCAI, pages
+1384–1390, 2005.
+
+Sanner
+
+[Zhang and Poole, 1996] Nevin Lianwen Zhang and David Poole.
+Exploiting causal independence in Bayesian network inference.
+Journal of Artiﬁcial Intelligence Research, 5:301–328, 1996.
+
+IJCAI-07
+
+2449
+
+

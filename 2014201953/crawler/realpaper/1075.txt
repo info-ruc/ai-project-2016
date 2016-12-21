@@ -1,0 +1,1256 @@
+Efﬁcient Failure Detection on Mobile Robots Using Particle Filters
+
+with Gaussian Process Proposals
+
+Christian Plagemann 1
+
+Dieter Fox 2
+
+1 Albert-Ludwigs-University
+
+Wolfram Burgard 1
+2 University of Washington
+
+Department of Computer Science
+
+Department of Computer Science & Engineering
+
+Freiburg, Germany
+
+{plagem,burgard}@informatik.uni-freiburg.de
+
+Seattle, WA, USA
+
+fox@cs.washington.edu
+
+Abstract
+
+The ability to detect failures and to analyze their
+causes is one of the preconditions of truly au-
+tonomous mobile robots. Especially online fail-
+ure detection is a complex task, since the effects
+of failures are typically difﬁcult to model and often
+resemble the noisy system behavior in a fault-free
+operational mode. The extremely low a priori like-
+lihood of failures poses additional challenges for
+detection algorithms. In this paper, we present an
+approach that applies Gaussian process classiﬁca-
+tion and regression techniques for learning highly
+effective proposal distributions of a particle ﬁlter
+that is applied to track the state of the system. As a
+result, the efﬁciency and robustness of the state es-
+timation process is substantially improved. In prac-
+tical experiments carried out with a real robot we
+demonstrate that our system is capable of detecting
+collisions with unseen obstacles while at the same
+time estimating the changing point of contact with
+the obstacle.
+
+1 Introduction
+The detection of and reaction to unforeseen failure events
+is a fundamental ability for autonomous systems as an im-
+proper treatment of such situations may cause loss of control
+and can possibly harm the system or the environment. Con-
+sider, for example, a mobile service robot that collides with a
+low doorstep or a planetary rover that hits an unforseen small
+rock. In such situations, the mobile robot should be able to (a)
+detect the unexpected event quickly and (b) to infer the cause
+of the event in order to react appropriately. Many successful
+previous approaches to the online failure detection problem
+are based on the sequential Monte-Carlo method. They typi-
+cally track multiple system modes in parallel before they de-
+cide on the most probable one. A crucial problem for such
+sampling-based approaches especially in real-time scenarios,
+however, lies in the high dimensionality of the state space
+to be tracked and the low frequency and unpredictability of
+failure events. To increase the efﬁciency of sample-based
+representations, different techniques such as lookahead sam-
+pling [de Freitas et al., 2003], risk sensitive sampling [Thrun
+et al., 2001], and hierarchical sampling [Verma et al., 2003]
+
+have been proposed. In this paper, we propose an alterna-
+tive approach, in which Gaussian processes (GP) are used to
+learn proposal distributions that represent informed guesses
+about the failure mode and its parameters. We demonstrate
+how GP classiﬁcation can be used to predict discrete failure
+modes and how GP regression can be used to model continu-
+ous failure parameters. Since Gaussian processes provide full
+predictive distributions including the predictive uncertainties,
+they can readily be used as proposal distributions in the parti-
+cle ﬁlter implementation. By including the most recent sensor
+measurements received by the robot, these proposals can be
+seen as an approximation of the optimal proposals for the re-
+spective state variables.
+
+Our system does not require additional hardware such as
+inertial sensors or bumper rings, which may be expensive
+or otherwise unfavorable in certain domains, e.g., for aerial
+blimps. The proposed algorithm has been implemented on
+a real robot and can be executed in real-time. We discuss
+results from several test runs in realistic scenarios in which
+we compared the achievable detection rates and pose track-
+ing quality of our system with an optimized standard particle
+ﬁlter implementation without informed proposals.
+
+This paper is organized as follows. After discussing related
+work, we describe particle ﬁlters for sequential state estima-
+tion and failure detection in Section 3. Our Gaussian process
+proposals are introduced in Section 4, followed by the exper-
+imental results.
+
+2 Related Work
+The close coupling between a mobile system and its environ-
+ment makes it hard to detect abnormal behavior using instan-
+taneous statistical tests only without tracking possible failure
+modes over time [Dearden and Clancy, 2002]. For this rea-
+son, probabilistic state tracking techniques have been applied
+to this problem. Particle ﬁlters represent the belief about the
+state of the system by a set of state samples [Thrun et al.,
+2005]. In particle ﬁlter based approaches to fault diagnosis,
+the system is typically modeled by a non-linear Markov jump
+process [Driessen and Boers, 2004] or a dynamic mixture of
+linear processes [de Freitas et al., 2003]. The look-ahead par-
+ticle ﬁlter introduced in the latter work also approximates the
+optimal proposal distribution by considering the most recent
+sensor measurements, but in contrast to our work focuses on
+the case of discrete failure modes without continuous failure
+
+IJCAI-07
+
+2185
+
+Figure 1: Graphical model for the dynamic system in an ab-
+stract view (left) and a more detailed form (right) where the
+system states st are split up to include the discrete failure
+mode ft, the failure parameters ot, and the robot’s state xt.
+
+parameters. Benanzera et al. [2004] combine consistency-
+based approaches, i.e., the Livingstone system, with particle
+ﬁlter based state estimation techniques. Verma et al. [2003]
+introduce the variable resolution particle ﬁlter for failure de-
+tection. Their approach is to build an abstraction hierarchy of
+system models. The models of consideration build a partition
+of the complete state space and the hierarchy is deﬁned in
+terms of behavioral similarity. A different kind of model ab-
+straction hierarchy based on explicit model assumptions was
+developed in [Plagemann et al., 2006] to detect failures on-
+line. Other approaches that deal with the time efﬁciency of
+particle ﬁlters include [Kwok et al., 2002] in which real-time
+constraints are considered for single system models.
+
+Gaussian processes have been widely studied in the Ma-
+chine Learning community. Excellent introductions have
+been given by [MacKay, 1998] and [Rasmussen, 1996]. [Gi-
+rard et al., 2002] present a Gaussian process based model for
+multiple step ahead prediction of time series. Classiﬁcation
+models are discussed in [Neal, 1997]. [Schwaighofer et al.,
+2003] present an application of Gaussian processes to local-
+ization using signals of a wireless phone network.
+
+3 Sequential State Estimation
+The temporal evolution of dynamic systems such as mobile
+robots can be described using the graphical model depicted
+in the left diagram of Figure 1. In this ﬁgure, st denotes the
+state of the system at time t, zt stands for received sensor
+measurements, and ut is the issued control command. Given
+the modeled independence assumptions, the state of the sys-
+tem can be evaluated recursively using the Bayes Filter for-
+malism [Thrun et al., 2005]
+p(st | z0:t, u0:t−1)
+
+= ηt p(zt | st)
+
+p(st | st−1, ut−1)
+
+p(st−1 | z0:t−1, u0:t−2)
+
+dst−1 .(1)
+
+{z
+
+}
+
+|
+
+{z
+
+}
+
+|
+
+{z
+
+}
+
+Z
+
+|
+
+observation model
+
+transition model
+
+recursive term
+
+Particle ﬁlters are widely used as a sample based implemen-
+tation of this recursive ﬁlter. They represent the state of the
+[i]
+t (cid:3)}. With
+system by a set of weighted samples X = {(cid:2)s
+the sample-based representation, the integral in Equation 1
+simpliﬁes to a ﬁnite sum over the samples resulting from the
+previous iteration. The transition model and the observation
+model can be applied directly to predict and weight the indi-
+vidual samples respectively.
+
+[i]
+t , w
+
+3.1 Modeling Failure Events and Parameters
+For dynamic systems under the inﬂuence of external or inter-
+nal failure events, the state st of the system can be split up
+
+to include the discrete failure mode ft, the continuous failure
+parameters ot, and the remaining part of the robot’s state xt.
+We assume the commonly used constant failure rate model
+(see [Ng et al., 2005]), where the failure event itself does not
+depend on the rest of the system. The right diagram of Fig-
+ure 1 shows the underlying graphical model. Since the ob-
+servations are independent of the failure state (ft, ot) given
+the state xt of the robot, the observation model simpliﬁes to
+p(zt | st) = p(zt | xt). The transition model can be factor-
+ized as
+
+p(st | st−1 , ut−1) = p(xt , ft , ot | xt−1, ft−1, ot−1, ut−1)
+
+(2)
+
+.
+
+(3)
+
+}
+
+= p(ft | ft−1)
+
+· p(ot | ft , xt−1 , ot−1)
+
+· p(xt | ot, xt−1, ut−1)
+
+|
+
+{z
+
+}
+
+|
+
+{z
+
+}
+
+|
+
+{z
+
+failure event model
+
+failure parameter model
+
+robot motion model
+
+The constant failure rate model states that failure events are
+distributed exponentially depending on a failure rate parame-
+ter λ by
+
+p(ft) = 1 − e−λ·(t−˜t)
+
+,
+
+(4)
+where ˜t denotes the time of the last failure event. It can eas-
+ily be shown that for such a model, the mean time between
+failures becomes M T BF = 1
+λ . For realistic failure rates λ,
+this model results in extremely low failure probabilities per
+ﬁlter iteration. Assume, for example, a mean time of 30 min-
+utes between collisions of a service robot with unseen obsta-
+cles. This implies λ = 1
+1800s = 0.0005 and with a ﬁlter
+frequency of δt = 0.1 seconds yields a failure probability of
+p(ft | ¬ft−1) ≈ 0.000056 within one iteration. For such
+a small value, just one of 20, 000 particles would jump to a
+failure mode on average. Thus, one would either need an ex-
+tremely large particle set or would risk that failures remain
+undetected. This problem is ampliﬁed by the fact that not
+only the discrete failure mode has to be sampled, but also
+the unknown continuous failure parameters. Since in general,
+there is no prior knowledge about the parameters of randomly
+occurring failures, we assume a uniform distribution
+p(ot | ft, xt−1, ot−1) = U[omin,omax](ot)
+
+(5)
+
+over a certain interval. Note that this model applies only to
+the case where the system transitions into a failure state. The
+evolution of failure parameters within a failure state is typi-
+cally governed by a much more peaked distribution similar to
+the motion model of the robot. In Section 5, we describe our
+model for the evolution of collision parameters based on rigid
+body dynamics. This model is able to track collisions sufﬁ-
+ciently accurate, if the initial collision parameters have been
+estimated well enough. The main focus of this work therefore
+is to improve the detection of failure events and to efﬁciently
+estimate the initial parameters.
+
+To address the problem of low sampling probabilities for
+important parts of the state space, [Thrun et al., 2001] in-
+troduced the risk sensitive particle ﬁlter that incorporates a
+learned risk function to force the ﬁlter into less likely but
+important states. While this approach ensures a reasonable
+amount of samples in the important failure modes, it cannot
+adapt to the speciﬁc situation the robot is in when the sam-
+pling decision is made. We therefore propose to use learned
+proposal distributions to be able to make informed guesses
+about the discrete failure mode and the continuous failure pa-
+rameters online.
+
+IJCAI-07
+
+2186
+
+3.2 Data-driven Proposal Distributions
+In the sequential importance sampling scheme (see [Doucet,
+1998]) an arbitrary proposal distribution can be used to di-
+rectly sample the relevant areas of the state space as long
+as (a) all possible states have a non-zero possibility of be-
+ing chosen and (b) the importance weights of the particles
+are adjusted appropriately. Proposal distributions that depend
+on the most recent sensor measurements or on features ex-
+tracted by separate algorithms are typically denoted as data-
+driven proposals or detector-mediated proposals (see [Khan
+et al., 2004]). Such proposals aim at approximating the opti-
+mal proposal p(st | st−1, zt, ut−1) which fully includes the
+most current sensor measurement zt. With the process model
+deﬁned in Equations 1 and 3, the weight for particle i at time
+t becomes
+
+[i]
+
+t = p(s
+π(s
+
+[i]
+1:t | z1:t)
+[i]
+1:t | z1:t)
+
+w
+
+= p(zt | s
+(cid:2)
+
+[i]
+[i]
+1:t | z1:t−1)
+1:t, z1:t−1) p(s
+[i]
+1:t | z1:t)
+π(s
+
+p(zt | z1:t−1)
+
+(cid:3)(cid:4)
+
+(cid:5)
+
+=:1/η
+
+= η · p(zt | s
+π(s
+
+[i]
+t
+
+[i]
+t−1)
+
+[i]
+t
+
+| s
+
+[i]
+t ) p(s
+[i]
+| s
+1:t−1, z1:t)
+
+· p(s
+(cid:2)
+π(s
+
+[i]
+1:t−1 | z1:t−1)
+[i]
+1:t−1 | z1:t−1)
+
+(cid:3)(cid:4)
+
+(cid:5)
+
+=w[i]
+
+t−1
+
+= η · w
+
+[i]
+t−1 · p(zt | s
+
+[i]
+p(f
+t
+πf (f
+
+| f
+[i]
+t
+
+[i]
+t−1)
+| Ft)
+
+· p(o
+
+[i]
+
+[i]
+t ) · p(x
+t
+[i]
+π(x
+t
+[i]
+[i]
+| f
+t , x
+t
+[i]
+| f
+πo(o
+t
+
+[i]
+[i]
+t−1)
+t , x
+[i]
+[i]
+t−1)
+t , x
+[i]
+t−1)
+
+| o
+| o
+[i]
+t−1, o
+[i]
+t , Ft)
+
+·
+
+(6)
+
+where π is the proposal distribution forto the transition model
+deﬁned in Equation 3 with the failure event model exchanged
+for πf and the failure parameter model exchanged for πo.
+Here, πf and πo are the learned proposal distributions for the
+discrete ft and the continuous ot respectively. The control
+commands ut have been omitted for clarity, they are straight-
+forward to include. The normalizing factor η is constant for
+all particles i. Furthermore, Ft denotes an arbitrary feature
+vector extracted at time t. Any feature vector Ft as well as
+any functions πf and πo can be used for this task as long as
+the assumptions
+
+• πf (f | Ft) (cid:5)= 0 for all f with p(f | s1:t, z1:t−1) (cid:5)= 0
+• πo(o | ft, Ft) (cid:5)= 0 for all o with p(o | s1:t, z1:t−1) (cid:5)= 0.
+hold, which means that all possible failure states have to be
+assigned a non-zero probability of being chosen. Visually
+speaking, Equation 6 states that after each ﬁlter iteration, the
+particle weights have to be multiplied with the current obser-
+[i]
+vation likelihood p(zt | s
+t ) and with two correction terms
+for the two learned proposal distributions. To calculate these
+[i]
+correction terms for a speciﬁc sample s
+t , we divide the prob-
+abilities deﬁned in Equations 4 and 5 by the likelihoods ac-
+[i]
+cording to which the state variables f
+t have been
+drawn from πf and πo. Another precondition for the learned
+proposals therefore is the availability of likelihoods for sam-
+pled values. As we will see in the next section, Gaussian pro-
+cesses always ensure the non-zero probability assumptions,
+
+and o
+
+[i]
+t
+
+can easily be sampled from, and provide the transition prob-
+abilities needed for the weight correction described above.
+
+4 Gaussian Processes Proposals for Discrete
+
+and Continuous State Variables
+
+Gaussian processes are a powerful tool for learning and rep-
+resenting full predictive distributions for non-linear func-
+tions [Rasmussen, 1996] and have also proven successful in
+solving classiﬁcation problems. Given a training set and pri-
+ors on the function to be learned, the Gaussian process model
+allows to predict function values at new input locations and
+also supplies predictive uncertainties. We ﬁrst introduce the
+regression and classiﬁcation models as well as their role in
+the general failure detection setting described above. In Sec-
+tion 4.3, we then describe a speciﬁc application in detail, the
+detection and tracking of collision events for mobile robots.
+
+4.1 Non-linear Regression
+Assuming a non-linear functional dependency g between m-
+dimensional input vectors y1, . . . , yn and real-valued targets
+t1 . . . , tn such that ti = g(yi) + i for independent error
+terms i, the task is to predict future targets tn+j at new
+input locations yn+j. The idea of Gaussian processes is to
+view all target values t1, . . . , tn+j as jointly Gaussian dis-
+tributed with an (n + j)-dimensional mean and a covariance
+cov(t, t(cid:2)) = k(y, y(cid:2)) speciﬁed via a kernel distance function
+k on the input vectors. Predictions for a new query point
+yn+1 can thus be performed by conditioning on the known
+target values t1, . . . , tn, see [Neal, 1997]. The mean μ and
+of the Gaussian predictive distribution for tn+1
+variance σ
+turn out to be
+
+2
+
+μ = E(tn+1 | t1, . . . , tn) = kT
+2 = V (tn+1 | t1, . . . , tn) = v − kT
+σ
+
+C −1t
+
+(8)
+with C the n × n covariance matrix for the given targets, t
+the n-dimensional vector of given target values, and k the
+n-dimensional vector of covariances between the new target
+value tn+1 and the known targets t1, . . . , tn.
+
+C −1k
+
+(7)
+
+In our failure detection setting, we can use this regression
+model to predict the continuous parameters of new failure
+events. We take extracted features Ft as input vectors y and
+failure parameters ot as targets t. Given a training set of such
+quantities and a properly chosen covariance function k, we
+can compute the predictive distribution πo(ot | ft, Ft) :=
+2) as detailed in Equations 7 and 8. This (normal) dis-
+N (μ, σ
+tribution naturally meets the requirements for proposal dis-
+tributions named in the previous section. It can be sampled
+from directly, it supplies the likelihoods of sampled values, it
+has an inﬁnite support, and it therefore only assigns non-zero
+likelihoods.
+
+An important aspect that has been left out so far is the
+choice of covariance function and how its parameters can be
+set. The covariance function plays an important role in the
+Gaussian process framework as it represents the prior knowl-
+edge about the underlying function g. By changing its form
+and parameters, one can control the generalization behavior
+and smoothness of the predictor. A common choice of covari-
+ance function (see [MacKay, 1998]) that is also used in this
+
+IJCAI-07
+
+2187
+
+not f (no collision)
+f (collision)
+
+ 1.5
+
+ 1
+
+ 0.5
+
+ 0
+
+-0.5
+
+-1
+
+t
+v
+
+ 
+f
+f
+i
+
+D
+
+-1.5
+
+-1.5
+
+-1
+
+-0.5
+
+ 0
+
+ 0.5
+
+ 1
+
+ 1.5
+
+Diff vr
+
+Regression result
+Training data (diff vt = -0.4 +/- 0.1)
+
+ 0.03
+ 0.025
+ 0.02
+ 0.015
+ 0.01
+ 0.005
+ 0
+
+]
+
+m
+
+[
+ 
+t
+n
+i
+o
+p
+
+ 
+t
+c
+a
+t
+n
+o
+C
+
+ 0.3
+
+ 0.25
+
+ 0.2
+
+ 0.15
+
+ 0.1
+
+ 0.05
+
+ 0
+
+-0.05
+
+-0.1
+
+-0.15
+
+-2.5 -2 -1.5 -1 -0.5  0  0.5  1  1.5  2  2.5
+
+Diff vr [m/s]
+
+-0.5
+
+-1
+
+ 0
+
+ 0.5
+
+ 1
+
+-1.5
+
+-1
+
+-0.5
+
+Diff vt
+
+ 0.03
+ 0.025
+ 0.02
+ 0.015
+ 0.01
+ 0.005
+ 0
+
+ 1.5
+
+ 1
+
+ 0.5
+
+ 0
+
+Diff vr
+
+Figure 2: The collision event training set where two feature values are mapped to class instances (left), the learned class prob-
+abilities πf (Ft) using Gaussian process classiﬁcation (middle), and the learned regression model for the collision parameters
+visualized by a cut through the 2-dimensional pdf that maps velocity deviations to contact points for a collision (right).
+
+work is
+
+k(y, y(cid:2)) := a0 + v0 · exp
+
+(cid:8)
+
+(cid:6)
+
+m(cid:7)
+
+d=1
+
+−
+
+1
+2
+
+wd(yd − y (cid:2)
+
+d)2
+
+with a constant component and a non-linear, stationary term,
+which depends only on the distance between input points.
+The parameters of the covariance function are called hyper-
+parameters of the Gaussian process. They can either be ﬁxed
+by maximizing the likelihood of the given data points or,
+for fully Bayesian treatment, can be integrated over using
+parameter-speciﬁc prior distributions. For our experiments
+reported in Section 5, we employed the latter strategy with
+Gamma priors on the hyperparameters. We set these priors to
+favor smooth regression functions to avoid overﬁtting to the
+training data. The analytically intractable integration over the
+hyperparameters is approximated using Markov Chain sam-
+pling and the prediction results are cached on a ﬁne-grained
+grid.
+
+4.2 Binary Classiﬁcation
+
+Binary classiﬁcation problems can consistently be modeled
+in this framework by including for every binary target ti a
+real-valued latent variable li, such that
+
+p(ti = 1) =
+
+1
+
+1 + e−li
+
+,
+
+(9)
+
+which is known as the logistic model that links class proba-
+bilities to real values, see [Neal, 1997]. The latent variables
+can now be given a Gaussian process prior as in the regression
+setting and predictions of class probabilities can be performed
+by predicting the corresponding latent variables and evaluat-
+ing Equation 9. For the failure detection problem, we again
+use feature vectors Ft as inputs and binary failure labels ft
+as targets. The predicted class probabilities for new features
+then directly deﬁne the failure event proposal πf (ft | Ft).
+
+4.3 Learning to Predict Collision Events and
+
+Parameters
+
+In this section, we apply the sequential failure detection ap-
+proach described above to the hard problem of collision de-
+tection for mobile robots under noisy sensor measurements
+
+and without additional hardware like bumpers or inertial sen-
+sors. For learning the collision event proposal and the pro-
+posal for the contact point of the robot with the obstacle, we
+achieve excellent results with simple features based on the
+rotational and the translational velocity of the robot. Thus,
+we use as input to the Gaussian process classiﬁer the two-
+dimensional feature vector Ft = (Δvt, Δvr), where Δvt is
+the difference between the translational velocity estimated by
+the particle ﬁlter and the one estimated by local laser scan
+matching. Furthermore, Δvr is the difference of the rota-
+tional velocities respectively. A training set of 500 automat-
+ically labeled trajectories was generated by simulating ran-
+dom collisions with different obstacles using the 3D simu-
+lator Gazebo [Koenig and Howard, 2004]. Whereas the left
+diagram of Figure 2 depicts the gathered data points, the mid-
+dle diagram in the same ﬁgure shows the learned class prob-
+abilities depending on the two velocity differences described
+above. As can be seen from the left diagram, Δvt is negative
+for nearly all “collision” data points, which corresponds to
+the fact that the robot is slowed down when a collision occurs.
+The data points for “no collision” are spread widely and do
+not separate well from the “collision” data points due to noisy
+sensor measurements and imperfect labeling of the collision
+events. This makes the classiﬁcation problem a hard one. It
+should be stressed, that we use this classiﬁer as a proposal
+distribution for collisions rather than as a collision detector
+directly, because the features are too ambiguous to allow for
+perfect instantaneous classiﬁcation. Experiments with a real
+robot (see Section 5) showed that this yields high detection
+rates with a low number of false alarms.
+
+Given a collision event, the continuous collision parame-
+ters o have to be estimated to simulate the effects on the sys-
+tem and to continue the tracking process. Since the task is not
+to fully track the pushed obstacle over time, a simple model
+that abstracts from the obstacle’s geometry and exact pose
+has proven sufﬁcient to describe the effects on the robot. A
+collision with an unseen obstacle is represented by the ob-
+stacle mass m and the contact point c on the front of the
+robot. Therefore, the collision parameters are o = (m, c).
+We learn the proposal distribution πo(ot|Ft) for the parame-
+ters ot using the same velocity-based features and simulated
+training set as described above and the Gaussian process re-
+
+IJCAI-07
+
+2188
+
+]
+
+m
+
+[
+ 
+y
+
+ 11
+ 10
+ 9
+ 8
+ 7
+ 6
+ 5
+ 4
+ 3
+
+Std PF
+GP-PF
+
+ 1
+ 0.8
+ 0.6
+ 0.4
+ 0.2
+ 0
+
+ 0.7
+
+ 0.6
+
+ 0.5
+
+ 0.4
+
+ 0.3
+
+ 0.2
+
+ 0.1
+
+]
+
+m
+
+[
+ 
+r
+o
+r
+r
+e
+ 
+
+y
+r
+o
+t
+c
+e
+j
+a
+r
+t
+ 
+e
+g
+a
+r
+e
+v
+A
+
+ 9  10 11 12 13 14 15
+
+x [m]
+
+ 0
+
+ 0
+
+ 100  200  300  400
+Number of particles
+
+Estimated heading
+True heading
+Collision likelihood
+True collision
+Estim. contact point
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 0
+
+-0.2
+
+ 75
+
+ 80
+
+ 85
+
+ 90
+
+ 95
+Filter iteration
+
+ 100
+
+ 105
+
+Figure 3 (a):
+Two correctly
+detected collisions (triangles), the
+estimated trajectory (solid line),
+and the ground truth (dotted).
+
+Figure 3 (b):
+Average deviation
+of the estimated trajectory from the
+ground truth in meters for a varying
+number of particles.
+
+Figure 3 (c): Estimation details around a correctly detected
+collision including the manually labeled true collision event.
+One ﬁlter iteration corresponds to 0.1 seconds.
+
+gression technique. The right diagram of Figure 2 depicts a
+cut through the learned 2-dimensional distribution for the col-
+lision parameter c, which is the contact point of the obstacle
+on the front of the robot. The point of contact is measured
+in meters from the center of the robot’s front to the right. It
+can be seen from the diagram that unexpected clockwise ro-
+tations (Δvr < 0) of the robot are mapped to positive values
+for the contact point, which corresponds to a collision on the
+righthand side of the robot.
+
+5 Experimental Results
+
+Our system has been implemented on a real ActivMedia Pi-
+oneer 3DX robot and has been extensively tested in an ofﬁce
+environment. Before presenting experimental results, we de-
+scribe the motion model we implemented for our localization
+system. Since this model is not the focus of this work, we
+give only a brief overview here.
+
+The most widely used motion model for mobile robots is
+based on the wheel encoder measurements (see [Thrun et al.,
+2005]). This information, rather than the the actual control
+command, is taken as control input ut−1, which under nor-
+mal circumstances results in accurate predictions of the per-
+formed movement. Under the inﬂuence of failures like col-
+lisions or wheel slip, however, the motion of the wheels is
+not consistent with the whole robot’s motion any more. A
+more appropriate model for such situations that still is efﬁ-
+cient enough to be evaluated online is based on simple rigid
+body dynamics (see [Plagemann et al., 2006]). We model
+the robot as a rigid body in the 2-dimensional plane, repre-
+sented by a set of constant values and the variable state vector
+xt = (posx, posy, posθ, velt, velr) which includes the trans-
+lational velocity velt and the rotational velocity velr. In each
+ﬁlter iteration, the wheel thrusts are calculated from the actual
+velocity command that was sent to the motors. From this, the
+next state vector is computed by numerical simulation using
+the physical relationships between forces, acceleration, and
+speed. Due to space limitations, we refer to [Witkin and
+Baraff, 1997] for details about rigid body physics. With this
+model, collisions with another rigid object at a given point
+of contact can be simulated using the same type of physi-
+
+cal abstraction, namely computing the impulse, the resulting
+forces, and ultimately the inﬂuence on the robot’s state vec-
+tor. At the same time, this model describes how the point
+of contact between the robot and the obstacle changes over
+time and therefore deﬁnes the transition model for failure pa-
+rameters of Equation 3. From our experience, this physical
+model achieves the best balance between accuracy and efﬁ-
+ciency. Simpler models fail to handle important test cases
+while more complex models have too many free parameters
+to be evaluated in real time.
+
+5.1 Quantitative Evaluation of Failure Detection
+
+and Tracking Performance
+
+To quantitatively evaluate the usefulness of our approach, we
+compared it to a particle ﬁlter that implements the same pro-
+cess model with the standard uninformed proposals described
+in Section 3.1. The parameters of the standard ﬁlter were op-
+timized for best tracking performance and failure detection
+rates to ensure comparability. We recorded data by manu-
+ally steering the robot through the environment and arranged
+for two collisions, one with boxes of milk and the other one
+with a box of lemonade bottles. Both obstacles were placed
+at arbitrary positions and the obstacle heights were too low
+for the laser sensor to detect them. Figure 3(a) depicts a typ-
+ical test run, where our system successfully tracked the pose
+of the robot and detected the two collisions. On the recorded
+data set, we tested our improved particle ﬁlter with Gaussian
+process proposals (GP-PF) as well as the standard particle ﬁl-
+ter (Std PF) for different parameter settings. Each ﬁlter was
+executed 50 times for each parameter setting.
+
+Table 1 gives the failure detection performance of the dif-
+ferent ﬁlters. The detection rate is deﬁned as the number
+of correctly identiﬁed failures relative to the full number.
+The false positives rate is the amount of false alarms rela-
+tive to the number of detections. The ground truth collision
+events were manually entered and a collision was counted as
+correctly detected, when the marginal failure likelihood ex-
+ceeded a threshold Θ after a maximum of six ﬁlter iterations
+(0.6 seconds) after the true failure event. The threshold Θ was
+optimized independently for each ﬁlter to allow an unbiased
+comparison.
+
+IJCAI-07
+
+2189
+
+Std PF
+150 particles
+
+Std PF GP-PF GP-PF
+950 p.
+300 p.
+
+50 p.
+
+Detection Rate
+False Positives
+
+85 %
+76 %
+
+90 %
+72 %
+
+87 %
+38 %
+
+98 %
+14 %
+
+Acknowledgments
+This work has been supported by the EC under FP6-004250-
+CoSy, by the German Ministry for Education and Research
+(BMBF) through the DESIRE project, and by the National
+Science Foundation under NSF CAREER grant IIS-0093406.
+
+Table 1: Detection results with the optimized standard parti-
+cle ﬁlter (Std PF) and our approach that uses Gaussian Pro-
+cess Proposals (GP-PF).
+
+The diagram in Figure 3(b) gives the average deviation of
+the tracked poses of the robot compared to the ground truth
+trajectory. The ground truth trajectory was computed using
+a scan matcher. The results visualized in this diagram show
+that our system stays around ten centimeters closer to the true
+trajectory and produces less variance in these estimates than
+the standard approach. This is mainly due to the fact that the
+failure parameter (here, the point of contact with the obstacle)
+is estimated more accurately. To give an impression about the
+accuracy with which our ﬁlter estimates the point of contact
+and thereby the path of the robot, one failure event is depicted
+in detail in the diagram of Figure 3(c). It can be seen, that
+the estimated failure likelihood increases shortly after the la-
+beled failure event and that the heading angle of the robot is
+correctly estimated.
+
+The detection rates as well as the tracking results show
+that learned Gaussian process proposals can indeed increase
+the reliability and efﬁciency of online state estimation ap-
+proaches. The time requirements for the improved particle
+ﬁlter are around 10% to 15% higher than for the standard
+implementation without Gaussian process proposals. Never-
+theless, the implemented system with 200 particles still pro-
+cesses one minute of recorded data in less than 23 seconds on
+a PC with a 2800 MHz CPU.
+
+6 Conclusions
+
+In this paper, we showed that efﬁcient proposal distributions
+for particle ﬁlters can be learned using Gaussian process mod-
+els and that both discrete as well as continuous state variables
+can be treated in a consistent manner. We applied the ap-
+proach to the hard problem of online failure detection on mo-
+bile robots and presented a system for detecting unforseen
+collisions. Experiments with a real robot demonstrated, that
+the developed system is able to track the state of the robot
+more reliably through collision events than an optimized ver-
+sion of the standard particle ﬁlter with uninformed proposals.
+Our system does not require any additional hardware and can
+be trained conveniently using a simulator.
+
+While our current system only deals with binary failure
+variables, we believe that the multi-class case, potentially
+including different simultaneous failures, can be formulated
+and solved using similar models. For a limited set of such
+discrete failure modes, the combination of this system with
+the look-ahead particle ﬁlter [de Freitas et al., 2003] may be
+beneﬁcial. Moreover, in future work, we would like to extend
+our approach to the more general problem domain of learning
+sampling models for dynamic Bayesian networks.
+
+References
+[Benazera et al., 2004] E.
+
+and
+S. Narasimhan. Combining particle ﬁlters and consistency-
+based approaches.
+In 15th Int. Workshop on Principles of
+Diagnosis, Carcassonne, France, 2004.
+
+Benazera,
+
+R.
+
+Dearden,
+
+[de Freitas et al., 2003] N. de Freitas, R. Dearden, F. Hutter,
+R. Morales-Menendez, J. Mutch, and D. Poole. Diagnosis by
+a waiter and a mars explorer. In Proc. of the IEEE, 2004.
+
+[Dearden and Clancy, 2002] R. Dearden and D. Clancy. Particle ﬁl-
+ters for real-time fault detection in planetary rovers. In Proc. of
+the Thirteenth Int. Workshop on Principles of Diagnosis, 2002.
+
+[Doucet, 1998] A. Doucet. On sequential simulation-based meth-
+ods for bayesian ﬁltering. Technical report, Signal Processing
+Group, Dept. of Engeneering, University of Cambridge, 1998.
+
+[Driessen and Boers, 2004] J.N. Driessen and Y. Boers. An efﬁ-
+cient particle ﬁlter for nonlinear jump markov systems. In IEEE
+Sem. Target Tracking: Algorithms and Appl., Sussex, UK, 2004.
+[Girard et al., 2002] A. Girard, C.E. Rasmussen, J. Qui˜nonero Can-
+dela, and R. Murray-Smith. Gaussian process priors with uncer-
+tain inputs - application to multiple-step ahead time series fore-
+casting. In NIPS, 2002.
+
+[Khan et al., 2004] Z. Khan, T.R. Balch, and F. Dellaert. An mcmc-
+based particle ﬁlter for tracking multiple interacting targets. In
+ECCV (4), pages 279–290, 2004.
+
+[Koenig and Howard, 2004] N. Koenig and A. Howard. Design and
+use paradigms for gazebo, an open-source multi-robot simulator.
+Tech. rep., USC Center for Robotics and Emb. Systems, 2004.
+
+[Kwok et al., 2002] C. Kwok, D. Fox, and M. Meila. Real-time
+In Advances in Neural Information Processing
+
+particle ﬁlters.
+Systems 15 (NIPS), pages 1057–1064, 2002.
+
+[MacKay, 1998] D.J.C. MacKay.
+
+Introduction to Gaussian pro-
+
+cesses. In Neural Networks and Machine Learning, 1998.
+
+[Neal, 1997] R. Neal. Monte carlo implementation of gaussian pro-
+cess models for bayesian regression and classiﬁcation. Technical
+report, Dept. of Computer Science, University of Toronto., 1997.
+[Ng et al., 2005] B. Ng, A. Pfeffer, and R. Dearden. Continuous
+
+time particle ﬁltering. In Proceedings of IJCAI, 2005.
+
+[Plagemann et al., 2006] C. Plagemann, C. Stachniss, and W. Bur-
+gard. Efﬁcient failure detection for mobile robots using mixed-
+abstraction particle ﬁlters. In Europ. Robotics Symposium 2006.
+[Rasmussen, 1996] C.E. Rasmussen. Evaluation Of Gaussian Pro-
+cesses And Other Methods For Non-Linear Regression. PhD the-
+sis, Dept. of Computer Science, Univ. of Toronto, 1996.
+
+[Schwaighofer et al., 2003] A.
+
+V. Tresp, and C. Hoffmann.
+positioning system for cellular networks. In NIPS, 2003.
+
+Schwaighofer, M. Grigoras,
+Gpps: A gaussian process
+
+[Thrun et al., 2001] S. Thrun, J. Langford, and V. Verma. Risk sen-
+
+sitive particle ﬁlters. In NIPS, 2001.
+
+[Thrun et al., 2005] S. Thrun, W. Burgard, and D. Fox. Probabilis-
+
+tic Robotics. MIT Press, 2005.
+
+[Verma et al., 2003] V. Verma, S. Thrun, and R. Simmons. Variable
+
+resolution particle ﬁlter. In Proc of IJCAI, 2003.
+
+[Witkin and Baraff, 1997] A. Witkin and D. Baraff. An introduc-
+In SIGGRAPH’97 Course
+
+tion to physically based modeling.
+Notes, 1997.
+
+IJCAI-07
+
+2190
+
+

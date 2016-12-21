@@ -1,0 +1,833 @@
+Going Far, Logically
+
+Fusun Yaman and Dana Nau and V.S. Subrahmanian
+
+Department of Computer Science,
+
+University of Maryland Institute for Advanced Computer Studies (UMIACS),
+
+and Institute for Systems Research (ISR)
+
+University of Maryland
+College Park, MD, 20742
+{fusun, nau, vs}@cs.umd.edu
+
+Abstract
+
+There are numerous applications where we need to
+ensure that multiple moving objects are sufﬁciently
+far apart. Furthermore, in many moving object do-
+mains, there is positional indeterminacy — we are
+not 100% sure exactly when a given moving object
+will be at a given location. [Yaman et al., 2004]
+provided a logic of motion but did not provide algo-
+rithms to ensure that moving objects are kept suf-
+ﬁciently far apart.
+In this paper, we extend their
+logic to include a “far” predicate. We develop the
+CheckFar algorithm that checks if any given two
+objects will always be sufﬁciently far apart at dur-
+ing a time interval. We have run a set of experi-
+ments showing that our CheckFar algorithm scales
+very well.
+
+Introduction
+
+1
+All of us ﬂy in airplanes. We know that ﬂight plans are al-
+most never 100% accurate. We all have a vested interest in
+ensuring that planes we ﬂy in are sufﬁciently far from other
+planes that are ﬂying in the sky at the same time. The goal of
+this paper is to develop a hybrid logical and constraint based
+framework to ensure that moving objects with positional un-
+certainty (where will the object be at a given time) remain
+sufﬁciently far apart.
+
+Our work builds on [Yaman et al., 2004] who developed
+the concept of a “go-theory”. A go-theory is a ﬁnite set of
+“go-atoms.” A go-atom can express statements such as ‘Plane
+p1 leaves location L1 some time between 10 and 12 and ar-
+rives at location L2 at some time between 30 and 40 and
+during the ﬂight the speed of the plane is between 5 and 6”.
+They provide algorithms to check if a given plane is within
+a given region at a given time point. They also introduce
+ground atoms of the form near(o1, o2, d, t1, t2) — intuitively,
+this means that at all times during the interval t1, t2, o1 and
+o2 are guaranteed to be within d units of each other.
+
+In this paper, we introduce a predicate symbol called
+far(o1, o2, d, t1, t2) — intuitively, this means that at all times
+during the interval t1, t2, o1 and o2 are guaranteed to be at
+least d units apart.
+
+One may think that near() and far() are complements of
+each other. Unfortunately, this is not true. Yaman et. al.[Ya-
+
+man et al., 2004] deﬁne interpretations and a notion of satis-
+faction. For near(o1, o2, d, t1, t2) atom to be a logical conse-
+quence of a go-theory G, for every interpretation I that satis-
+ﬁes G, it must be the case that for all times t1 ≤ t ≤ t2, the
+distance between the locations of o1 and o2 at time t is less
+than or equal to d. Thus, ¬near(()o1, o2, d, t1, t2) is a logical
+consequence of G if for every interpretation I which satisﬁes
+G there exists a time t1 ≤ t ≤ t2, the distance between the lo-
+cations of o1 and o2 at time t (according to the interpretation
+I) is greater than d. In contrast, for far(o1, o2, d, t1, t2) to be
+entailed by S, it must be the case that for every interpretation
+I which satisﬁes G and for every time point t1 ≤ t ≤ t2, the
+distance between the locations of o1 and o2 at time t is greater
+than d. Thus, entailment of far() atoms is not the same as en-
+tailment of either near() atoms or ¬near() literals.
+
+In this paper, we deﬁne the semantics of far() and develop
+an algorithm called CheckFar to check entailment of ground
+far() atoms by a go-theory G. We have conducted extensive
+experiments on the computational feasibility of CheckFar —
+our experiments show in a compelling way that in real world
+situations1, CheckFar will work very well indeed.
+In our
+experiments we answered far queries in less than 0.6 seconds
+for go theories up to 1000 atoms per object.
+
+2 Background On go-Theories
+We now provide a quick overview of go-theories from[Ya-
+man et al., 2004]. We assume the existence of several sets of
+constant symbols: R is the set of all real numbers, O is the
+set of names of objects, P = R × R is the set of all points
+in two-dimensional cartesian space. We assume the existence
+of three disjoint sets of variable symbols, VR, VO, and VP,
+ranging over R, O and P, respectively. A real term t is any
+member of R ∪ VR. Object terms and point terms are deﬁned
+similarly. Ground terms are deﬁned in the usual way. We now
+deﬁne atoms as follows.
+• If o1, o2 are object terms, and d, t1, t2 are positive real
+terms, then near(o1, o2, d, t1, t2) is an atom. Intuitively,
+this atom says that o1, o2 are within distance d of each
+other during the time interval [t1, t2].
+• If o is an object term, P1, P2 are point terms, and t1, t2
+are positive real terms, then in(o, P1, P2, t1, t2) is an
+1We built an application to manage separation between ships in
+
+port shipping lanes.
+
+1 , t−
+
+atom. Intuitively, this atom says that object o is in the
+rectangle whose lower left (resp. upper right) corner is
+P1 (resp. P2) at some point in the time interval [t1, t2].
+• If o is an object term, P1, P2 are point terms, and
+t−
+1 , t+
+then
+go(o, P1, P2, t−
+2 , v−, v+) is an atom called a
+2 , t+
+go atom. Intuitively, this atom says that object o leaves
+point P1 at some time in [t−
+1 ] and arrives at point P2
+1 , t+
+during [t−
+2 ], traveling in a straight line with a mini-
+mum speed v− and maximum speed v+.
+
+2 , v−, v+ are positive real
+
+1 , t−
+
+2 , t+
+
+2 , t+
+
+1 , t+
+
+terms,
+
+Ground atoms are deﬁned in the usual way. A go theory is
+a ﬁnite set of ground go-atoms. Note that go-theories do not
+contain near() or in() atoms.
+Notation. If g = go(o, P1, P2, t−
+2 , v−, v+), then,
+
+1 , t−
+
+obj(g) = o,
+loc1(g) = P1,
+loc2(g) = P2,
+
+1 , t+
+v−(g) = v−,
+t−
+1 (g) = t−
+1 ,
+t−
+2 (g) = t−
+2 ,
+
+2 , t+
+v+(g) = v+,
+1 (g) = t+
+t+
+1 ,
+2 (g) = t+
+t+
+2 .
+
+2 , t+
+
+1 , t−
+
+1 , t+
+2 , t+
+
+If G is a go-theory and o is an object id, the restriction of G
+to o, denoted Go is the set {g ∈ G | obj(g) = o}.
+An interpretation is a continuous function I : O × R+ →
+P. Intuitively, I(o, t) is o’s location at time t.
+Deﬁnition 1 Let g = go(o, P1, P2, t−
+2 , v−, v+)
+1 , t+
+be a ground atom and I be an interpretation. I satisﬁes g
+w.r.t. a time interval T = [t1, t2] iff:
+1 ] and I(o, t1) = P1
+2 ] and I(o, t2) = P2
+
+• t1 ∈ [t−
+• t2 ∈ [t−
+• ∀t ∈ [t1, t2], I(o, t) is on the line segment [P1, P2]
+• ∀t, t0 ∈ [t1, t2],
+
+t < t0 implies dist(I(o, t), P1) <
+dist(I(o, t0), P1), where dist is the function that com-
+putes the Euclidean distance between two points.
+• For all but ﬁnitely many times in [t1, t2], v =
+d(|I(o, t)|)/dt is deﬁned and v−(g) ≤ v ≤ v+(g).
+This intuitively says that I |= g w.r.t. a time interval T =
+[t1, t2] iff o starts moving at t1 and stops moving at t2 and
+furthermore, during [t1, t2], the object moves away from P1
+towards P2 without either stopping or turning back or wan-
+dering away from the straight line connecting P1 and P2. We
+are now ready to deﬁne the full concept of satisfaction.
+I satisﬁes a ground literal (denoted I |= A) in these cases:
+1. I |= go(o, P1, P2, t−
+2 , v−, v+) iff there exists
+2. I |= near(o1, o2, d, t1, t2) iff dist(I(o1, t),I(o2, t)) ≤
+3. I |= in(o, P1, P2, t1, t2) iff there are numbers t ∈
+y] such that
+
+an interval [t1, t2] such that I |= A w.r.t. [t1, t2].
+d for all t1 ≤ t ≤ t2.
+[t1, t2], x ∈ [P1
+I(o, t) = (x, y).
+
+x] and y ∈ [P1
+
+4. I |= ¬A iff I does not satisfy A.
+The above deﬁnition can be extended in the obvious way to
+handle quantiﬁcation — in this paper, we will only consider
+the ground case.
+I satisﬁes (or is a model of) a set of ground atoms MT iff
+I satisﬁes every A ∈ MT. MT is consistent iff there is an in-
+terpretation I such that I |= MT. L is a logical consequence
+
+1 , t−
+
+1 , t+
+
+2 , t+
+
+x, P2
+
+y, P2
+
+of MT, denoted MT |= L, iff every model of MT is also a
+model of L.
+
+far() atoms
+
+3
+We are now ready to extend the logic in [Yaman et al., 2004]
+to include far() atoms. If o1, o2 are objects, and d, t1, t2 are
+real terms, then far(o1, o2, d, t1, t2) is a far() atom.
+Deﬁnition 2 (satisfaction of far() atoms) Suppose f is a
+ground far atom and I is an interpretation. I |= f iff for
+all t1 ≤ t ≤ t2, dist(I(o1, t), I(o2, t)) > d.
+We say a go theory G entails f iff whenever I |= G, it is
+also the case that I |= f. The far()-entailment problem is
+that of checking whether a given go-theory entails a ground
+far()-atom.
+The entailment of a negated near literal does
+not imply entailment of the associated far atom. Similarly
+entailment of a negated far literal does not imply entailment
+of the associated near atom. However, the following results
+hold:
+Lemma 1 Suppose G is
+theory
+sup-
+far(o1, o2, d, t1, t2)
+near(o1, o2, d, t1, t2)
+pose
+are ground.
+then
+G |= ¬near(o1, o2, d, t1, t2). If G |= near(o1, o2, d, t1, t2),
+then G |= ¬far(o1, o2, d, t1, t2).
+
+and
+If G |= far(o1, o2, d, t1, t2),
+
+a
+and
+
+go
+
+The following result tells us that checking for entailment
+
+of a ground far()-atom is co-NP complete.
+Theorem 1 Let G be a go theory and f = far(o, o0, d, t1, t2)
+be a ground atom. Checking if G |= f is coNP-complete.
+We will omit the proofs due to space constraints.
+
+4 Far Algorithm
+Finding an algorithm to solve the far()-entailment problem is
+a complex task. Our solution involves the following steps.
+First we partition a go-theory into clusters Go of go-atoms
+about the same object o. Next, for any given go-atom g, we
+deﬁne the temporal certainty interval which speciﬁes a time
+interval when the object is guaranteed to be on the line seg-
+ment [loc1(g), loc2(g)]. Third, we deﬁne the positional cer-
+tainty interval that ﬁnds the smallest subsegment of the above
+line in which the vehicle is guaranteed to be at time t. Both
+temporal and positional certainty intervals are deﬁned w.r.t.
+a given ordering of go-atoms. Our fourth step is to explain
+how to solve the far()-entailment problem when a go-theory
+has only two go-atoms (one for each object) and t1 = t2 in
+the far() atom whose entailment we are trying to check. Our
+ﬁfth step generalizes this to the case when t1 ≤ t2. Finally,
+we show how to remove the assumption that G contains only
+two go-atoms.
+
+Due to space constraints, we will proceed under the as-
+sumption that G is non-collinear as deﬁned below. Extending
+our algorithm to remove this assumption is straightforward 2
+Our implementations do not require this assumption.
+
+2[Yaman et al., 2004] provides a technique to merge multiple
+collinear go-atoms into “movements” that are non-collinear. The
+same technique can be used here.
+
+Deﬁnition 3 A go theory G is non-collinear iff there are no
+go-atoms g, g0 ∈ G such that obj(g) = obj(g0) and the fol-
+lowing two conditions both hold:
+• The intersection of line segments [loc1(g), loc2(g)] and
+[loc1(g0), loc2(g0)] is a line segment [P, Q] such that P
+is visited before Q in both g and g0 and
+1 (g) ≤ t+
+
+2 (g0) and t−
+
+1 (g0) ≤ t+
+
+• t−
+
+2 (g).
+
+4.1 Temporal and Positional Certainty Intervals
+In this section, we deﬁne the notions of temporal and posi-
+tional uncertainty.
+Deﬁnition 4 (C(G, o,v)) Let G be a go theory and o be an
+object id. Let v be any total ordering on Go. The set
+C(G, o,v) of linear constraints associated with G, o,v is de-
+ﬁned as follows:
+
+• ∀g = go(o, P1, P2, t−
+
+1 , t−
+1 , t+
+2 , t+
+2 ≤ Eg ≤ t+
+1 and t−
+
+2
+
+2 , v−, v+) ∈ Go
+
+1 ≤ Sg ≤ t+
+
+– t−
+– v− × (Eg − Sg) ≤ dist(P1, P2) ≤ v+ × (Eg − Sg)
+
+• for every g, g0 ∈ Go such that g v g0: Eg ≤ Sg0 .
+
+Sg and Eg are variables associated with an atom g which
+intuitively denote the start time and end time of the movement
+described by g. When Go has only one atom g,we will use
+C(g) as a short hand notation.
+Example 1 Let g = go(o, (40, 10), (70, 50), 12, 13, 21, 21, 4,
+10) and g0 = go(o, (70, 50), (30, 80), 20, 21, 30, 31, 4, 10).
+Suppose G = {g, g0} and g v g0. Then C(G, o,v) contains
+the following constraints:
+
+• 12 ≤ Sg ≤ 13, 21 ≤ Eg ≤ 21 ,
+• 4 × (Eg − Sg) ≤ 50 ≤ 10 × (Eg − Sg).
+• 20 ≤ Sg0 ≤ 21, 30 ≤ Eg0 ≤ 31 ,
+• 4 × (Eg0 − Sg0) ≤ 50 ≤ 10 × (Eg − Sg),
+• Eg ≤ Sg0.
+
+We now use linear programming methods to deﬁne the tem-
+poral certainty interval of a go atom.
+Deﬁnition 5 (T CI(G, o,v, g)) Let G be a go theory, o be an
+object, and v be a total order on Go such that C(G, o,v) has
+a solution. The temporal certainty interval, T CI(G, o,v, g),
+of an atom g ∈ Go w.r.t. v is the time interval [T −, T +]
+where
+• T − is the result of solving the linear program: “maxi-
+• T + is the result of solving the linear program: “mini-
+
+mize Sg subject to C(G, o,v)”,
+mize Eg subject to C(G, o,v)”.
+
+T CI(G, o,v, g) is undeﬁned if T − > T +.
+When Go has only one atom g we will T CI(g) as a short
+Intuitively, T CI(G, o,v, g) is the interval
+hand notation.
+when we know for sure that object o is within the line speci-
+ﬁed in go-atom g.
+Example 2 Let g and g0 be the two go atoms in Example
+If G = {g, g0} and g v g0, then
+1. T CI(g) is [13, 21].
+T CI(G, o,v, g0) = [21, 30].
+
+Conversely, given a time point t and a ground go-atom g, we
+wish to know the potential segment on the line connecting
+loc1(g) and loc2(g) where the object associated with g could
+possibly be. To ﬁnd this, we need another linear program.
+Deﬁnition 6 (P CI(G, o,v, g, t)) Let G be a go theory, o
+be an object, and v be a total order on atoms of Go such
+that C(G, o,v) has a solution. Let g be an atom in Go
+such that T CI(G, o,v, g) is deﬁned and t be any time
+point in T CI(G, o,v, g). The positional certainty interval,
+P CI(G, o,v, g, t), of atom g at time t w.r.t. ordering v is
+deﬁned as follows:
+
+• Let C(g, t) be the set of constraints:
+
+– dg,t
+– D−dg,t
+
+v+(g) ≤ t − Sg ≤ dg,t
+v−(g)
+v+(g) ≤ Eg − t ≤ D−dg,t
+v−(g)
+
+where D = dist(loc1(g), loc2(g)). Note that this is
+a linear program when g is ﬁxed because many terms
+above (such as D, v−(g),v+(g) are constants).
+
+• Let dmin
+
+g,t
+
+g,t be the result of solving the linear program
+minimize dg,t subject to C(G, o,v) ∪ C(g, t).
+• Let dmax
+g,t be obtained by maximizing the objective func-
+tion in the above linear program (instead of minimizing).
+• Let P −(G, o,v, g, t) be the point exactly dmin
+g,t
+units away from loc1(g) on the line connecting
+loc1(g), loc2(g) and likewise, let P +(G, o,v, g, t) be
+units away from loc1(g) on the
+the point exactly dmax
+same line.
+The positional certainty interval P CI(G, o,v, g, t) is the
+line segment from P −(G, o,v, g, t) to P +(G, o,v, g, t).
+When Go has only one atom g we use the shorter notation
+P CI(g, t).
+Lemma 2 Let g be a go atom such that T CI(g) is deﬁned,
+I be an interpretation, and suppose t ∈ T CI(g). If I |= g,
+then I(o, t) is on the line segment P CI(g, t).
+4.2 Binary go-theories about a single time point
+A binary go-theory is one which contains two go-atoms G =
+{g, g0} where obj(g) = o, obj(g0) = o0. Consider a ground
+far() query far(o, o0, t1, t2, d) where t1 = t2. We need to
+check if the distance between o and o0 is guaranteed to be
+greater than d at time t. The following lemma presents neces-
+sary and sufﬁcient conditions for entailment of such queries
+under the above assumptions.
+Lemma 3 Let G = {g, g0} be a go-theory such that
+obj(g) = o and obj(g0) = o0 and let f = far(o, o0, d, t, t)
+be a ground atom. G |= f iff
+
+• t ∈ T CI(g) and t ∈ T CI(g0) and
+• The minimum distance between line segments P CI(g, t)
+and P CI(g0, t) is greater than d.
+
+Example 3 Let g = go(o, (40, 10), (70, 50), 12, 13, 21, 21,
+4, 10) and g0 = go(o0, (55, 20), (45, 80), 17, 18, 32, 33, 2, 6)
+be two atoms. Let G = {g, g0} and f = far(o, o0, 5, 19, 19).
+T CI(g) = [13, 21] and T CI(g0) = [18, 32] both include the
+
+Deﬁnition 8 (d-neighbourhood) Let g be a ground go-atom
+such that T CI(g) is deﬁned. Let d be a real number and
+let T = [t1, t2] be a time interval such that T ⊆ T CI(g).
+The d-neighbourhood of g during T , denoted N br(g, T, d) =
+{(x, y, t) | t1 ≤ t ≤ t2 and (x, y) ∈ N earP ts(g, t, d)}
+where N earP ts(g, t, d) = {(x, y) | ∃(x0, y0) ∈ P CI(g, t)
+and dist((x, y), (x0y0)) ≤ d}.
+Intuitively N earP ts(g, t, d) is the set of all points p such that
+all points on the line segment P CI(g, t) which are d units or
+less in distance from p at time t. Similarly N br(g, T, d) is the
+set of all points (x, y, t) such that it is possible for obj(g) to
+be within d units of (x, y) at some time t in interval T .
+Theorem 3 (i) N br(g, T, d) is a convex set. (ii) If d = 0,
+then N br(g, T, d) = SE(g, T ).
+Example 5 Let g = go(o, (40, 10), (70, 50), 12, 13, 19, 21,
+4, 10) be a go atom. The 5-neighborhood of g over time in-
+terval [19, 21] is shown on the far right hand side of Figure 1.
+It is easy to see that it is a convex set.
+The following theorem states necessary and sufﬁcient condi-
+tions under which {g, g0} |= f.
+Theorem 4 Let f = far(o, o0, d, t1, t2) and G = {g, g0} be a
+go theory where obj(g) = o and obj(g0) = o0. G |= f iff
+
+• [t1, t2] ⊆ T CI(g) and [t1, t2] ⊆ T CI(g0)
+• N br(g, [t1, t2], d) ∩ SE(g0, [t1, t2]) = ∅
+
+Thus, an algorithm to solve the far()-entailment problem only
+needs to check both these conditions. [Mantyla, 1988] pro-
+vides polynomial algorithms to check for the intersection of
+two convex sets — these can be used directly to check the
+second condition above.
+Example 6 Let g = go(o, (40, 10), (70, 50), 12, 13, 21, 21, 4,
+10) and g0 = go(o0, (55, 20), (45, 80), 17, 18, 32, 33, 2, 6) be
+two go atoms. Let G = {g, g0} and f = far(o, o0, 5, 19, 21).
+Then T CI(g) = [13, 21] and T CI(g0) = [18, 32].
+Both include the time interval [19, 21]. Figure 1 shows
+N br(g, [19, 21], 5) and SE(g0, [19, 21]). It is apparent from
+the ﬁgure that the two do not intersect: hence G |= f.
+4.4 Arbitrary Go-theories with temporal intervals
+We now remove the restriction that G is a binary go-theory.
+Doing so introduces several complications. For any single o,
+there may be many possible total orderings associated with
+Go. Furthermore, for some theories we can predict the pos-
+sible locations of an object not only in the certainty interval
+of an atom, but also during a time interval that spans over
+several atoms. The following lemma gives the necessary and
+sufﬁcient conditions when this can be done.
+Lemma 4 Let G be a go-theory, o be an object, and v be a
+total order on Go such that C(G, o,v) has a solution. Sup-
+pose g1 v g2 . . . v gn are the atoms of Go. T CI(G, o,v
+, gi) ∪ T CI(G, o v, gi+1) . . . ∪ T CI(G, o,v, gj) is a sin-
+gle time interval iff for every 1 ≤ i ≤ k < j ≤ n with
+T CI(G, o,v, gk) = [T −
+
+k ] the following are true
+
+k , T +
+
+k = T −
+
+• T +
+• loc2(gk) = loc1(gk+1)
+
+k+1
+
+Figure 1: The polygon on the left is the space envelope of g0
+during [19, 21] and the volume on the right is 5-neigbourhood
+of g during time interval [19, 21]. g and g0 are as deﬁned in
+Examples 4,5 and 6.
+
+time point 19. At time 19, o is somewhere on the line segment
+P CI(g, 19) = [(58, 34), (65.2, 43.6)] and object o’ is on the
+line segment P CI(g0, 19) = [(54.67, 21.97), (53.08, 31.84)].
+The minimum distance between these two lines is 33.73 which
+is greater than 5 so G |= f.
+
+Consider
+
+the atom near(o, o0, d, t, t) atom instead of
+far(o, o0, d, t, t) then the second bullet of Lemma 3 becomes:
+“The maximum distance between line segments P CI(g, t)
+and P CI(g0, t) is less than or equal to d”. This maxi-
+mum distance is achieved at the end points of P CI(g, t) and
+P CI(g0, t), e.g. P −(g, t) and P +(g0, t). However the mini-
+mum distance between P CI(g, t) and P CI(g0, t) is not nec-
+essarily at the end points hence its computation is more com-
+plex.
+
+4.3 Binary go-theories with temporal intervals
+The complexity of computing far queries gets magniﬁed even
+more when we consider the case t1 ≤ t2. For the near atom
+this is easy because it is enough to check the distance at the
+end points of P CI(g, t) and as shown in [Yaman et al., 2004]
+end points of P CI(g, t) are piecewise linear functions over a
+time interval. This is not enough for the far atom. For this
+reason answering far queries over time intervals requires a
+different approach then the one in [Yaman et al., 2004].
+We ﬁrst deﬁne the space envelope of a go-atom.
+
+Intu-
+itively, the space envelope of a go-atom g is the set of all
+(x, y, t)-triples such that there exists a model I of g in which
+I(obj(g), t) = (x, y). In other words, it deﬁnes where and
+when it is possible for object o to be.
+Deﬁnition 7 Let g be a ground go-atom such that T CI(g)
+is deﬁned and let T = [t1, t2] be any time interval such that
+T ⊆ T CI(g). The space envelope, SE(g, T ) of g during
+interval T is {(x, y, t) | t ∈ T and (x, y) ∈ P CI(g, t)}.
+Theorem 2 SE(g, T ) is a convex set.
+Example 4 Let g0 = go(o0, (55, 20), (45, 80), 17, 18, 32, 33,
+2, 6) be a go atom. The space envelope of g0 over time interval
+[19, 21], is shown in Figure 1 on the left side. It is easy to see
+that SE(g0, [19, 21]) is convex.
+We now deﬁne the set of points that are closer than a given
+distance d to any possible location of an object at a given
+time.
+
+Deﬁnition 9 Let G be a go-theory, o be an object, and v
+be a total order on Go such that C(G, o,v) has a solution.
+Suppose S ⊆ Go. S is temporally relevant to time interval
+[t1, t2] is iff
+
+• The atoms in S satisfy the conditions in lemma 4 and
+• There are atoms g, g’ in S such that t1 ∈ T CI(G, o,v
+
+, g) and t2 ∈ T CI(G, o,v, g0)
+
+Example 7 Let g1 = go(o, (40, 10), (70, 50), 12, 13, 21, 21, 4,
+10) and g2 = go(o, (70, 50), (30, 80), 20, 21, 30, 31, 4, 10)
+If G = {g1, g2} and g1 v g2 then
+be go atoms.
+C(G, o,v) has a solution. Moreover T CI(G, o,v, g1) =
+[13, 21], T CI(G, o,v, g2) = [21, 30] and T CI(G, o,v
+, g1) ∪ T CI(G, o,v, g2) is a single interval.
+Suppose
+T = [19, 30] then {g1, g2} is temporally relevant to T .
+We now generalize deﬁnitions 7 and 8 to accommodate non-
+binary go-theories.
+Deﬁnition 10 (SE(G, o,v, T )) Let G be a go-theory, o be
+an object, and v be a total order on Go such that C(G, o,v)
+If T = [t1, t2] is a time interval, then
+has a solution.
+SE(G, o,v, T ) is the set of all points (x, y, t) such that
+• t ∈ T and t ∈ T CI(G, o,v, g) for some g ∈ Go,
+• (x, y) is on P CI(G, o,v, g, t).
+
+SE(G, o,v, T ) is not deﬁned if there is a time point t ∈ T
+such that for all g ∈ Go, t 6∈ T CI(G,v, g).
+
+Note that SE(G, o,v, T ) is not necessarily convex when
+T spans over multiple go atoms. We can generalize N br to
+N br(G, o,v, T, d) in a similar manner — these are omitted
+due to space constraints. N br(G,v, T, d) also may not be
+convex. We now state a theorem describing the conditions
+under which a go theory G entails a far() atom.
+Theorem 5 Suppose G is a go-theory and o, o0 are objects.
+The ground atom f = far(o, o0, d, t1, t2) is a logical conse-
+quence of G iff for every pair of total orders v and v0 on Go
+such that C(G, o,v) and C(G, o0,v0) are solvable:
+and Go0
+• ∃S ⊆ Go such that S is temporally relevant to [t1, t2]
+• ∃S0 ⊆ Go0
+such that S0 is temporally relevant to [t1, t2]
+• N br(G, o,v, [t1, t2], d) ∩ SE(G, o0,v0, [t1, t2]) = ∅.
+Example 8 Let g1 and g2 be go atoms in Example 7 and
+g0 = go(o0, (55, 20), (45, 80), 17, 18, 32, 33, 2, 6). Let G =
+{g1, g2, g0} and f = far(o, o0, 5, 19, 30).
+If g1 v g2 and
+v0= ∅ then Figure 2 shows N br(G, o,v, [19, 30], 5) and
+SE(G, o0,v0, [19, 30]). The ﬁgure also shows that the sets
+intersect - hence G 6|= f.
+
+As N br(G, o,v, T, d) and SE(G, o0,v, T ) are not always
+convex, computing their intersection is tricky. We partition
+T into subintervals T1, T2, . . . , Tn (we call this a convex
+partition of T ) such that for all i < n, the end point of Ti
+is the end point of the temporal certainty interval of some
+. It is easy to verify that n ≤ |Go| + |Go0|.
+g ∈ Go ∪ Go0
+For each Ti, N br(G, o,v, Ti, d) and SE(G, o0,v, Ti) are
+convex and we leverage this in the CheckFar algorithm
+below.
+
+Figure 2: The space envelope of o0 with respect to G and
+5-neighbourhood of o w.r.t. G and v during time interval
+[19, 30]. G and v are as deﬁned in Example 8
+
+such that So0 is temporally relevant to [t1t2]
+
+Algorithm CheckFar(G,v,v0, f)
+Suppose f = far(o, o0, d, t1, t2);
+if C(G, o,v) or C(G, o0,v0) has no solution then return true
+Let So ⊆ Go such that So is temporally relevant to [t1t2]
+Let So0 ⊆ Go0
+if no such So or So0 exists then return false
+Let T1, T2 . . . Tn be the convex partition of [t1, t2]
+for each i < n do
+if N br(G, o,v, Ti, d) ∩ SE(G, o0,v0, Ti]) 6= ∅
+then return false
+end for
+return true
+=
+Theorem 6 Suppose G is a go-theory and f
+far(o, o0, d, t1, t2) is a ground atom.
+f is en-
+tailed by G iff for every total order v and v0 on Go and Go0
+,
+the algorithm CheckFar(G,v,v0, f) returns “true”.
+
+Then:
+
+5 Implementation
+We have implemented the CheckFar algorithm in Matlab.
+Our test results show that CheckFar(G,v,v0, f) runs in lin-
+ear time. Note that a single run of CheckFar does not check
+if G |= f.
+In fact CheckFar(G,v,v0, f) should be exe-
+cuted for every possible v,v0 pair that produce a solvable
+set of constraints. Although in theory this number is exponen-
+tial which leads to coNP-hardness, in practice we expect this
+number to be bounded by a manageable constant k. In gen-
+eral individual movements can have some uncertainty how-
+ever the order in which they are going to be accomplished is
+usually well known. Figure 3 shows the running time of 3
+far queries as we vary the number of atoms per object when
+k = 256. Each data point is an average of 300 runs. For
+these experiments we created go theories G with at most 16
+total orderings and all atoms are in a rectangle of size 300
+by 400. We queried those theories using three query tem-
+plates Q1 = far(o, o0, 1, t1, t2), Q2 = far(o, o0, 50, t1, t2)
+and Q3 = far(o, o0, 10000, t1, t2) where [t1, t2] is a random
+time interval with length 10. The reader will notice that as the
+distance increases, the time to compute the query decreases.
+In the case of Q3 which is trivially false it takes almost no
+time to return the answer. Queries Q1 and Q2 take at most
+0.6 seconds for go theories with 1000 atoms per object.
+
+theory. In real-world applications such as air trafﬁc control
+and a shipping port lane management we have built, we ex-
+pect such orderings to be relatively small in number even if
+the number of objects is very large. The reason for this is
+that usually the ﬂight plan for each airplane consists of a se-
+quence of steps which only yields 1 ordering of the atoms per
+airplane (whereas our experiments have used 16). Our exper-
+iments show that CheckFar performs very well in practice.
+
+Acknowledgements
+This work was
+supported in part by ARO grant
+DAAD190310202, ARL grants DAAD190320026 and
+DAAL0197K0135,
+the ARL CTAs on Telecommunica-
+tions and Advanced Decision Architectures, NSF grants
+IIS0329851 and IIS0412812 and 0205489 and UC Berkeley
+contract number SA451832441 (subcontract from DARPA’s
+REAL program).
+
+References
+[Cohn et al., 2003] A. G. Cohn, D. Magee, A. Galata,
+D. Hogg, and S. Hazarika. Towards an architecture for
+cognitive vision using qualitative spatio-temporal repre-
+sentations and abduction. In Spatial Cognition III. 2003.
+[Erwig et al., 1999] M. Erwig, R. H. G¨uting, M. Schneider,
+and M. Vazirgiannis. Spatio-temporal data types: An
+approach to modeling and querying moving objects in
+databases. GeoInformatica, 3(3):269–296, 1999.
+
+[Gabelaia et al., 2003] D. Gabelaia, R. Kontchakov, A. Ku-
+rucz, F. Wolter, and M. Zakharyaschev. On the compu-
+tational complexity of spatio-temporal logics. In FLAIRS
+Conference, pages 460–464, 2003.
+
+[Lin and Gottschalk, 1998] M. C. Lin and S. Gottschalk.
+Collision detection between geometric models: a survey.
+In Proc.of IMA Conference on Mathematics of Surfaces,
+1998.
+
+[Mantyla, 1988] M. Mantyla. Introduction to Solid Model-
+
+ing. W. H. Freeman and Co., 1988.
+
+[Merz et al., 2003] S. Merz, J. Zappe, and M. Wirsing. A
+spatio-temporal logic for the speciﬁcation and reﬁnement
+of mobile systems. In Fund. Appr. to Software Engr., pages
+87–101, 2003.
+
+[Muller, ] P. Muller. A qualitative theory of motion based on
+
+spatio-temporal primitives. In KR98, pages 131–141.
+
+[Rajagopalan and Kuipers, 1994] R.
+
+and
+B. Kuipers. Qualitative spatial reasoning about objects in
+motion: Application to physics problem solving. In Conf.
+on AI for Applications, pages 238–245, 1994.
+
+Rajagopalan
+
+[Shanahan, 1995] M. Shanahan. Default reasoning about
+spatial occupancy. Artiﬁcial Intelligence, 74(1):147–163,
+1995.
+
+[Wolter and Zakharyaschev, ] F. Wolter
+
+kharyaschev.
+reasoning based on RCC-8. In KR2000, pages 3–14.
+
+Spatio-temporal
+
+and M. Za-
+representation and
+
+[Yaman et al., 2004] F. Yaman, D. Nau, and V. S. Subrahma-
+nian. A logic of motion. In KR2004, pages 85–94, 2004.
+
+Figure 3: Time to compute three far queries Q1, Q2 and Q3
+when k = 256.
+
+6 Related Work
+To our knowledge, there is no work on a logical foundation
+for checking separation between moving objects in the pres-
+ence of temporal and spatial uncertainty. However, almost all
+models of moving entities like cars, airplanes, ships, humans
+and animals are subject to uncertainty about where they are
+at a given point in time.
+
+[Gabelaia et al., 2003; Merz et al., 2003; Wolter and Za-
+kharyaschev, ; Cohn et al., 2003] study spatio-temporal log-
+ics where time is a discrete sequence rather than being con-
+tinuous. [Muller, ] describes a formal theory for reasoning
+about motion in a qualitative framework that supports com-
+plex motion classes. The work is purely symbolic. [Shana-
+han, 1995] discusses the frame problem, when constructing
+a logic-based calculus for reasoning about the movement of
+objects in a real-valued co-ordinate system. [Rajagopalan and
+Kuipers, 1994] focuses on relative position and orientation of
+objects with existing methods for qualitative reasoning in a
+Newtonian framework. The focus of these works is qualita-
+tive - in contrast our work is heavily continuous and rooted in
+a mix of geometry and logic rather in just logic alone. far()
+queries are not studied in any of these papers.
+
+There is also some peripherally related work in computer
+graphics [Lin and Gottschalk, 1998] and in “moving object
+databases” [Erwig et al., 1999] – they provide no model the-
+ory or algorithms for far() queries nor allow any uncertainty.
+
+7 Conclusions
+The ability to query a large number of objects moving un-
+certainly in time and space so that separation constraints be-
+tween objects are maintained is critical to many applications
+(e.g. air trafﬁc control, shipping port lane management). In
+this paper, we have extended the “logic of motion” proposed
+by Yaman et. al. [Yaman et al., 2004] via a far() predicate.
+We develop a model theory for far()-entailment. We show
+that the far()-entailment problem is coNP-complete. We de-
+velop an efﬁcient algorithm called CheckFar that effectively
+checks if a given total ordering of atoms in a go-theory pre-
+serve separation constraints. To check whether two objects
+are guaranteed to be at least d units of distance away from
+each other during an interval of time, we must apply Check-
+Far to different possible orderings of the atoms in the go-
+
+

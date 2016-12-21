@@ -1,0 +1,1381 @@
+From Sampling to Model Counting
+
+Carla P. Gomes†
+
+Joerg Hoffmann‡
+
+Ashish Sabharwal†
+
+Bart Selman†
+
+†Department of Computer Science, Cornell University, Ithaca, NY 14853-7501, U.S.A.
+
+∗
+
+{gomes,sabhar,selman}@cs.cornell.edu
+
+‡University of Innsbruck, Technikerstraße 21a, 6020 Innsbruck, Austria
+
+joerg.hoffmann@deri.org
+
+Abstract
+
+We introduce a new technique for counting models
+of Boolean satisﬁability problems. Our approach
+incorporates information obtained from sampling
+the solution space. Unlike previous approaches, our
+method does not require uniform or near-uniform
+samples. It instead converts local search sampling
+without any guarantees into very good bounds on
+the model count with guarantees. We give a formal
+analysis and provide experimental results showing
+the effectiveness of our approach.
+
+1 Introduction
+
+Boolean satisﬁability (SAT) solvers have been successfully
+applied in a range of domains, most prominently, in AI plan-
+ning and hardware and software veriﬁcation. In these appli-
+cations, the basic task is to decide whether a SAT encoding
+of the underlying problem domain is satisﬁable or not. Given
+the tremendous progress in state of the art SAT solvers and
+their applications, researchers have become interested in pur-
+suing other questions concerning SAT encodings to further
+extend the reach of SAT technology. For example, can one
+randomly sample from the set of satisfying assignments? Or
+can one count the total number of satisfying assignments?
+In both a formal complexity theoretic sense as well as in
+practice, these computational questions are much harder than
+“just” determining satisﬁability versus unsatisﬁability of a
+formula. Formally, counting the number of solutions is a
+#P-complete problem, making it complete for a complexity
+class at least as hard as the polynomial-time hierarchy (PH)
+[Toda, 1989].1 On the positive side, efﬁcient methods for
+sampling and counting would open up a wide range of new
+applications, e.g., involving various forms of probabilistic
+reasoning [Darwiche, 2005; Roth, 1996; Littman et al., 2001;
+Park, 2002; Sang et al., 2005].
+
+Uniform sampling and model counting are closely related
+In particular, Jerrum, Valiant, and Vazirani [1986]
+tasks.
+showed that for many combinatorial problems, if one can
+
+∗
+
+Research supported by Intelligent Information Systems Insti-
+tute (IISI), Cornell University (AFOSR grant F49620-01-1-0076)
+and DARPA (REAL grant FA8750-04-2-0216).
+
+1The class NP is the ﬁrst of an inﬁnite sequence of levels in PH.
+
+sample uniformly from the set of solutions, then one can use
+samples to obtain a highly accurate count of the total num-
+ber of solutions.2 We will explain this strategy below. This
+approach was exploited in the work on ApproxCount [Wei
+and Selman, 2005], where a model sampling procedure called
+SampleSat [Wei et al., 2004] was used to provide samples of
+satisfying assignments of the underlying SAT instance. In this
+setting, the counting is only approximate — with no guaran-
+tees on the accuracy — because SampleSat does in general
+not sample purely uniformly; it uses Markov Chain Monte
+Carlo (MCMC) methods [Madras, 2002; Metropolis et al.,
+1953; Kirkpatrick et al., 1983], which often have exponential
+(and thus impractical) mixing times. In fact, the main draw-
+back of Jerrum et al.’s counting strategy is that for it to work
+well one needs (near-)uniform sampling, which is a very hard
+problem in itself. Moreover, biased sampling can lead to ar-
+bitrarily bad under- or over-estimates of the true count.
+
+The key new insight of this paper is that, somewhat sur-
+prisingly, using sampling with a modiﬁed strategy, one can
+get very good lower-bounds on the total model count, with
+high conﬁdence guarantees, without any requirement on the
+quality of the sampling. We will provide both a formal anal-
+ysis of our approach and experimental results demonstrating
+its practical effectiveness.
+
+Our strategy, SampleCount, provides provably (proba-
+bilistic) guaranteed lower-bounds on the model counts of
+Boolean formulas using solution sampling. Interestingly, the
+correctness of the obtained bounds holds even when the sam-
+pling method used is arbitrarily bad; only the quality of the
+bounds may go down (i.e., the bound may get farther away
+from the true count on the lower side). Thus, our strategy re-
+mains sound even when a heuristic-based practical solution
+sampling method is used instead of a true sampler.
+
+SampleCount can also be viewed as a way of extend-
+ing the reach of exact model counting procedures, such as
+Relsat [Bayardo Jr. and Pehoushek, 2000] and Cachet
+[Sang et al., 2004].3 More speciﬁcally, SampleCount ﬁrst
+uses sampling to select a set of variables of the formula to
+ﬁx. Once a sufﬁcient number of variables have been set,
+
+2Conversely, one can also design a uniform solution sampler us-
+
+ing a solution counter.
+
+3These exact counters also provide a lower-bound on the true
+
+model count if they are aborted before terminating.
+
+IJCAI-07
+
+2293
+
+the remaining formula can be counted using an exact model
+counter. From the exact residual model count and the num-
+ber of ﬁxed variables, we can then obtain a lower-bound on
+the total number of models. As our experiments will show,
+these bounds can be surprisingly close to optimal. Moreover,
+on many problem classes our method scales very well. To
+mention just one example, we consider a circuit synthesis for-
+mula from the literature, called 3bitadd 32.cnf. This for-
+mula can be solved quite easily with a local search style SAT
+solver, such as Walksat [McAllester et al., 1997]. However,
+it is out of reach for all but the most recent DPLL style solvers
+(MiniSat [E´en and S¨orensson, 2005] takes almost two hours
+to ﬁnd a single solution). Consequently, it is completely out
+of reach of exact model counters based on DPLL. The origi-
+nal formula has nearly 9,000 variables. SampleCount sets
+around 3,000 variables in around 30 minutes, with the re-
+maining formula solved by Cachet in under two minutes.
+The overall lower-bound on the model count — with 99%
+conﬁdence — thus obtained is an astonishing 101339 models.
+We see that the formula has a remarkable number of truth as-
+signments, yet exact counters cannot ﬁnd any models after
+over 12 hours of run time.
+
+1.1 Main Idea
+
+To provide the reader with an intuitive understanding of our
+approach, we ﬁrst give a high-level description of how sam-
+pling can be used to count. We will then discuss how this can
+be made to work well in practice.
+
++
+
+(a) From Sampling to Counting [Jerrum et al., 1986]. Con-
+sider a Boolean formula F with M satisfying assignments.
+Assuming we could sample these satisfying assignments uni-
+formly at random, we can measure the fraction of all models
+that have x1 set to True, M
+, by taking the ratio of the num-
+ber of assignments in the sample that have x1 set to True over
+the sample size. This fraction will converge with increasing
+sample size to the true fraction of models with x1 set posi-
++/M. (For now, assume that γ > 0.) It follows
+tively, γ = M
+immediately that M = (1/γ)M
+. We will call 1/γ the “mul-
+tiplier” (> 0). We have thus reduced the problem of counting
+the models of F to counting the models of a simpler formula,
+. We can recursively repeat the process, leading to a se-
+F
+ries of multipliers, until all variables are assigned or until we
+can count the number of models of the remaining formulas
+with an exact counter. For robustness, one usually sets se-
+lected variable to the truth value that occurs more often in
+the sample. This also avoids the problem of having γ = 0 and
+therefore an inﬁnite multiplier. (Note that the more frequently
+occurring truth value gives a multiplier of at most 2.)
+
++
+
++
+
+2005].
+
+and Selman,
+
+(b) ApproxCount [Wei
+
+In
+ApproxCount,
+the above strategy is made practical by
+using a SAT solution sampling method called SampleSat
+[Wei et al., 2004]. Unfortunately, there are no guarantees
+on the uniformity of the samples from SampleSat. Al-
+though the counts obtained can be surprisingly close to the
+true model counts, one can also observe cases where the
+method signiﬁcantly over-estimates or under-estimates. Our
+experimental results will conﬁrm this behavior.
+
+(c) SampleCount. Our approach presented here uses a
+probabilistic modiﬁcation of strategy (a) to obtain true accu-
+
+rate counts in expectation. The key strength of SampleCount
+is that it works no matter how biased the model sampling is,
+thereby circumventing the main drawback of approach (a).
+Instead of using the sampler to select the variable setting and
+compute a multiplier, we use the sampler only as a heuristic
+to determine in what order to set the variables. In particu-
+lar, we use the sampler to select a variable whose positive
+and negative setting occurs most balanced in our set of sam-
+ples (ties are broken randomly). Note that such a variable
+will have the highest possible multiplier (closest to 2) in the
+SampleCount setting discussed above. Informally, setting
+the most balanced variable will divide the solution space most
+evenly (compared to setting one of the other variables). Of
+course, as we noted, our sampler may be heavily biased and
+we therefore cannot really rely on the observed ratio between
+positive and negative settings of a variable. Interestingly, we
+can simply set the variable to a randomly selected truth value
+and use the multiplier 2. This strategy will still give — in ex-
+pectation — the true model count. A simple example shows
+why this is so. Consider our formula above and assume x1 oc-
++
+curs most balanced in our sample. Let the model count of F
+be 2M/3 and of F
+be M/3. If we select with probability 1/2
+to set x1 to True, we obtain a total model count of 2 × 2M/3,
+i.e., too high; but, with probability 1/2, we will set the vari-
+able to False, obtaining a total count of 2 × M/3, i.e., too low.
+Overall, our expected (average) count will be exactly M.
+
+−
+
+Technically, the expected total model count is correct be-
+cause of the linearity of expectation. However, we also
+see that we may have signiﬁcant variance between speciﬁc
+counts, especially since we are setting a series of variables
+in a row (obtaining a sequence of multipliers of 2), until we
+have a simpliﬁed formula that can be counted exactly. In fact,
+in practice, the total counts distributions (over different runs)
+are often heavy-tailed [Kilby et al., 2006]. To mitigate the
+ﬂuctuations between runs, we use our samples to select the
+best variables to set next. Clearly, a good heuristic would be
+to set such “balanced” variables ﬁrst. We use SampleSat
+to get guidance on ﬁnding such balanced variables. The ran-
+dom value setting of the selected variable leads to an expected
+model count that is equal to the actual model count of the
+formula. We show how this property can be exploited us-
+ing Markov’s inequality to obtain lower-bounds on the total
+model count with predeﬁned conﬁdence guarantees. These
+guarantees can be made arbitrarily strong by repeated itera-
+tions of the process.
+
+We further boost the effectiveness of our approach by using
+variable “equivalence” when no single variable appears suf-
+ﬁciently balanced in the sampled solutions. For instance, if
+variables x1 and x2 occur with the same polarity (either both
+positive or both negative) in nearly half the sampled solutions
+and with a different polarity in the remaining, we randomly
+replace x2 with either x1 or x1, and simplify. This turns out to
+have the same positive effect as setting a single variable, but is
+more advantageous when no single variable is well balanced.
+in practice,
+SampleCount provides surprisingly good lower-bounds —
+with high conﬁdence and within minutes — on the model
+counts of many problems which are completely out of reach
+of current exact counting methods.
+
+Our experimental results demonstrate that
+
+IJCAI-07
+
+2294
+
+2 Preliminaries
+
+Let V be a set of propositional (Boolean) variables that take
+value in the set {0, 1}. We think of 1 as True and 0 as False.
+Let F be a propositional formula over V . A solution or model
+of F (also referred to as a satisfying assignment for F) is a
+0-1 assignment to all variables in V such that F evaluates to
+1. Propositional Satisﬁability or SAT is the decision problem
+of determining whether F has any models. This is the canon-
+ical NP-complete problem. In practice, one is also interested
+in ﬁnding a model, if there exists one. Propositional Model
+Counting is the problem of computing the number of models
+for F. This is the canonical #P-complete problem. It is the-
+oretically believed to be signiﬁcantly harder than SAT, and
+also turns out to be so in practice.
+
+The correctness guarantee for our algorithm relies on ba-
+sic concepts from probability theory. Let X and Y be two
+discrete random variables. The expected value of X , denoted
+E [X], equals ∑x x Pr [X = x]. The conditional expectation of
+X given Y , denoted E [X | Y ], is a function of Y deﬁned as
+follows: E [X | Y = y] = ∑x x Pr [X = x | Y = y]. We will need
+the following two results whose proof may be found in stan-
+dard texts on probability theory.
+
+Proposition 1 (The Law of Total Expectation). For any dis-
+crete random variables X and Y , E [X] = E [E [X | Y ]].
+
+Proposition 2 (Markov’s inequality). For any random vari-
+able X , Pr [X > k E [X]] < 1/k.
+
+3 Model Counting Using Solution Sampling
+
+This section describes our sample-based model counting al-
+gorithm, SampleCount (see Algorithm 1). The algorithm
+has three parameters: t, the number of iterations; z, the num-
+ber of samples for each variable setting; and α, the “slack”
+factor, which is a positive real number. The input is a formula
+F over n variables. The output is a lower-bound on the model
+count of F. SampleCount is a randomized algorithm with
+a high probability of success. We will shortly formalize its
+success probability quantitatively as Theorem 1.
+
+SampleCount is formally stated as Algorithm 1 and de-
+scribed below. SampleCount performs t iterations on F
+and ﬁnally reports the minimum of the counts obtained in
+these iterations. Within an iteration, it makes a copy G
+of F and, as long as G is too hard to be solved by an
+exact model counting subroutine,4 does the following.
+It
+calls SampleSolutions(G, z) to sample up to z solutions
+of G;
+it may re-
+turn fewer than z samples.5 Call this set of solutions S.
+GetMostBalancedVar(S) selects a variable u of G whose
+positive and negative occurrences in S are as balanced as pos-
+sible, i.e., as close to |S|/2 each as possible. Ties are bro-
+ken randomly. Similarly, GetMostBalancedVarPair(S)
+
+if the sampling subroutine times out,
+
+4This is decided based on the number of remaining variables
+or other natural heuristics. A common strategy is to run an exact
+counter for a pre-deﬁned amount of time [Wei and Selman, 2005].
+
+5Even when no samples are found, the procedure can continue
+by selecting a random variable. Of course, the quality of the bound
+obtained will suffer.
+
+Params: integers t, z; real α > 0
+Input
+Output : A lower-bound on the model count of F
+begin
+
+: A CNF formula F over n variables
+
+minCount ← 2n
+for iteration ← 1 to t do
+
+G ← F
+s ← 0
+until G becomes feasible for ExactModelCount do
+
+s ← s + 1
+S ← SampleSolutions(G, z)
+u ← GetMostBalancedVar(S)
+(v, w) ← GetMostBalancedVarPair(S)
+r ← a random value chosen uniformly from {0, 1}
+if balance(u) ≥ balance(v, w) then
+
+set u to r in G
+
+else
+
+if r = 0 then replace w with v in G
+else replace w with ¬v in G
+
+Simplify(G)
+
+count ← 2s−α· ExactModelCount(G)
+if count < minCount then
+
+minCount ← count
+
+return Lower-bound: minCount
+
+end
+
+Algorithm 1: SampleCount
+
+selects a variable pair (v, w) whose same and different occur-
+rences are as balanced as possible. Here “same occurrence”
+in a solution means that either both v and w appear positively
+or they both appear negatively. If u is at least as balanced
+as (v, w), SampleCount uniformly randomly sets u to 0 or
+1 in G. Otherwise, it uniformly randomly replaces w with
+either v or ¬v, forcing a literal equivalence. Now G is sim-
+pliﬁed by unit propagating this variable restriction, it is tested
+again for the possibility of exact counting, and, if necessary,
+the sampling and simpliﬁcation process is repeated. Once G
+comes within the range of the exact counting subroutine after
+s simpliﬁcation steps, the number of remaining models in G
+is computed. This, multiplied with 2s−α
+, is the ﬁnal count for
+this iteration. After t iterations, the minimum of these counts
+is reported as the lower-bound.
+
+By setting variables and equivalences, the original formula
+is reduced in size. By doing this repeatedly, we eventually
+reach a formula that can be counted exactly. SampleCount
+provides a practically effective way of selecting the variables
+to set or the equivalence to assert. Each time it looks for the
+most evenly way to divide the set of remaining solutions. By
+picking one of the two subsets randomly, we obtain real guar-
+antees (see Section 3.1) and the formula is eventually sufﬁ-
+ciently simpliﬁed to enable an exact count. The sampling is
+used to attempt an as evenly as possible division of the solu-
+tion space. The better this works, the better our lower-bound.
+But we don’t need any guarantees on the sampling quality;
+we will still obtain a valid, non-trivial lower-bound.
+
+3.1 Correctness Analysis of SampleCount
+We now analyze SampleCount as a randomized algorithm
+and show that the probability that it provides an incorrect
+lower-bound on an input formula decreases exponentially to
+zero with the number of iterations, t, and the slack factor, α.
+
+IJCAI-07
+
+2295
+
+Somewhat surprisingly, as we discuss below, the bound on
+the error probability we obtain is independent of the number
+z of samples used and the quality of the samples (i.e., how
+uniformly they are distributed in the solution space).
+Theorem 1. For parameters (t, z, α), the lower-bound re-
+turned by SampleCount is correct with probability at least
+−αt independent of the number and quality of solution
+1 − 2
+samples.
+
+∗, s
+
+∗
+
+∗ > 0, be the true model count of F. Sup-
+Proof. Let 2s
+pose SampleCount returns an incorrect lower-bound, i.e.,
+minCount > 2s
+in all of the
+t iterations. We will show that this happens in any single iter-
+. By probabilistic indepen-
+ation with probability at most 2
+dence of the t iterations, the overall error probability would
+then be at most 2
+
+. This implies that count > 2s
+
+−αt , proving the theorem.
+
+−α
+
+∗
+
+(cid:2)
+
+Fix any iteration of SampleCount. When executing the
+algorithm, as variables of G are ﬁxed or replaced with an-
+other variable within the inner (until-do) loop, G is repeat-
+edly simpliﬁed and the number of variables in it is reduced.
+For the analysis, it is simpler to consider a closely related for-
+mula ρ(G) over all n variables. At the start of the iteration,
+ρ(G) = G = F. However, within the inner loop, instead of
+ﬁxing a variable u to 0 or 1 or replacing w with v or ¬v and
+simplifying (as we did for G), we add additional constraints
+u = 0, u = 1, w = v, or w = ¬v, respectively, to ρ(G). Clearly,
+at any point during the execution of SampleCount, the solu-
+tions of ρ(G) are isomorphic to the solutions of G; every so-
+lution of G uniquely extends to a solution of ρ(G) and every
+solution of ρ(G) restricted to the variables of G is a solution
+of G. In particular, the number of solutions of G is always the
+same as that of ρ(G). Further, every solution of ρ(G) is also
+a solution of F.
+
+Let
+
+G). ρ((cid:2)
+
+times the model count of ρ((cid:2)
+
+G deﬁned on all n variables, ρ((cid:2)
+(cid:2)
+
+G denote the ﬁnal formula G on which the subroutine
+ExactModelCount(G) is applied after s variable restric-
+tions. Note that s itself is a random variable whose value is
+determined by which variables are restricted to which random
+value and how that propagates to simplify G so that its resid-
+ual models may be counted exactly. Consider the variant of
+G) is a random formula
+determined by F and the random bits used in the iteration. Fi-
+nally, the variable count for this iteration is a random variable
+whose value is 2s−α
+G). We are
+Recall that every solution of ρ((cid:2)
+interested in the behavior of count as a random variable.
+G) is also a solution of F.
+For every solution σ of F, let Yσ be an indicator random
+(cid:2)
+G. Then, count =
+variable which is 1 iff σ is a solution of
+2s−α∑σYσ. We will compute the expected value of count us-
+ing the law of total expectation: E [count] = E [E [count | s]].
+Fix s. For each σ, Pr [Yσ = 1 | s] equals the probability that
+each of the s variable restrictions within the inner loop is con-
+sistent with σ, i.e., if σ has u = 0 then u is not restricted to 1,
+if σ has v = w then w is not replaced with ¬v, etc. Because
+of the uniformly random value r used in the restrictions, this
+happens with probability exactly 1/2 in each restriction. Note
+that the s restrictions set or replace s different variables, and
+are therefore probabilistically independent with respect to be-
+−s.
+ing consistent with σ. Consequently, Pr [Yσ = 1 | s] = 2
+
+∗
+
+This implies that the conditional expectation of count given
+s is E [count | s] = E [2s−α∑σYσ | s] = 2s−α∑σ E [Yσ | s] =
+2s−α∑σ Pr [Yσ = 1 | s] = 2s−α∑σ 2
+−α∑σ 1. Since F
+has 2s
+. Applying
+(cid:3)
+the law of total expectation, E [count] = E [E [count | s]] =
+E
+
+solutions, we have E [count | s] = 2s
+(cid:4)
+(cid:3)
+
+2s
+Finally, using Markov’s inequality, Pr
+
+count > 2s
+
+−s = 2
+
+∗−α
+.
+
+= 2s
+
+∗(cid:4)
+
+∗−α
+
+∗−α
+
+<
+
+∗ = 2
+
+−α
+
+−α
+
+E [count]/2s
+. This proves that the error probability in
+(in fact, strictly less than
+any single iteration is at most 2
+). From our argument at the beginning of this proof, the
+2
+−αt .
+overall probability of error after t iterations is less than 2
+Since we did not use any property of the number or quality of
+samples, the error bound holds independent of these.
+
+−α
+
+We end with a discussion of the effect of the number of
+samples, z, on SampleCount. It is natural to expect more
+samples to lead to a “better” bound at the cost of a higher
+runtime. Note, however, that z does not factor into our formal
+result above. This is, in fact, one of the key points of this
+paper, that we provide guaranteed bounds without making
+any assumptions whatsoever on the quality of the sampling
+process or the structure of the formula. Without any such
+assumptions, there is no reason for more samples to guide
+SampleCount towards a better lower-bound. In the worst
+case, a highly biased sampler could output the same small set
+of solutions over and over again, making more samples futile.
+However, in practice, we do gain from any sampling pro-
+cess that is not totally biased. It guides us towards balanced
+variables whose true multipliers are close to 2, which reduces
+probabilistic ﬂuctuations arising from randomly ﬁxing the se-
+lected variables. Indeed, under weak uniformity-related as-
+sumptions on the sampler and assuming the formula has a
+mix of balanced and imbalanced variables, a higher number
+of samples will reduce the variation in the lower-bound re-
+ported by SampleCount over several runs.
+
+4 Experimental Results
+
+We conducted experiments on a cluster of 3.8 GHz Intel
+Xeon machines with 2GB memory per node running Linux.
+The model counters used were SampleCount, Relsat ver-
+sion 2.00 with counting, Cachet version 1.2 extended to re-
+port partial counts, and ApproxCount version 1.2. Both
+SampleCount and ApproxCount internally use SampleSat
+for obtaining solution samples. SampleCount was created
+by modifying ApproxCount to ignore its sample-based mul-
+tipliers, ﬁx the most balanced variables at random, and ana-
+lyze equivalences, and by creating a wrapper to perform mul-
+tiple iterations (t) with the speciﬁed slack factor α.
+
+In all our experiments with SampleCount, α and t were
+set so that αt = 7, giving a correctness conﬁdence of 1 −
+−7 = 99% (see Theorem 1). t ranged from 1 to 7 so as to
+2
+keep the runtimes of SampleCount well below two hours,
+while the other model counters were allowed a full 12 hours.
+The number of samples per variable setting, z, was typically
+chosen to be 20. Our results demonstrate that SampleCount
+is quite robust even with so few samples. Of course, it can
+be made to produce even better results with more samples
+of better quality, or by using a “buckets” strategy that we will
+
+IJCAI-07
+
+2296
+
+Table 1: Performance of SampleCount compared with exact counters and with an approximate counter without guarantees.
+
+Instance
+
+True Count
+
+CIRCUIT SYNTH.
+
+2bitmax 6
+
+2.1 × 1029
+
+3bitadd 32
+
+—
+
+RANDOM k-CNF
+
+SampleCount
+(99% conﬁdence)
+Models
+
+Time
+
+Exact Counters
+
+Relsat
+
+Cachet
+
+ApproxCount
+
+(without guarantees)
+
+Models
+
+Time
+
+Models
+
+Time
+
+Models
+
+Time
+
+≥ 2.4 × 1028
+29 sec
+≥ 5.9 × 101339 32 min
+
+2.1 × 1029
+—
+
+66 sec
+
+12 hrs
+
+2.1 × 1029
+—
+
+2 sec ≈ 5.6 × 1028
+12 hrs ≈ 7.3 × 10941
+
+8 sec
+
+43 min
+
+wff-3-3.5
+
+wff-3-1.5
+
+wff-4-5.0
+
+1.4 × 1014
+1.8 × 1021
+
+—
+
+≥ 1.6 × 1013
+≥ 1.6 × 1020
+≥ 8.0 × 1015
+
+1.4 × 1014
+4 min
+4 min ≥ 4.0 × 1017
+2 min ≥ 1.8 × 1012
+
+2 hrs
+
+1.4 × 1014
+1.8 × 1021
+12 hrs
+12 hrs ≥ 1.0 × 1014
+
+7 min ≈ 8.4 × 1013
+3 hrs ≈ 9.3 × 1018
+12 hrs ≈ 4.2 × 1015
+
+LATIN SQUARE
+
+ls8-norm 5.4 × 1011
+ls9-norm 3.8 × 1017
+ls10-norm 7.6 × 1024
+ls11-norm 5.4 × 1033
+ls12-norm
+
+—
+
+ls13-norm
+
+ls14-norm
+
+ls15-norm
+
+—
+
+—
+
+—
+
+—
+
+lang-2-12
+
+ls16-norm
+LANGFORD PROBS.
+1.0 × 105
+3.0 × 107
+3.2 × 108
+2.1 × 1011
+2.6 × 1012
+3.7 × 1015
+
+lang-2-19
+
+lang-2-15
+
+lang-2-16
+
+lang-2-20
+
+lang-2-23
+
+lang-2-24
+
+lang-2-27
+
+lang-2-28
+
+—
+
+—
+
+—
+
+≥ 3.1 × 1010
+≥ 1.4 × 1015
+≥ 2.7 × 1021
+≥ 1.2 × 1030
+≥ 6.9 × 1037
+≥ 3.0 × 1049
+≥ 9.0 × 1060
+≥ 1.1 × 1073
+≥ 6.0 × 1085
+
+≥ 4.3 × 103
+≥ 1.0 × 106
+≥ 1.0 × 106
+≥ 3.3 × 109
+≥ 5.8 × 109
+≥ 1.6 × 1011
+≥ 4.1 × 1013
+≥ 5.2 × 1014
+≥ 4.0 × 1014
+
+19 min ≥ 1.7 × 108
+32 min ≥ 7.0 × 107
+49 min ≥ 6.1 × 107
+69 min ≥ 4.7 × 107
+50 min ≥ 4.6 × 107
+67 min ≥ 2.1 × 107
+44 min ≥ 2.6 × 107
+56 min
+
+—
+
+68 min
+
+—
+
+1.0 × 105
+32 min
+60 min ≥ 1.8 × 105
+65 min ≥ 1.8 × 105
+62 min ≥ 2.4 × 105
+54 min ≥ 1.5 × 105
+85 min ≥ 1.2 × 105
+80 min ≥ 4.1 × 105
+111 min ≥ 1.1 × 104
+117 min ≥ 1.1 × 104
+
+12 hrs ≥ 1.9 × 107
+12 hrs ≥ 1.7 × 107
+12 hrs ≥ 2.4 × 107
+12 hrs ≥ 1.2 × 107
+12 hrs ≥ 1.5 × 107
+12 hrs ≥ 2.0 × 107
+12 hrs ≥ 1.5 × 107
+12 hrs ≥ 9.1 × 106
+12 hrs ≥ 1.0 × 107
+
+1.0 × 105
+15 min
+12 hrs ≥ 1.1 × 105
+12 hrs ≥ 1.0 × 105
+12 hrs ≥ 1.1 × 105
+12 hrs ≥ 1.0 × 105
+12 hrs ≥ 8.4 × 104
+12 hrs
+
+—
+
+12 hrs
+
+12 hrs
+
+—
+
+—
+
+12 hrs ≈ 2.7 × 1012
+12 hrs ≈ 9.5 × 1017
+12 hrs ≈ 2.1 × 1027
+12 hrs ≈ 5.1 × 1040
+12 hrs ≈ 1.8 × 1051
+12 hrs ≈ 4.1 × 1064
+12 hrs ≈ 2.3 × 1089
+12 hrs ≈ 5.6 × 10115
+12 hrs ≈ 5.4 × 10123
+
+4 hrs ≈ 3.7 × 105
+12 hrs ≈ 7.4 × 1010
+12 hrs ≈ 6.3 × 1010
+12 hrs ≈ 1.2 × 1014
+12 hrs ≈ 9.9 × 1015
+12 hrs ≈ 1.3 × 1020
+12 hrs ≈ 1.3 × 1022
+12 hrs ≈ 1.7 × 1033
+12 hrs ≈ 2.3 × 1026
+
+11 sec
+
+8 sec
+
+11 sec
+
+5 sec
+
+11 sec
+
+22 sec
+
+1 min
+
+8 min
+
+12 min
+
+18 min
+
+2 hrs
+2.5 hrs
+
+1.5 min
+23 min
+
+6 min
+
+12 min
+
+24 min
+
+75 min
+1.5 hrs
+3 hrs
+
+2 hrs
+
+brieﬂy outline in Section 5. On the other hand, ApproxCount
+often signiﬁcantly under- or over-estimated the number of
+solutions with 20 samples. We therefore allowed it around
+100 samples per variable setting in all our runs, except for
+the very easy instances (circuit synthesis and random for-
+mulas) where it used 1000 samples. Other parameters of
+ApproxCount were set so as to obtain the desired number of
+samples in a reasonable amount of time from SampleSat. A
+local search “cutoff” between 2,000 and 20,000 was sufﬁcient
+for most problems, while the Langford instances required a
+cutoff of 100,000 to obtain enough samples. Finally, both
+SampleCount and ApproxCount were set to call Cachet
+when typically between 50 and 350 variables remained unset.
+Table 1 summarizes our main results, where we evaluate
+our approach on formulas from four domains: circuit syn-
+thesis, random k-CNF, Latin square, and Langford problems.
+We see that SampleCount scales well with problem size
+and provides good high-conﬁdence lower-bounds close to the
+true counts, in most cases within an hour.
+It clearly out-
+performs exact counters, which almost always time out after
+12 hours, providing counts that are several orders of magni-
+tude below those of SampleCount. We also report results
+
+on ApproxCount even though the comparison is not really
+meaningful as ApproxCount does not provide any correct-
+ness guarantees. Indeed, it, for example, under-estimates the
+count by at least 10398 on 3bitadd 32, and over-estimates
+by 107 (with an increasing trend) on the Latin square for-
+mulas. (Of course, there are also classes of formulas where
+ApproxCount appears to count quite accurately when given
+good quality samples.) We discuss the results in detail below.
+The circuit synthesis formulas are for ﬁnding minimal size
+circuits for a given Boolean function. These are known to
+quickly become very difﬁcult for DPLL style procedures.
+The instance 2bitmax 6 is still easy for exact model count-
+ing procedures, and SampleCount also gets a very good
+lower-bound quickly. 3bitadd 32, on the other hand, was
+only recently solved for a single solution using MiniSat in
+about 6,000 seconds. 3bitadd 32 is certainly far beyond
+the reach of exact counting. The total solution count for
+this formula is astonishing; SampleCount reports a lower-
+bound of 5.9 × 101339. Note that the formula has close to
+9,000 variables and therefore the solution set is still an expo-
+nentially small fraction of the total number of assignments.
+SampleCount sets around 3,000 variables in around 30 min-
+
+IJCAI-07
+
+2297
+
+Table 2: Comparison of SampleCount with MBound, both with 99% conﬁdence.
+
+SampleCount
+
+MBound
+
+Instance
+
+Ramsey-20-4-5
+
+Ramsey-23-4-5
+
+Schur-5-100
+
+Schur-5-140
+
+Models
+
+≥ 3.3 × 1035
+≥ 1.4 × 1031
+≥ 1.3 × 1017
+
+—
+
+fclqcolor-18-14-11 ≥ 3.9 × 1050
+fclqcolor-20-15-12 ≥ 3.1 × 1057
+
+Models
+
+Time
+3.5 min ≥ 1.2 × 1030
+53 min ≥ 1.8 × 1019
+20 min ≥ 2.8 × 1014
+12 hrs ≥ 6.7 × 107
+3.5 min ≥ 2.1 × 1040
+6 min ≥ 2.2 × 1046
+
+Relsat
+Time
+Models
+23 min ≥ 9.1 × 109
+25 min ≥ 6.8 × 105
+25 min ≥ 8.1 × 104
+
+Cachet
+Models
+
+≥ 9.0 × 1011
+≥ 8.4 × 106
+≥ 1.0 × 1014
+
+1 hr
+
+—
+
+—
+
+28 sec ≥ 1.2 × 1031 ≥ 2.4 × 1033
+2 min ≥ 9.0 × 1027 ≥ 8.6 × 1038
+
+Time
+
+12 hrs
+
+12 hrs
+
+12 hrs
+
+12 hrs
+
+12 hrs
+
+12 hrs
+
+utes, with the remaining formula solved by Cachet in un-
+der two minutes. Finally, ApproxCount seriously under-
+estimates the true count, reporting only 9.3 × 10941.
+
+Our
+
+random formulas are selected from the under-
+constrained area, i.e., with clause-to-variable ratios below the
+SAT-UNSAT threshold. As noted by Bayardo Jr. and Pe-
+houshek [2000], such formulas have a large number of as-
+signments and are much harder to count than formulas of the
+same size near the phase transition. The table gives results
+on three such formulas: wff-3-150-525, wff-3-100-150,
+and wff-4-100-500. SampleCount comes close to the true
+counts within minutes, while Cachet takes up to 3 hours.
+ApproxCount again under-estimates the counts.
+
+Our third domain involves the problem of counting the
+number of normalized Latin squares of a given order. A nor-
+malized Latin square is a Latin square with the ﬁrst row and
+column ﬁxed. The exact counts for these formulas are known
+up to order 11. We see that SampleCount scales nicely as
+n increases, giving good bounds in a relatively small amount
+of time. We used averaging over buckets of size two for bet-
+ter bounds (cf. Section 5). Both Relsat and Cachet con-
+sistently time out with partial or no counts.
+Interestingly,
+ApproxCount over-estimates the counts by several orders of
+magnitude for the harder formulas whose true count is known.
+Our ﬁnal domain, Langford’s problem, is parameterized
+In our instances, k = 2 and the
+by two values, k and n.
+following problem is encoded: produce a sequence S of
+length 2n such that for each i ∈ {1, 2, . . . , n}, i appears twice
+in S and the two occurrences of i are exactly i apart from each
+other. This problem is satisﬁable only if n is 0 or 3 modulo
+4. We see that SampleCount, with buckets of size 3, scales
+well as n increases, quickly giving good lower-bounds on the
+true count (which is known for some of our instances, cf.
+http://www.lclark.edu/˜miller/langford.html).
+Again, ApproxCount over-estimates the counts by many
+orders of magnitude, while Relsat and Cachet produce
+signiﬁcant under-counts in 12 hours of CPU time.
+
+In Table 2, we compare the performance of SampleCount
+with an XOR-streamlining based model counting method that
+we recently proposed, called MBound [Gomes et al., 2006].
+These two approaches are very different in spirit. MBound
+was designed for challenging combinatorial problems for
+which even ﬁnding a single solution is often computation-
+ally difﬁcult. SampleCount, on the other hand, is targeted
+towards problems for which multiple solutions can be repeat-
+
+edly sampled efﬁciently. While MBound adds randomly cho-
+sen “XOR” constraints to the formula, potentially making it
+harder for SAT solvers, SampleCount adaptively eliminates
+variables, simplifying the formula. SampleCount has fewer
+parameters than MBound and is easier to use in practice. As
+we will see, on formulas where enough samples can be ob-
+tained easily, SampleCount outperforms MBound. However,
+when it is hard to ﬁnd samples, MBound wins. This shows
+that the two techniques are complementary.
+
+All formulas considered for the comparison in Table 2 are
+beyond the reach of current exact model counting methods,
+and are also challenging for ApproxCount (see [Gomes et
+al., 2006] for details). We see that on both the Ramsey and
+the clique coloring problems, SampleCount provides much
+stronger lower-bounds than MBound (at 99% conﬁdence for
+both approaches). For the Schur problems, SampleCount
+dominates on the easier instance, but is unable to sample so-
+lutions at all for the harder instance.
+
+Finally, we demonstrate that although in expectation accu-
+rate model counts are still obtained even when samples are
+not used in the form of a guiding heuristic, techniques based
+on randomly selecting and ﬁxing variables can suffer from a
+highly undesirable heavy-tail effect. Consider the following
+settings for SampleCount: α= 0, t = 1, and an exact counter
+is called only when all variables are ﬁxed (so that it returns
+either 0, inconsistency, or 1 as the residual count). We use
+two variations of this, the ﬁrst where variables are selected
+at random and the second where sampling is used to select
+variables likely to be more balanced.
+
+Figure 1 shows the result on the Latin square formula
+ls7-normalized.
+It plots the cumulative average of the
+number of solutions obtained using the two variants over
+1,800 independent runs. The values plotted for run i are the
+average of the ﬁrst i model counts for the two variants, respec-
+tively. Theoretically, both of these cumulative averages must
+converge to the true count for this formula, 1.69 × 107 (shown
+as a horizontal line), after sufﬁciently many runs. It is clear
+from the ﬁgure that when balanced variables are used even
+by considering only 20 solution samples, the obtained model
+count approaches the true count signiﬁcantly faster than when
+variables are selected at random. This fast convergence is key
+to SampleCount’s good performance in practice.
+
+Note that in the random variable selection case, the model
+count happened to start quite low in this experiment, keep-
+ing the cumulative average down. The sudden upward jumps
+
+IJCAI-07
+
+2298
+
+t
+
+n
+u
+o
+c
+ 
+
+n
+o
+
+i
+t
+
+l
+
+u
+o
+s
+ 
+f
+
+o
+
+ 
+
+e
+g
+a
+r
+e
+v
+a
+
+ 
+
+e
+v
+i
+t
+
+l
+
+a
+u
+m
+u
+C
+
+ 3e+07
+
+ 2.5e+07
+
+ 2e+07
+
+ 1.5e+07
+
+ 1e+07
+
+ 5e+06
+
+ 0
+
+Model counts for ls7-normalized.cnf
+
+true count = 1.69e+07
+with random variable selection (lower curve)
+with balanced variable selection (upper curve)
+
+ 0
+
+ 200  400  600  800  1000  1200  1400  1600  1800
+
+Number of runs
+
+Figure 1: Convergence to the true model count: random vari-
+able selection vs. balanced variables using solution sampling
+
+in the plot correspond to excessively high model counts that
+compensate for all runs up till that point and bump up the
+cumulative average. Here, these over-estimated counts are
+2.1 × 109 in run 903 and 4.3 × 109 in run 1756, both over 100
+times the true count. Extremes of this nature, and even more
+drastic, occur fairly often when selecting variables at random.
+
+5 Extending SampleCount with Buckets
+For randomized algorithms, more computational resources
+and more iterations typically result in improved behavior.
+While this is true for SampleCount as well, it is not immedi-
+ately obvious. In fact, the more iterations we perform (i.e., the
+higher the t), the worse lower-bound on the model count we
+are likely to get because SampleCount takes the minimum
+over these t iterations. This apparent paradox is resolved
+by noting that as t grows, the minimum count may reduce
+a bit but the probability of obtaining an incorrect bound, as
+given by Theorem 1, converges exponentially to zero. Thus,
+more iterations directly translate into a much higher conﬁ-
+dence level in the correctness of SampleCount.
+
+SampleCount can in fact be extended so that more iter-
+ations translate into a trade-off between higher bounds and
+higher conﬁdence. The idea is to perform T = bt iterations
+and group these into t buckets or groups of size b each. The
+lower-bound in this extended version is obtained by comput-
+ing the average of the b counts within each bucket and taking
+the minimum over these t averages.
+
+strategy is
+
+identical
+
+For b = 1,
+
+this bucket
+
+to
+SampleCount. As b increases while t remains unchanged,
+we are likely to get lower-bounds even closer to the true
+count. To see this, ﬁx α = 0 so that the count obtained in
+each iteration is a random variable whose expected value is
+precisely the true count. Over different iterations, this count
+varies from its expected value, lowering the value of the
+minimum over all counts. By taking averages over several it-
+erations within a bucket, we stabilize the individual count for
+each bucket, and the minimum over these stabilized counts
+increases. One can show that the correctness guarantee for
+this bucket strategy is exactly the same as Theorem 1. We
+leave experimental evaluation for a full version of the paper.
+
+6 Conclusion
+We presented SampleCount, a new method for model count-
+ing which capitalizes on the ability to efﬁciently draw (pos-
+sibly biased) samples from the solution space of problems
+using SAT solvers. A key feature of this approach is that
+it gives probabilistic correctness guarantees on the obtained
+bounds on the solution counts without assuming anything at
+all about the quality (i.e., uniformity) of the sampling method
+used. In practice, SampleCount provides very good lower-
+bounds on the model counts of computationally challenging
+problems, and scales well as problem complexity increases.
+
+References
+[Bayardo Jr. and Pehoushek, 2000] R. J. Bayardo Jr. and J. D. Pe-
+houshek. Counting models using connected components. In 17th
+AAAI, pg. 157–162, Austin, TX, Jul 2000.
+
+[Darwiche, 2005] A. Darwiche. The quest for efﬁcient probabilistic
+
+inference, Jul 2005. Invited Talk, IJCAI-05.
+
+[E´en and S¨orensson, 2005] N. E´en and N. S¨orensson. MiniSat: A
+In 8th SAT, St.
+
+SAT solver with conﬂict-clause minimization.
+Andrews, U.K., Jun 2005. Poster.
+
+[Gomes et al., 2006] C. P. Gomes, A. Sabharwal, and B. Selman.
+Model counting: A new strategy for obtaining good bounds. In
+21th AAAI, pg. 54–61, Boston, MA, Jul 2006.
+
+[Jerrum et al., 1986] M. R. Jerrum, L. G. Valiant, and V. V. Vazi-
+rani. Random generation of combinatorial structures from a uni-
+form distribution. Theoretical Comput. Sci., 43:169–188, 1986.
+
+[Kilby et al., 2006] P. Kilby, J. Slaney, S. Thi´ebaux, and T. Walsh.
+In 21th AAAI, pg. 1014–1019,
+
+Estimating search tree size.
+Boston, MA, Jul 2006.
+
+[Kirkpatrick et al., 1983] S. Kirkpatrick, D. Gelatt Jr., and M. Vec-
+Science,
+
+Optimization by simuleated annealing.
+
+chi.
+220(4598):671–680, 1983.
+
+[Littman et al., 2001] M. L. Littman, S. M. Majercik, and T. Pitassi.
+Stochastic Boolean satisﬁability. J. Auto. Reas., 27(3):251–296,
+2001.
+
+[Madras, 2002] N. Madras. Lectures on Monte Carlo methods. In
+Field Institute Monographs, volume 16. Amer. Math. Soc., 2002.
+and
+H. Kautz. Evidence for invariants in local search. In AAAI/IAAI,
+pg. 321–326, Providence, RI, Jul 1997.
+
+[McAllester et al., 1997] D. A. McAllester, B. Selman,
+
+[Metropolis et al., 1953] N. Metropolis, A. Rosenbluth, M. Rosen-
+bluth, A. Teller, and E. Teller. Equations of state calculations by
+fast computing machines. J. Chem. Phy., 21:1087–1092, 1953.
+
+[Park, 2002] J. D. Park. MAP complexity results and approxima-
+In 18th UAI, pg. 388–396, Edmonton, Canada,
+
+tion methods.
+Aug 2002.
+
+[Roth, 1996] D. Roth. On the hardness of approximate reasoning.
+
+J. AI, 82(1-2):273–302, 1996.
+
+[Sang et al., 2004] T. Sang, F. Bacchus, P. Beame, H. A. Kautz, and
+T. Pitassi. Combining component caching and clause learning for
+effective model counting. In 7th SAT, Vancouver, B.C., Canada,
+May 2004. Online Proceedings.
+
+[Sang et al., 2005] T. Sang, P. Beame, and H. A. Kautz. Performing
+Bayesian inference by weighted model counting. In 20th AAAI,
+pg. 475–482, Pittsburgh, PA, Jul 2005.
+
+[Toda, 1989] S. Toda. On the computational power of PP and ⊕P.
+
+In 30th FOCS, pg. 514–519, 1989.
+
+[Wei and Selman, 2005] W. Wei and B. Selman. A new approach to
+model counting. In 8th SAT, volume 3569 of LNCS, pg. 324–339,
+St. Andrews, U.K., Jun 2005.
+
+[Wei et al., 2004] W. Wei, J. Erenrich, and B. Selman. Towards
+efﬁcient sampling: Exploiting random walk strategies. In 19th
+AAAI, pg. 670–676, San Jose, CA, Jul 2004.
+
+IJCAI-07
+
+2299
+
+

@@ -1,0 +1,1125 @@
+Detecting Stochastically Scheduled Activities in Video
+
+∗
+
+Massimiliano Albanese1
+
+Vincenzo Moscato2
+
+Antonio Picariello2
+
+V.S. Subrahmanian1
+
+Octavian Udrea1
+
+1University of Maryland Institute for Advanced Computer Studies,
+
+{albanese,vs,udrea@umiacs.umd.edu}
+
+2Universit`a di Napoli Federico II, Napoli, Italy,
+
+{vmoscato,picus}@unina.it
+
+Abstract
+
+The ability to automatically detect activities in
+video is of increasing importance in applications
+such as bank security, airport tarmac security, bag-
+gage area security and building site surveillance.
+We present a stochastic activity model composed
+of atomic actions which are directly observable
+through image understanding primitives. We focus
+on answering two types of questions: (i) what are
+the minimal sub-videos in which a given action is
+identiﬁed with probability above a certain thresh-
+old and (ii) for a given video, can we decide which
+activity from a given set most likely occurred? We
+provide the MPS algorithm for the ﬁrst problem,
+as well as two different algorithms (naiveMPA and
+MPA) to solve the second. Our experimental re-
+sults on a dataset consisting of staged bank robbery
+videos (described in [Vu et al., 2003]) show that
+our algorithms are both fast and provide high qual-
+ity results when compared to human reviewers.
+
+1 Introduction
+
+There has been a tremendous amount of work in low-level
+computer vision video processing algorithms for detection of
+various types of elementary events or actions such as a person
+entering or leaving a room or unloading a package. However,
+there is much less work on how such low level detection algo-
+rithms can be utilized in high-level recognition of activities in
+video. High level activities can include transactions at a bank
+automatic teller machine (ATM), robberies at an ATM, un-
+loading an aircraft, moving bags from a secure baggage zone
+at an airport to the truck that transports it to the plane, etc.
+
+In this paper, we focus on such high level activities (and
+provide a simple ATM example to motivate our work). High
+level activities consist of a set of simple actions that are de-
+tectable using video image processing algorithms, together
+with some temporal requirements.
+
+In this paper, we provide fast algorithms to answer two
+kinds of queries. The ﬁrst type of query tries to ﬁnd min-
+imal (i.e. the shortest possible) clips of video that contain a
+given event with a probability exceeding a speciﬁed threshold
+— we call these Threshold Activity Queries. The second type
+of query takes a portion of a video (the part seen thus far) and
+a set of activities, and tries to ﬁnd the activity in the set that
+most likely has occurred in the video (we call these Activity
+Recognition Queries).
+
+The key contributions of this paper are the following. We
+ﬁrst introduce (in Section 2) a simple stochastic automata
+representation of complex activities based on atomic actions
+which are recognizable by an image understanding primitive
+such as those in [Elgammal et al., 2000; Bevilacqua, 2003;
+2002; Cavallaro et al., 2005; 2000; Makarov, 1996]. Ex-
+amples of actions we have implemented in our system us-
+ing computer vision algorithms include person and object
+identiﬁcation, identiﬁcation of people entering and exiting
+rooms and motion tracking. Our ﬁrst major contribution
+(in Section 3) is the M P S algorithm to answer threshold
+queries. Our second major contribution (Section 4) are the
+naiveM P A and M P A algorithms to solve activity recog-
+nition queries. We evaluate these algorithms theoretically as
+well as experimentally (in Section 5) on a third party dataset
+consisting of staged bank robbery videos [Vu et al., 2003]
+and provide evidence that the algorithms are both efﬁcient
+and yield high-quality results.
+
+2 Stochastic Activities
+
+In this section, we provide a simple framework to represent
+high level activities on top of low level image processing
+primitives. This framework is a simple version of HMMs -
+we don’t claim it is new. The novel part of this paper starts
+from the next section onwards.
+
+We assume the existence of a ﬁnite set A of “action” sym-
+bols; we assume that each such atomic action can be detected
+by an image understanding method1. For the purposes of this
+paper, we will assume that action symbols are propositional,
+though there is no loss of generality in this assumption.
+
+∗
+
+Authors listed in alphabetical order. This work was partly sup-
+ported by AFOSR grants FA95500610405 and FA95500510298,
+ARO grant DAAD190310202 and by the Joint Institute for Knowl-
+edge Discovery.
+
+1Although some of the image understanding methods cited in
+this paper return a numeric value between 0 and 1, this can be readily
+transformed into a method that returns either “yes” or “no” based on
+a ﬁxed threshold.
+
+IJCAI-07
+
+1802
+
+Deﬁnition 1 (Stochastic activity) A stochastic activity is a
+labeled graph (V, E, ρ) where:
+
+1. V is a ﬁnite set of action symbols;
+2. E is a subset of (V × V );
+3. ρ is a function that associates, with each v of out-degree
+1 or more, a probability distribution on {(v, v(cid:2))|(v, v(cid:2)) ∈
+E}, i.e. for all v ∈ V ,
+
+ρ((v, v(cid:2))) = 1.
+
+(cid:2)
+
+(v,v(cid:2))∈E
+
+4. {v ∈ V | (cid:4) ∃ v(cid:2) ∈ V s.t. (v, v(cid:2)) ∈ E} (cid:4)= ∅. This states
+that there exists at least one end symbol in the activity
+deﬁnition.
+
+5. {v ∈ V | (cid:4) ∃ v(cid:2) ∈ V s.t. (v(cid:2), v) ∈ E} (cid:4)= ∅. This states
+that there exists at least one start symbol in the activity
+deﬁnition.
+
+For v ∈ V , we denote by pb(v) the maximum product of prob-
+abilities on any paths between v and an end node.
+
+Figure 1(a) shows a small example of a stochastic activ-
+ity associated with transactions at an Automatic Teller Ma-
+chine (ATM). In this ﬁgure, we have assumed that edges
+without a label have probability 1. For example, consider
+the node withdraw-cash. There are two edges starting at
+this node - one to withdraw-card labeled with a probabil-
+ity of 0.9 and one to insert-checks with probability 0.1. This
+means that there is a 90% probability of transitioning to the
+withdraw-card state after executing withdraw-cash and a
+10% probability of transitioning to insert-checks after exe-
+cuting withdraw-cash. For the purposes of this paper, this
+example is somewhat simpliﬁed (e.g., we avoided talking
+about receipts generated by ATMs, etc.). Each of the actions
+in this stochastic activity can be easily detected by either an
+image processing algorithm (e.g. detect-person would check
+if a person is present in the image) or a sensor (e.g. to detect
+if insert-card holds). It is also important to note that in this
+framework, it is possible to execute withdraw-cash, then ex-
+ecute insert-checks, and then again execute withdraw-cash
+— informally speaking, the probability of this sequence oc-
+curring would be 0.1 × 0.2 = 0.02. Similarly, Figure 1(b)
+describes an attempted robbery at an ATM.
+
+A labeling (cid:3) of a video v is a mapping that takes a video
+frame f as input, and returns a set of action symbols as output.
+
+Example 1 The following is a labeling of a 500-frame
+video w.r.t.
+to the stochastic activity presented in Fig-
+(5, {detect − person}), (26, {present −
+ure 1(a):
+card}), (45, {insert − card}), (213, {withdraw −
+cash}), (320, {insert − checks}), (431, {withdraw −
+card}), (496, {¬detect − person}).
+
+We say that an action a(cid:2) follows an action a in segment
+[s, e] ⊆ v w.r.t. labeling (cid:3) and activity deﬁnition (V, E, ρ) iff:
+(i) a ∈ (cid:3)(s), a(cid:2) ∈ (cid:3)(e) and (a, a(cid:2)) ∈ E; (ii) ∀a(cid:2)(cid:2) ∈ {b ∈
+V |(a, b) ∈ E} − {a(cid:2)} and ∀f s.t. s ≤ f ≤ e, a(cid:2)(cid:2) (cid:4)∈ (cid:3)(f ).
+
+Example 2 Consider the labeling in Example 1.
+In the
+subvideo [45, 320], action withdraw − cash follows action
+insert − card. However, action insert − checks does not
+follow action insert − card.
+Intuitively, a labeling of video v speciﬁes which actions are
+detected in a given video. We now deﬁne the probability with
+
+which a given video segment [s, e] satisﬁes an activity speci-
+ﬁcation.
+Deﬁnition 2 (Probabilistic satisfaction) Let v = [s, e] be a
+video segment and let (V, E, ρ) be a stochastic activity. Let
+(cid:3) : v → 2V
+be a labeling of the video segment v. We say
+that v satisﬁes (V, E, ρ) with probability p iff there exists a
+sequence of framesf1 ≤ . . . ≤ fn ∈ [s, e] and a sequence of
+activity symbols u1, . . . , un such that:
+(i) ∀i ∈ [1, n]ui ∈ (cid:3)(fi).
+(ii) For all i ∈ [1, n − 1], ui+1 follows ui in [fi, fi+1] w.r.t.
+
+(iii) {w ∈ V |(w, u1) ∈ E} = ∅ and {w ∈ V )|(un, w) ∈
+
+(cid:3) and (V, E, ρ).
+
+E} = ∅.
+
+(iv) Πn−1
+
+i=1 ρ((ui, ui+1)) ≥ p.
+
+One problem with the above deﬁnition is that an activity con-
+sisting of very few action symbols will in most cases yield
+a higher probability than an activity with a hundred times as
+many actions. In cases when we want to decide which activity
+from a given set most likely occurs in a video, we need to nor-
+malize the probability w.r.t. to the activity deﬁnition. We say
+that a video [s, e] satisﬁes an activity (V, E, ρ) w.r.t.
+label-
+ing (cid:3) with relative probability p∗ iff [s, e] satisﬁes (V, E, ρ)
+with probability p and p∗ = p−pmin
+pmax−pmin , where pmin, pmax
+are the lowest and respectively highest probabilities labeling
+a path from a start node2 to an end node3 in (V, E, ρ).
+
+Example 3 Consider the labeling in Example 1 and the
+stochastic activity in Figure 1. Then the video satisﬁes the
+action with probability 0.056. For this example, pmin = 0
+(since we can have an arbitrarily large sequence of activities
+repeating the action symbols withdraw − cash, insert −
+checks) and pmax = 0.63. Then the video whose labeling
+is given in Example 1 satisﬁes the activity in Figure 1 with a
+relative probability of approximately 0.089.
+Proposition 1 Let v = [s, e] be a video segment, and let (cid:3) be
+its labeling. Let (V, E, ρ) be a stochastic activity such that
+v satisﬁes (V, E, ρ) with probability p. Then for all videos
+v(cid:2) with labeling (cid:3)(cid:2) such that v ⊆ v(cid:2) and ∀f ∈ [s, e] (cid:3)(f ) =
+(cid:3)(cid:2)(f ), v(cid:2) satisﬁes (V, E, ρ) with probability p.
+
+Deﬁnition 3 A stochastic activity query (SAQ) is a four-tuple
+(v, (cid:3), (V, E, ρ), p) where v is a video, (cid:3) is a labeling of the
+video, (V, E, ρ) is a stochastic activity, and p is a threshold
+probability.
+
+A sequence [s, e] is an answer to the above SAQ iff [s, e]
+satisﬁes (V, E, ρ) with probability p and there is no strict sub-
+set [s(cid:2), e(cid:2)] ⊂ [s, e] which satisﬁes (V, E, ρ) with probability p.
+
+Intuitively, we are looking for the smallest subvideos that
+satisfy an activity deﬁnition with probability above a given
+threshold p. We will now deﬁne the most probable subvideo
+and most probable activity problems more formally.
+The Most Probable Subvideo (MPS) Problem. The most
+probable subvideo problem can now be deﬁned as follows:
+given a stochastic activity query (v, (cid:3), (V, E, ρ), p), ﬁnd the
+set of all answers to the query.
+
+2A node of indegree 0.
+3A node of outdegree 0.
+
+IJCAI-07
+
+1803
+
+detect-
+person
+
+present-
+
+card
+
+insert-card
+
+0.7
+
+withdraw-
+
+cash
+
+0.9
+
+withdraw-
+
+card
+
+0.1 0.2
+
+0.8
+
+0.3
+
+insert-
+checks
+
+~detect-
+person
+
+detect-
+person
+
+present-
+
+card
+
+insert-card
+
+detect-
+assailant
+
+0.8
+
+withdraw-
+
+cash
+
+0.9
+
+cash-
+transfer
+
+0.05
+
+0.1
+
+0.15
+
+~detect-
+person
+
+~detect-
+assailant
+
+(a) ATM regular operation
+
+(b) ATM attempted robbery
+
+Figure 1: ATM stochastic activity examples
+
+In many
+The Most Probable Activity (MPA) Problem.
+practical cases – airport security, ATM monitoring, etc., the
+system users are interested in monitoring a list of speciﬁc
+activities. The goal is to identify the activity (or activities)
+that most likely occur in a given portion of the surveillance
+video. The most likely activity problem can be deﬁned as
+follows: given a video v, its labeling (cid:3), a set of activity def-
+initions A = {(V1, E1, ρ1), . . . , (Vn, En, ρn)}, ﬁnd the set
+A(cid:2) ⊆ A such that the following hold: (i) Let pm = max({p ∈
+[0, 1]|∃Ai = (Vi, Ei, ρi) ∈ A s.t. v satisﬁes Ai with relative
+probability p}). Then ∀(Vi, Ei, ρi) ∈ A(cid:2), (Vi, Ei, ρi) satisfy
+v with relative probability pm; (ii) (cid:4) ∃(Vj, Ej , ρj) ∈ A − A(cid:2),
+s.t. v satisﬁes (Vj , Ej, ρj) with relative probability pm.
+
+3 Threshold Queries
+The most probable subvideo (M P S) algorithm tries to ﬁnd
+all answers to a stochastic activity query (v, (cid:3), (V, E, ρ), p)
+and is shown in Figure 2.
+
+Algorithm MPS
+Input: Query (v, (cid:2), (V, E, ρ), pt), where v = [s, e].
+Output: The set of subvideos representing the answer to the input query and the probabilities with
+which the activity is satisﬁed.
+Notation: C is a set of triples (f, p, a), where f is a frame in v, p ∈ [0, 1] and a ∈ V is an
+activity symbol.
+
+for every (f, p, a) ∈ C do
+
+1. R ← ∅;
+2. C ← ∅;
+3. Vs ← {a ∈ V | (cid:6) ∃a(cid:2) ∈ V s.t. (a(cid:2) , a) ∈ E};
+4. Ve ← {a ∈ V | (cid:6) ∃a(cid:2) ∈ V s.t. (a, a(cid:2)) ∈ E};
+5. for fi = s to e do
+6.
+7.
+8.
+9.
+10.
+11.
+12.
+13.
+
+D ← (cid:2)(fi) ∩ {b ∈ V |(a, b) ∈ E};
+if D (cid:6)= ∅ then
+
+if p · ρ(a, a(cid:2)) ≥ pt then
+
+C ← C − {(f, p, a)};
+
+for a(cid:2) ∈ D do
+
+T ← {(f (cid:2), p(cid:2), b) ∈ C|f (cid:2) = f ∧ a(cid:2) = b};
+C ← C − T ∪
+
+{(f, max(max(f (cid:2) ,p(cid:2),a(cid:2))∈T (p(cid:2)), p · ρ(a, a(cid:2))), a(cid:2))};
+
+for every (f, p, a) ∈ C s.t. a ∈ Ve do
+
+endfor
+for every a ∈ Vs ∩ (cid:2)(fi) do
+C ← C ∪ {(fi, 1, a)};
+
+endif
+endfor
+
+14.
+15.
+16.
+17.
+18.
+19.
+20.
+21.
+22.
+23.endfor
+24.for ([f1, f2], p) ∈ R do
+25.
+
+R ← R ∪ {([f, fi], p)};
+C ← C − {(f, p, a)};
+
+endfor
+
+for ([f (cid:2)
+if [f (cid:2)
+
+1, f (cid:2)
+1, f (cid:2)
+
+2], p(cid:2)) ∈ R − {([f1, f2], p)} do
+2] ⊂ [f1, f2] then
+
+R ← R − {([f1, f2], p)};
+
+else if ([f (cid:2)
+
+1, f (cid:2)
+
+2] = [f1, f2]) ∧ (p(cid:2) > p) then
+
+R ← R − {([f1, f2], p)};
+
+26.
+27.
+28.
+29.
+30.
+31.endfor
+32.return R;
+
+endfor
+
+Figure 2: An algorithm for the MPS problem
+
+The MPS algorithm maintains a set C of triples (f, p, a)
+that correspond to partially detected activities. f represents
+the frame when a start symbol in (V, E, ρ) is detected; this
+is later used to determine the subvideos that should go in the
+answer. p represents the product of probabilities on the path
+from the start symbol up to the action symbol a – the last sym-
+bol detected up to the current frame. The algorithm works
+by changing the state represented by C – intuitively, consist-
+ing of all paths through the activity deﬁnition for which we
+may reach an end node with probability above the threshold.
+Triples are removed from C when it is evident that the current
+path will result in a probability lower than pt (lines 12–13).
+When all frames of the video have been analyzed, the mini-
+mality condition in Deﬁnition 3 is enforced on lines 24–31 by
+removing redundant subvideos.
+
+Consider the labeling in Example 1 and the activity deﬁni-
+tion in Figure 1(a) and assume that pt = 0.01. At frame 5,
+the MPS algorithm will add the triple (5, 1, detect − person)
+to C (line 18). At frame 26, this triple will be replaced by
+(5, 1, present − card).
+Immediately after frame 213, we
+have C = {(5, 0.7, withdraw − cash)}. The process con-
+tinues until frame 496, after which the condition on line 19
+becomes true and (5, 0.056, ¬detect − person) causes the
+subvideo [5, 496] to be added to the answer R on line 20.
+Theorem 1 (MPS correctness) Algorithm M P S termi-
+nates and for an input query (v, (cid:3), (V, E, ρ), pt) it returns the
+set of answers R to the query – i.e.:
+
+• ∀[s, e] ∈ R, [s, e] is an answer to (v, (cid:3), (V, E, ρ), pt) as
+
+• (cid:4) ∃[s, e] s.t. [s, e] is an answer to (v, (cid:3), (V, E, ρ), pt) and
+
+per Deﬁnition 3.
+
+[s, e] (cid:4)∈ R.
+
+Theorem 2 (MPS complexity) Algorithm MPS for input
+query (v, (cid:3), (V, E, ρ), pt) runs in time O(|v|2 · |V |).
+
+Note that MPS makes only one pass through the video,
+which allows it to process a video as it comes in frame by
+frame. MPS is therefore well suited for scenarios (such as
+surveillance) in which a video is analyzed while playing.
+
+4 Activity recognition queries
+In this section, we present two methods to answer activity
+recognition queries where:
+
+• v is a video with labeling (cid:3).
+• A = {(V1, E1, ρ1), . . . , (Vn, En, ρn)} is a ﬁnite set of
+
+activities.
+
+One way to ﬁnd the set of activities (Vi, Ei, ρi) satisﬁed by
+v with the maximum relative probability among all activities
+in A is to use the MPS algorithm presented earlier as follows:
+
+IJCAI-07
+
+1804
+
+1. Start with pt = 1.
+2. If pt has not changed since the previous iteration, return
+
+the last set of activities obtained at step 3.
+
+3. Run M P S and record all activities satisﬁed with relative
+
+probability at least pt.
+
+4. If there is more than one activity in the previous set, then
+set pt to the average between its current and previous
+value and go to step 2. Otherwise if only one activity is
+obtained at step 3, return it.
+
+5. If there is no activity in the previously computed set, set
+
+pt to half its previous value and go to step 2.
+
+For reasons of space, we omit a detailed algorithmic de-
+scription of naiveM P A. The algorithm’s main issue is the
+binary search, which can run for many iterations, each taking
+O(n · |v|2 · |V |) steps. Our experiments show that the algo-
+rithm is particularly slow when there is more than one activity
+to be returned.
+
+Example 4 Consider
+the set of activities depicted in
+(5, {detect −
+Figure 1 and the following labeling:
+person}), (26, {present − card}), (45, {insert −
+card}), (213, {withdraw − cash}), (320, {insert −
+checks}), (344, {detect − assailant}), (431, {withdraw −
+card}), (446, {withdraw − cash}), (496, {¬detect −
+person}), (500, {¬detect − person}).
+
+naiveM P A will determine that T = ∅ until pt = 0.0625.
+At this point, subvideo [5, 496] satisﬁes the activity depicted
+in Figure 1(a) with relative probability 0.089 > pt, whereas
+the subvideo [30, 500] satisﬁes the activity in Figure 1(b) with
+relative probability of 0.044 < pt, hence the former will be
+returned.
+
+The activity recognition problem problem can be more ef-
+ﬁciently solved by maintaining state in a similar fashion to
+M P S for each of the activities in the set A. The algorithm is
+shown in Figure 3.
+
+M P A maintains an array C[1] . . . C[n] of sets, in which
+C[i] holds the current state for activity (Vi, Ei, ρi) in a sim-
+ilar way to the C set used by M P S. m[i] holds the maxi-
+mum relative probability with which A[i] has been satisﬁed
+thus far. Pruning occurs when a triple (f, p, a) in C[i] de-
+notes a path that cannot be completed with relative probabil-
+ity greater than m[i] (line 13). As M P S, M P A makes only
+one pass through the video, thus permitting incremental com-
+putation.
+
+Theorem 3 (MPA correctness) Algorithm MPA terminates
+and returns the correct answer – i.e.
+the set of activities
+{Ai} that is satisﬁed by v with the highest relative probability
+among all activities in A.
+
+Theorem 4 (MPA complexity) Algorithm MPA runs it time
+O(|v|2 · maxi∈[1,n](|Vi|) · n).
+
+5 Experiments and Implementation
+Our prototype implementation of the M P S, naiveM P A and
+M P A consists of approximately 1000 lines of Java code. In
+addition, we implemented an image processing library of ap-
+proximately 25,000 lines of Java code. The library operates
+on video frames, identifying blobs (corresponding to objects
+in the video), information about such objects (e.g., whether
+
+(Vi , Ei, ρi) ∈ A that
+
+Algorithm MPA
+Input: Video v with labeling (cid:2), set of activities A.
+is satisﬁed by v with the highest probability p and
+Output:
+∀j ∈ [1, n], j (cid:6)= i, (Vj , Ej , ρj ) is either not satisﬁes by v or is satisﬁed with probability
+p(cid:2) < p.
+Notes: C is a vector of sets, each C[i] has the same structure as C for the MPS algorithm. By
+
+notation, fi(p) =
+
+, where pi
+
+max , pi
+
+min are the maximum and respectively
+
+p−pi
+min
+pi
+max−pi
+
+min
+
+minimum probabilities for a path in (Vi , Ei , ρi).
+
+1. for i = 1 to n do
+2. m[i] ← 0;
+3. C[i] ← ∅;
+4. endfor
+5. for every frame fj in v do
+for every i = 1 to n do
+6.
+7.
+8.
+9.
+10.
+11.
+12.
+13.
+14.
+15.
+16.
+17.
+18.
+19.
+20.
+21.
+
+for a(cid:2) ∈ D do
+
+endif
+endfor
+
+for every (f, p, a) ∈ C[i] do
+
+D ← (cid:2)(fj ) ∩ {b ∈ Vi|(a, b) ∈ Ei};
+if D (cid:6)= ∅ then
+
+C[i] ← C[i] − {(f, p, a)};
+
+p(cid:2) ← p · ρi(a, a(cid:2));
+if fi(p(cid:2) · pb(a(cid:2))) > max(m[1], . . . , m[n]) then
+
+T ← {(f (cid:2), p(cid:2), b) ∈ C|f (cid:2) = f ∧ a(cid:2) = b};
+
+C[i] ← C[i] − T ∪ {(f, max(max(f,p,b)∈T (p), p(cid:2)), a(cid:2))};
+
+endfor
+for every a ∈ {x ∈ Vi| (cid:6) ∃ y ∈ Vi s.t. (y, x) ∈ Ei} ∩ (cid:2)(fj ) do
+
+C[i] ← C[i] ∪ {(fj , 1, a)};
+
+for every (f, p, a) ∈ C[i] s.t.
+
+a ∈ {x ∈ Vi| (cid:6) ∃y ∈ Vi s.t. (x, y) ∈ Ei} do
+
+C[i] ← C[i] − {(f, p, a)};
+m[i] ← max(m[i], fi(p));
+
+22.
+23.
+24.
+25.
+26.endfor
+27.return {(Ai , m[i])|m[i] = max(m[1], . . . , m[n])};
+
+endfor
+
+endfor
+
+Figure 3: An algorithm for the activity recognition problem
+
+an portion of an image is a person) and implementing mo-
+tion tracking primitives – this in turn leads to the ability to
+detect atomic actions (e.g., a person entering a room). The
+library implements algorithms described in [Elgammal et al.,
+2000; Bevilacqua, 2003; 2002; Cavallaro et al., 2005; 2000;
+Makarov, 1996]. Labeling data obtained from video process-
+ing was stored in a MySQL DBMS. All experiments were
+run on a Pentium Centrino at 1.5 Mhz, with 1.5GB of RAM,
+running Windows XP Professional.
+
+Our experiments were performed over a dataset of 7 video
+sequences of approximately 15-30 seconds, depicting both
+regular bank operations and (staged) attempted robberies; the
+dataset is a superset of that described in [Vu et al., 2003].
+We developed ﬁve activity deﬁnitions with the following no-
+tation: (a1) depicts regular customer-employee interaction;
+(a2) describes a non-employee that enters the vault room (the
+“safe”); (a3) describes a bank robbery attempt; (a4) describes
+a successful bank robbery – in which the assailant(s) enter the
+bank, then enter the safe by holding an employee hostage and
+then escape; (a5) describes an employee accessing the safe on
+behalf of a customer.
+
+In the ﬁrst set of experiments we measured the running
+time of M P S for activity deﬁnitions (a1)-(a4). We imple-
+mented two version of the algorithm: CA refers to the orig-
+inal algorithm in Figure 2; we found that in many scenarios
+(such as activities at an ATM), we can improve efﬁciency by
+assuming activities cannot be interleaved – which lead to the
+version denoted by CN A. The running times for labeling
+
+IJCAI-07
+
+1805
+
+]
+s
+m
+
+[
+ 
+
+e
+m
+T
+
+i
+
+1600
+
+1400
+
+1200
+
+1000
+
+800
+
+600
+
+400
+
+200
+
+0
+
+0
+
+MPS running time
+
+a1 CA
+a1 CNA
+a2 CA
+a2 CNA
+a3 CA
+a3 CNA
+a4 CA
+a4 CNA
+
+Frame recall and precision
+
+Frame precision - CA
+Frame recall - CA
+Frame precision - CNA
+Frame recall CNA
+
+120.00%
+
+100.00%
+
+80.00%
+
+]
+
+%
+
+[
+
+60.00%
+
+40.00%
+
+20.00%
+
+0.00%
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+70
+
+0.1
+
+0.2
+
+0.3
+
+0.4
+
+0.5
+
+0.6
+
+0.7
+
+0.8
+
+0.9
+
+Labeling size [no. actions]
+
+(a) MPS running time
+
+Threshold
+
+(b) MPS frame precision and recall
+
+Figure 4: MPS experimental results
+
+size between 2 and 60 actions are shown in Figure 4(a)4. The
+activity deﬁnitions (a1)-(a4) are satisﬁed when the labeling
+size reaches 30, leading to a visible increase in running time;
+as expected, CN A is more efﬁcient than the original CA ver-
+sion. We have also observed that running times are dependent
+on the complexity of an activity deﬁnition.
+
+MPA and naiveMPA running times
+
+]
+s
+m
+
+[
+ 
+
+e
+m
+T
+
+i
+
+7000
+
+6000
+
+5000
+
+4000
+
+3000
+
+2000
+
+1000
+
+0
+
+0
+
+10
+
+20
+
+naiveMPA - S1
+naiveMPA - S2
+naiveMPA - S3
+naiveMPA - S4
+MPA - S1
+MPA - S2
+MPA - S3
+MPA - S4
+
+50
+
+60
+
+70
+
+30
+
+40
+
+Labeling size [no actions]
+
+Figure 5: MPA running time
+
+In the second set of experiments, we measure the precision
+and recall of M P S w.r.t. a set of 4 human annotators. The av-
+erage among the annotations from the four subjects was con-
+sidered the ground truth when measuring both precision and
+recall. The results are shown in Figure 4(b). We notice that
+precision is always very high and generally constant, while
+recall has a rather surprising variation pattern – namely, recall
+is monotonic with the threshold. The explanation for the ap-
+parently anomalous behavior comes from the fact that for low
+thresholds, the number of candidate subvideos is relatively
+high, hence the minimality condition causes fewer frames to
+appear in the answer. The monotonic behavior pattern stops
+when the threshold becomes high enough (.4 in this case).
+
+4This does not include the running time of library methods that
+
+generate the labeling.
+
+In the third set of experiments, we analyzed the perfor-
+mance and answer quality for naiveM P A and M P A. The
+following sets of activities were used: S1 = {a5}, S2 =
+{a3, a5}, S3 = {a3, a4, a5} and S4 = {a2, a3, a4, a5}. The
+running times are shown in Figure 5. naiveM P A is espe-
+cially inefﬁcient until the labeling satisﬁes one of the activi-
+ties – this is due to the large number of iterations taken until
+the threshold is close enough to 0. Running times for the
+two algorithms are comparable for labeling sizes greater than
+30, although naiveM P A is always less efﬁcient than M P A.
+The graph shows running time is generally proportional to the
+number of actions in the labeling.
+
+6 Related work and Conclusions
+Model-based anomaly recognition techniques provide an a
+priori deﬁnition of an anomalous activity and then detect new
+anomalous activities [Hongeng and Nevatia, 2001]. [Zhong et
+al., 2004; Stauffer and Grimson, 2000] deﬁne models of reg-
+ular activities and bags of event n-grams to detect abnormal-
+ities. Context-free grammars have also been studied [Ivanov
+and Bobick, 2000; Vu et al., 2003; Nevatia et al., 2003;
+Narayanan, 1997]. Oliver et al.
+[Oliver et al., 2002] de-
+scribed an approach based on coupled HMMs for learning
+and recognizing human interactions. Dynamic Bayesian net-
+works – which can be viewed as a generalization of HMMs
+–, can be used for tracking and recognizing multi-agent ac-
+tivities [Hamid et al., 2003]. Data-based methods detect ac-
+tivities based on extracted features; Cuntoor and Chellappa
+[Cuntoor and Chellappa, 2006] proposed a characterization
+of events based on anti-eigenvalues, which are sensitive to
+changes. Parameswaran and Chellappa [Parameswaran and
+Chellappa, 2003] computed view invariant representations for
+human actions in both 2D and 3D.
+
+Ontologies have been recently used in different contexts for
+video surveillance. Chen et al [Chen et al., 2004] use ontolo-
+gies for analyzing social interaction in nursing homes; Ha-
+keem et al use ontologies for classiﬁcation of meeting videos
+[Hakeem and Shah, 2004]. Georis et al [Georis et al., 2004]
+use ontologies to recognize activities in a bank monitoring
+setting. As a result of the Video Event Challenge Workshops
+
+IJCAI-07
+
+1806
+
+held in 2003, ontologies have been deﬁned for six domains
+of video surveillance, among which Visual Bank Monitoring
+and Airport-Tarmac Security; the workshop also led to the
+development of two languages. The Video Event Represen-
+tation Language (VERL) [Hobbs et al., 2004], provides an
+ontological representation of complex events in terms of sim-
+pler sub-events. The Video Event Markup Language (VEML)
+is used to annotate VERL events in videos.
+
+Our work differs from the above approaches in the follow-
+
+ing respects:
+
+1. Our stochastic activity model is not based on features ex-
+tracted from data or on state-space representations, but
+on atomic actions that are recognizable by image under-
+standing primitives.
+
+2. To our knowledge, M P A is one of the very few al-
+gorithms that addresses the issue of detecting the most
+likely activity from a given set to have occurred in a
+certain video. In contrast, model-based representations
+usually train a speciﬁc model to recognize speciﬁc situ-
+ations.
+
+3. To our knowledge, we are the ﬁrst to ﬁnd the minimal
+video segments that contain an event with probability
+exceeding a threshold - this is important as a security
+guard wants to zero in immediately on the part of the
+video that contains the desired activity.
+
+References
+[Bevilacqua, 2002] Alessandro Bevilacqua. A system for
+detecting motion in outdoor environments for a visual
+surveillance application.
+PhD thesis, University of
+Bologna, 2002.
+
+[Bevilacqua, 2003] Alessandro Bevilacqua.
+
+shadow detection in trafﬁc monitoring applications.
+WSCG, 2003.
+
+Effective
+In
+
+[Cavallaro et al., 2000] A. Cavallaro, F. Ziliani, R. Castagno,
+and T. Ebrahimi. Vehicle extraction based on focus of
+attention, multi feature segmentation and tracking.
+In
+Proceedings of X European Signal Processing Confer-
+ence (EUSIPCO), pages 2161–2164, Tampere, Finland,
+September 2000.
+
+[Cavallaro et al., 2005] Andrea Cavallaro, Olivier Steiger,
+and Touradj Ebrahimi. Tracking video objects in clut-
+tered background. IEEE Trans. Circuits Syst. Video Techn.,
+15(4):575–584, 2005.
+
+[Chen et al., 2004] D. Chen, J Yang, and H.D. Wactlar. To-
+wards Automatic Analysis of Social Interaction Patterns
+in a Nursing Home Environment from Video. In MIR 04:
+Proceedings of the 6th ACM SIGMM international work-
+shop on Multimedia information retrieval, pages 283–290.
+ACM Press, 2004.
+
+[Cuntoor and Chellappa, 2006] N. P. Cuntoor and R. Chel-
+lappa. Key frame-based activity representation using
+antieigenvalues. In Proceedings of the Asian Conference
+on Computer Vision, 2006.
+
+[Elgammal et al., 2000] Ahmed M. Elgammal, David Har-
+wood, and Larry S. Davis. Non-parametric model for
+
+background subtraction.
+In ECCV ’00: Proceedings of
+the 6th European Conference on Computer Vision-Part II,
+pages 751–767, London, UK, 2000. Springer-Verlag.
+
+[Georis et al., 2004] B. Georis, M. Maziere, F. Bremond,
+and M. Thonnat. A Video Interpretation Platform Applied
+to Bank Agency Monitoring. In IDSS’04 - 2nd Workshop
+on Intelligent Distributed Surveillance Systems, FEB 23
+2004.
+
+[Hakeem and Shah, 2004] A. Hakeem and M. Shah. Ontol-
+ogy and Taxonomy Collaborated Framework for Meeting
+Classiﬁcation. In ICPR (4), pages 219–222, 2004.
+
+[Hamid et al., 2003] R. Hamid, Y. Huang, and I. Essa.
+Argmode - activity recognition using graphical models. In
+Proc. IEEE Computer Vision and Pattern Recognition, vol-
+ume 4, pages 38–43, 2003.
+
+[Hobbs et al., 2004] J. Hobbs, R. Nevatia, and B. Bolles. An
+Ontology for Video Event Representation. In IEEE Work-
+shop on Event Detection and Recognition, 2004.
+
+[Hongeng and Nevatia, 2001] Somboon Hongeng and Ra-
+makant Nevatia. Multi-agent event recognition. In ICCV,
+pages 84–93, 2001.
+
+[Ivanov and Bobick, 2000] Yuri A. Ivanov and Aaron F. Bo-
+bick. Recognition of visual activities and interactions by
+stochastic parsing. IEEE Trans. Pattern Anal. Mach. In-
+tell., 22(8):852–872, 2000.
+
+[Makarov, 1996] A. Makarov. Comparison of background
+extraction based intrusion detection algorithms. In Inter-
+national Comference Image Processing ICIP96, page sec-
+tion 16P3, 1996.
+
+[Narayanan, 1997] S. Narayanan.
+
+KARMA: Knowledge-
+based Action Representations for Metaphor and Aspect.
+PhD thesis, University of California, Berkeley, 1997.
+
+[Nevatia et al., 2003] R. Nevatia, T. Zhao, and S. Hongeng.
+Hierarchical language-based representation of events in
+video streams. In Proceedings of the Workshop on Event
+Mining (in conjuction with IEEE CVPR), 2003.
+
+[Oliver et al., 2002] N. Oliver, E. Horvitz, and A. Garg. Lay-
+ered representations for human activity recognition.
+In
+Proc. IEEE International Conference on Mulitmodal In-
+terfaces, pages 3–7, 2002.
+
+[Parameswaran and Chellappa, 2003] V. Parameswaran and
+R. Chellappa. View invariants for human action recogni-
+tion. In Proceedings of IEEE Computer Vision and Pattern
+Recognition, 2003.
+
+[Stauffer and Grimson, 2000] Chris Stauffer and W. Eric L.
+Grimson. Learning patterns of activity using real-time
+tracking.
+IEEE Trans. Pattern Anal. Mach. Intell.,
+22(8):747–757, 2000.
+
+[Vu et al., 2003] Van-Thinh Vu, Franc¸ois Br´emond, and
+Monique Thonnat. Automatic video interpretation: A
+novel algorithm for temporal scenario recognition. In IJ-
+CAI, pages 1295–1302, 2003.
+
+[Zhong et al., 2004] Hua Zhong, Jianbo Shi, and Mirk´o Vi-
+sontai. Detecting unusual activity in video. In CVPR (2),
+pages 819–826, 2004.
+
+IJCAI-07
+
+1807
+
+

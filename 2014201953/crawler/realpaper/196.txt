@@ -1,0 +1,982 @@
+Dynamically Constructed Bayes Nets for Multi-Domain Sketch Understanding
+
+Christine Alvarado
+
+∗
+
+and Randall Davis†
+
+MIT CSAIL
+
+Cambridge, MA 02139
+
+{calvarad,davis}@csail.mit.edu
+
+Abstract
+
+This paper presents a novel form of dynamically
+constructed Bayes net, developed for multi-domain
+sketch recognition. Our sketch recognition engine
+integrates shape information and domain knowl-
+edge to improve recognition accuracy across a vari-
+ety of domains using an extendible, hierarchical ap-
+proach. Our Bayes net framework integrates the in-
+ﬂuence of stroke data and domain-speciﬁc context
+in recognition, enabling our recognition engine to
+handle noisy input. We illustrate this behavior with
+qualitative and quantitative results in two domains:
+hand-drawn family trees and circuits.
+
+Introduction
+
+1
+There is a gap between how people naturally express ideas
+and the ability of computers to use that information. For ex-
+ample, while sketching provides a natural way to record de-
+sign ideas in many domains, sketches are, unavoidably, static
+pictures. Computer aided design tools, on the other hand,
+offer powerful capabilities, but require designers to interact
+through buttons and menus. The hardware to draw on the
+computer exists; the missing element is the computer’s abil-
+ity to interpret hand-drawn symbols in a domain. To address
+this problem, we are constructing a general sketch recognition
+architecture applicable to a number of domains, and capable
+of parsing freely-drawn strokes in real time and interpreting
+them as depicting objects in the domain of interest.
+
+Sketch recognition involves two related subproblems:
+stroke segmentation and symbol recognition. Segmentation
+determines which strokes should be grouped to form a single
+symbol. Symbol recognition determines what symbol a given
+set of strokes represents.
+
+The difﬁculty of doing segmentation and recognition si-
+multaneously has led previous approaches to place con-
+straints on the user’s drawing style, or focus on tasks where
+assumptions can greatly reduce segmentation complexity. For
+example, the multimodal approach in [Wu et al., 1999] as-
+sumes that each symbol will be drawn independently, and that
+
+∗
+Currently at Harvey Mudd College, Claremont, CA, 91711
+†This work was funded by the MIT iCampus project supported
+
+by Microsoft and MIT Project Oxygen.
+
+the user will often say the name of the symbol when drawing
+it. The approach in [Kara and Stahovich, 2004] assumes that
+the diagram (a feedback control system) consists of shapes
+linked by arrows, which is not true in other domains.
+
+While these systems have proven useful for their respective
+tasks, we aimed to create a more general system, independent
+of drawing assumptions in any one domain. Our system is
+designed, instead, to be applied to a number of symbolic do-
+mains by giving it descriptions of shapes and commonly oc-
+curring combinations of shapes. We use these descriptions in
+a three-stage, constraint-based approach to recognition. Our
+system ﬁrst relies on a rough processing of the user’s strokes
+to generate a number of interpretation hypotheses. In the sec-
+ond stage, the system uses a novel form of dynamically con-
+structed Bayes net to determine how well each hypothesis ﬁts
+the data. In the third stage, it uses this evaluation to guide fur-
+ther hypothesis generation. This paper focuses speciﬁcally on
+the second stage, exploring hypothesis evaluation; the other
+two stages are described in [Alvarado, 2004].
+
+Using Bayes nets for hypothesis evaluation offers two
+advantages over previous constraint-based recognition ap-
+proaches (e.g., [Futrelle and Nikolakis, 1995; Hammond and
+Davis, 2004]). First, our system can interpret drawings as
+they develop, identifying shapes before they are complete.
+Second, the system’s belief in a hypothesis can be inﬂuenced
+by both the strokes and the context in which the shape ap-
+pears, allowing the system to cope with noise in the drawing.
+We constructed a sketch recognition engine and used it in
+two domains: family tree diagrams and circuit diagrams. We
+show that the Bayes net successfully allows domain-speciﬁc
+context to help the system overcome noise in the stroke data,
+reducing interpretation errors compared to a baseline system.
+
+2 Dynamically Constructed Graphical Models
+While time-based graphical models (e.g., Dynamic Bayes
+Nets) have been widely used, they are not suitable for sketch
+understanding, for two reasons. First, we must model shapes
+based on two-dimensional constraints (e.g., touches) rather
+than on temporal constraints (i.e., follows). Second, our mod-
+els cannot simply unroll in time as data arrives: we cannot
+necessarily predict the order in which the user will draw the
+strokes, and things drawn previously can be changed.
+
+While it is not difﬁcult to use Bayes nets to model spatial
+relationships, static Bayes nets are not suitable for our task
+
+s1
+
+s2
+
+s4
+
+s3
+
+Primitive hypotheses
+E1 = ellipse-fit(s1)
+L1 = line-fit(s2)
+L2 = line-fit(s3)
+L3 = line-fit(s4)
+
+Arrow hypothesis A1
+Subshapes:
+line hypotheses L1, L2, L3
+Constraints:
+C2 = (coincident line-fit(s2).p1 line-fit(s3).p1)
+C3 = (coincident line-fit(s2).p1 line-fit(s4).p1)
+C4 = (equalLength line-fit(s3) line-fit(s4))
+C5 = (shorter line-fit(s3) line-fit(s2))
+C6 = (acuteAngle line-fit(s2), line-fit(s3))
+C7 = (acuteAngle line-fit(s2), line-fit(s4))
+CS hypothesis CS1
+Subshapes:
+arrow hypothesis A1, ellipse hypothesis E1
+Constraints:
+C1 = (contains ellipse-fit(s1) shape-fit(s2,s3,s4))
+
+Figure 1: A single current source hypothesis (CS1) and asso-
+ciated lower-level hypotheses.
+because we cannot predict a priori the number of strokes or
+symbols the user will draw. For sketch recognition, as in re-
+lated dynamic tasks, models to reason about speciﬁc problem
+instances (e.g., a particular sketch) must be dynamically con-
+structed in response the input. This problem is known as the
+task of knowledge-based model construction (KBMC).
+
+Early approaches to KBMC focused on generating Bayes
+nets from probabilistic knowledge bases [Glessner and
+Koller, 1995; Haddawy, 1994]. A recently proposed repre-
+sentation uses generic template knowledge directly as Bayes
+net fragments that can be instantiated and linked together at
+run-time [Laskey and Mahoney, 1997]. Finally, Koller et
+al. have developed a number of object-oriented frameworks
+[Koller and Pfeffer, 1997; Pfeffer et al., 1999; Getoor et al.,
+1999]. These models represent knowledge in terms of rela-
+tionships among objects and can be instantiated dynamically
+in response to the number of objects in a particular situation.
+Although these frameworks are powerful, they are not di-
+rectly suitable for sketch recognition. First, because of the
+size of the networks we encounter, it is sometimes desirable
+to generate only part of a complete network, or to prune nodes
+from the network. In reasoning about nodes in the network,
+we must account for the fact that the network may not be
+fully generated or relevant information may have been pruned
+from it (see [Alvarado, 2004] for details). Second, these pre-
+vious models have been optimized for responding to speciﬁc
+queries about a single node in the network. In contrast, our
+model must provide probabilities for a full set of possible in-
+terpretations of the user’s strokes.
+
+3 Network Structure
+Our Bayes net model is built around hierarchical descriptions
+of shapes in a domain, described in a language called LAD-
+DER [Hammond and Davis, 2003]. The basic unit in this
+
+language is a shape, which we use to mean a pattern recog-
+nizable in a given domain. Shapes may be compound, i.e.,
+composed of subshapes ﬁt together according to constraints.
+These subshapes also may be compound, but all shapes must
+be non-recursive. A shape that cannot be decomposed into
+subshapes (e.g., a line), is called a primitive shape. Primi-
+tive shapes may have named subcomponents that can be used
+when describing other shapes, e.g., the endpoints of a line,
+“p1” and “p2”, used in Figure 1.
+
+We refer to each shape description as a template with one
+slot for each subpart. A shape hypothesis is a template with
+an associated mapping between slots and strokes, generated
+during the recognition process. Similarly, a constraint hy-
+pothesis is a proposed constraint on one or more of the user’s
+strokes. A partial hypothesis is a hypothesis in which one or
+more slots are not bound to strokes.
+
+To introduce our Bayes net model, we begin by considering
+how to model a current source hypothesis (CS1) for the stokes
+in Figure 1. A current source is a compound shape, so CS1 in-
+volves two lower-level shape hypotheses—E1, an ellipse hy-
+pothesis for stroke s1; and A1, an arrow hypothesis involving
+strokes s2, s3 and s4—and one constraint hypothesis—C1, in-
+dicating that an ellipse ﬁt for stroke s1 contains strokes s2,
+s3, and s4. A1 is also compound and is further broken down
+into three line hypotheses (L1, L2 and L3) and six constraint
+hypotheses (C2, ...,C7) according to the description of an ar-
+row. Thus, determining the strength of hypothesis CS1 can be
+transformed into the problem of determining the strength of a
+number of lower-level shape and constraint hypotheses.
+
+The Bayes net used to evaluate CS1 is shown in Figure 2.
+There is one node in the network for each hypothesis; each
+node represents a boolean random variable that is true if the
+corresponding hypothesis is correct. The probability of each
+hypothesis is inﬂuenced both through its children by stroke
+data and through its parents by the context in which it appears,
+allowing the system to handle noise in the drawing.
+
+The nodes labeled O1, ...,O11 represent measurements of
+the stroke data that correspond to the constraint or shape to
+which they are linked. The variables corresponding to these
+nodes have positive real numbered values that we discretize in
+our implementation1. For example, the variable O2 is a mea-
+surement of the squared error between the stroke s1 and the
+best ﬁt ellipse to that stroke. Its raw value (later discretized)
+ranges from 0 to the maximum possible error between any
+stroke and an ellipse ﬁt to that stroke. The boxes labeled
+s1, ...,s4 are not part of the Bayes net but serve to indicate
+the stroke or strokes from which each measurement, Oi, is
+taken (e.g., O2 is measured from s1). P(CS1 = t|ev) (or sim-
+ply P(CS1|ev))2, where ev is the evidence observed from the
+user’s strokes, represents the probability that the hypothesis
+CS1 is correct.
+
+The direction of the links may seem counterintuitive, but
+there are two important reasons why the links are directed
+from higher-level shapes to lower-level shapes instead of the
+opposite direction. First, whether a higher-level hypothe-
+sis is true directly inﬂuences whether a lower-level hypoth-
+
+1The BN software we used did not support continuous variables.
+2Throughout this paper, t means true, and f means false.
+
+CS1
+
+E1
+
+A1
+
+L1
+
+L2
+
+L3
+
+O2
+
+O3
+
+O4
+
+O5
+
+C2
+
+O6
+
+C3
+
+O7
+
+C4
+
+O8
+
+C5
+
+C6
+
+C7
+
+O9
+
+O10
+
+O11
+
+C1
+
+O1
+
+s1
+
+s2
+
+s3
+
+s4
+
+Figure 2: A Bayes net to verify a single current source hy-
+pothesis. Labels come from Figure 1.
+
+esis is true. For example, if the arrow hypothesis A1 is
+true, then it is extremely likely that all three line hypotheses,
+L1, L2, L3, are also true. Second, this representation allows us
+to model lower-level hypothesis as conditionally independent
+given their parents, which reduces the complexity of the data
+needed to construct the network.
+
+Each shape description constrains its subshapes only rela-
+tive to one another. For example, an arrow may be made from
+any three lines that satisfy the necessary constraints. Based on
+this observation, our representation models a symbol’s sub-
+shapes separately from the constraints between them. For ex-
+ample, node L2 represents the hypothesis that stroke s3 is a
+line. Its value will be true if the user intended for s3 to be a
+line, any line regardless of its position, size or orientation. C4
+separately represents the hypothesis that the line ﬁt to s3 and
+the line ﬁt to s4 are the same length.
+
+The conditional independence between shapes and con-
+straints might seem a bit strange at ﬁrst. For example,
+whether or not two lines are the same length seems to de-
+pend on the fact that they are lines. However, observation
+nodes for constraints are calculated in such a way that their
+value is not dependent on the true interpretation for a stroke.
+For example, when calculating whether or not two lines are
+the same length, we ﬁrst ﬁt lines to the strokes (regardless
+of whether or not they actually look like lines), then measure
+their length. How well these lines ﬁt the original strokes is
+not considered in this calculation.
+
+The fact that there is no edge between the constraint nodes
+and the shapes they constrain has an important implication for
+using this model to perform recognition: There is no guaran-
+tee in this Bayes net that the constraints will be measured
+between the correct subshapes because the model allows sub-
+shapes and constraints to be detected independently. For ex-
+ample, we want C4 in Figure 2 to indicate that L2 and L3
+(the two lines in the head of an arrow) are the same length,
+not simply that any two lines are the same length. To satisfy
+this requirement, the system must ensure that O8 is measured
+from the same strokes that O4 and O5 were measured from.
+We use a separate mechanism to ensure that only legal bind-
+ings are created between strokes and observation nodes.
+
+The way we model shape and constraint information has
+two important advantages for recognition. First, this Bayes
+
+2
+
+5
+
+10
+
+9
+
+11
+
+4
+
+1
+
+8
+
+12
+
+3
+
+7
+
+6
+
+Figure 3: A partial sketch of a family tree. Quadrilaterals (Q)
+represent males (M); ellipses (E) represent females (F), and
+arrows (A) indicate a parent-child relationship.
+
+net model can be applied to recognize a shape in any size,
+position and orientation. CS1 represents the hypothesis that
+s1, ...,s4 form a current source symbol, but the exact posi-
+tion, orientation and size of that symbol is determined directly
+from the stroke data 3.
+
+Second, the system can model competing higher-level in-
+terpretations for lower-level shapes. For example, the system
+may consider a stroke to be a line that is in turn part of ei-
+ther an arrow or a quadrilateral. Because the line hypothesis
+does not include any higher-level shape-speciﬁc constraint in-
+formation, both an arrow hypothesis node and a quadrilateral
+hypothesis node can point to this same line hypothesis node.
+These two hypotheses then become alternate, competing ex-
+planations for the line hypothesis. We further discuss how
+hypotheses are combined below.
+
+4 Recognizing a Complete Sketch
+To recognize a complete sketch, we create a Bayes net similar
+to the one above for each shape. We call each of these Bayes
+nets a shape fragment because they can be combined to create
+a complete Bayes net for evaluating the whole sketch.
+
+Given a set of hypotheses for the user’s strokes (hypothe-
+sis generation is described in [Alvarado and Davis, 2004] and
+[Alvarado, 2004]), the system instantiates the corresponding
+shape fragments and links them together to form a complete
+Bayes net, called the interpretation network. To illustrate this
+process, consider a piece of a network generated in response
+to Strokes 6 and 7 in the example of Figure 3. Figure 4 shows
+the part of the Bayes net representing the hypotheses that the
+system generated for these strokes. Low level processing rec-
+ognizes Strokes 6 and 7 as L-shaped polylines and breaks
+each into two individual lines (L1...L4) that meet.
+
+4.1 Linking Shape Fragments
+When Bayes net fragments are linked during recognition,
+each node Hn may have several parents, S1 . . .Sm, where each
+parent represents a possible higher-level interpretation for Hn.
+We use a noisy-OR function to combine the inﬂuences of all
+the parents of Hn to produce the complete conditional proba-
+bility table (CPT) for P(Hn|S1, . . . ,Sm). The noisy-OR func-
+tion models the assumption that each parent can indepen-
+dently cause the child to be observed. For example, a single
+
+3Orientation-dependent symbols (e.g., a downward-facing ar-
+row) can be recognized by including orientation-dependent con-
+straints in their descriptions (e.g., vertical, below).
+
+stroke might be part of a quadrilateral or an arrow, but both
+interpretations would favor that interpretation of the stroke
+as a line. We set P(Hn = f|S j = t) = 0 for all parents S j
+in which Hn is a required subshape or constraint, and we set
+P(Hn = f|Sk = t) = 0.5 for all parents Sk in which Hn is an
+optional subshape or constraint. A consequence of these val-
+ues is that S j = t ⇒ P(Hn|S1, . . . ,Sm) = 1 for any S j in which
+Hn is required, which is exactly what we intended.
+
+We experimented with a noisy-XOR construct,
+
+imple-
+mented using a “gate node” similar to that described in
+[Boutilier et al., 1996], but found that noisy-OR semantics
+were simpler and in fact produced better results. In effect,
+a noisy-OR node in a Bayes net with low prior probabilities
+behaves as a non-aggressive XOR. The fact that one parent
+is true does not actively prohibit the other parents from being
+true, but it causes their probabilities to tend back to their prior
+values because of the “explaining away” phenomenon.
+
+4.2 Signal Level Noise
+The bottom layer of the network deals with signal level noise
+by modeling the differences between the user’s intentions and
+the strokes that she draws. For example, even if the user
+intends to draw L1, her stroke likely will not match L1 ex-
+actly, so the model must account for this variation. Consider
+P(O1|L1 = t) (recall that O1 is a discretized continuous val-
+ued variable). If the user always drew perfect lines, this dis-
+tribution would be 1 when O1 = 0 (i.e., the error is 0), and 0
+otherwise. However, most people do not draw perfect lines
+(due to inaccurate pen and muscle movements), and this dis-
+tribution allows for this error. It should be high when O1 is
+close to zero, and fall off as O1 gets larger. The wider the
+distribution, the more error the system will tolerate, but the
+less information a perfect line will provide.
+The other distribution needed is P(O1|L1 = f ) which is the
+probability distribution over line error given that the user did
+not intend to draw an line. This distribution should be close to
+uniform, with a dip around 0, indicating that if the user specif-
+ically does not intend to draw an line, she might draw any
+other shape, but probably won’t draw anything that resem-
+bles an line. Details about how we determined the conditional
+probability distributions between primitive shapes and con-
+straints and their corresponding observation nodes are given
+elsewhere [Alvarado, 2004].
+
+4.3 Missing Strokes
+A1 is a partial hypothesis—it represents the hypothesis that L1
+and L2 (from Stroke 6) are part of an arrow whose other line
+has not yet been drawn. Line nodes representing lines that
+have not been drawn (e.g., L5) are not linked to observation
+nodes because there is no stoke from which to measure these
+observations. We refer to these nodes (and their correspond-
+ing hypotheses) as virtual.
+
+The fact that partial hypotheses have probabilities allows
+the system to assess the likelihood of incomplete interpreta-
+tions based on the evidence it has seen so far. In fact, even
+virtual nodes have probabilities, corresponding to the proba-
+bility that the user (eventually) intends to draw these shapes
+but either has not yet drawn this part of the diagram or the
+
+M1
+
+Q1
+
+A1
+
+A2
+
+Constraints
+
+for A1
+
+L5
+
+L1
+
+L2
+
+L3
+
+L4
+
+Constraints
+
+for Q1
+
+L6
+
+Constraints
+
+for A2
+
+Observations
+
+O1 O2
+
+O3 O4
+
+Observations
+
+Observations
+
+Stroke6
+
+Stroke7
+
+Figure 4: A portion of the interpretation network generated
+while recognizing the sketch in Figure 3.
+
+correct low-level hypotheses have not yet been proposed (be-
+cause of low-level recognition errors). A partial hypothesis
+with a high probability cues the system to examine the sketch
+for possible missed low-level interpretations during the hy-
+pothesis generation step.
+
+Implementation and Bayesian Inference
+
+5
+Our system updates the structure of the Bayes net in response
+to each stroke the user draws, using an off-the-shelf, open
+source Bayes net package for Java called BNJ [bnj, 2004].
+
+We experimented with several
+
+Generating and modifying the BNJ networks can be time
+consuming due to the exponential size of the CPTs between
+the nodes. We use two techniques to improve performance.
+First, networks are generated only when the system needs to
+evaluate the likelihood of a hypothesis. This on-demand con-
+struction is more efﬁcient than continuously updating the net-
+work, because batch construction of the CPTs is often more
+efﬁcient than incremental construction. Second, the system
+modiﬁes only the portion of the network that has changed be-
+tween strokes, rather than creating it from scratch every time.
+inference methods and
+found that loopy belief propagation (loopy BP) [Weiss, 1997]
+was the most successful4. On our data, loopy BP almost al-
+ways converged (messages initialized to 1, run until node val-
+ues stable within 0.001). We further limited the algorithm’s
+running time in two ways. First, we terminated the algorithm
+after 60 seconds if it had not yet converged. Second, we al-
+lowed each node to have no more than 8 parents (i.e., only 8
+higher-level hypotheses could be considered for a single hy-
+pothesis), ensuring a limit on the complexity of the graphs
+produced. These restrictions had little impact on recognition
+performance in the family tree domain, but for complex do-
+mains such as circuit diagrams, more efﬁcient inference algo-
+rithms or graph simpliﬁcation techniques are needed to im-
+prove recognition results.
+
+6 Application and Results
+We applied our implemented system to two non-trivial
+domains—family trees and circuits—and found that it is ca-
+pable of recognizing sketches in both domains without re-
+programming. Qualitative and quantitative evaluation of our
+
+4Junction Tree [Jensen et al., 1990] was often too slow and
+
+Gibb’s Sampling did not produce meaningful results.
+
+Battery-1 Wire-2 Ground-1
+
+Battery-2
+
+Line-2
+
+Parallel-1
+
+Aligned-2
+
+Wire-3
+
+Line-3
+
+Parallel-2
+
+1
+
+2
+
+3
+
+1
+
+2
+
+3
+
+1
+
+2
+
+3
+
+Wire-1
+
+Line-1
+
+Aligned-1
+
+(a)
+
+(b)
+
+(c)
+
+SqErr-1
+
+Smaller-1 NextTo-1
+
+Meas-1
+
+Meas-4
+
+Meas-5
+
+Smaller-2 NextTo-2
+
+SqErr-3
+
+Meas-8
+
+Figure 5: Part of three possible ground symbols.
+
+system illustrates its strengths over previous approaches and
+suggests some extensions.
+
+Applying our system to a particular domain involves two
+steps: specifying the structural descriptions for the shapes
+in the domain, and specifying the prior probabilities for top-
+level shapes and domain patterns, i.e., those that will not have
+parents in the Bayes net. For each domain, we wrote a de-
+scription for each shape and pattern in that domain. We hand-
+estimated priors for each domain pattern and top level shape
+based on our intuition about the relative prevalence of each
+shape. For example, in family-tree diagrams, we estimated
+that marriages were much more likely than partnerships, and
+set P[Mar] = 0.1 and P[Part] = 0.001. These priors represent
+the probability that a group of strokes chosen at random from
+the page will represent the given shape and, in most cases,
+should be relatively low. Although setting priors by hand can
+be tedious, we found through experimentation that the sys-
+tem’s recognition performance was relatively insensitive to
+the exact values of these priors. For example, in the circuit
+diagrams, increasing all the priors by an order of magnitude
+did not affect recognition performance; what matters instead
+is the relative values of the prior probabilities.
+
+Our system is capable of recognizing simple sketches
+nearly perfectly in both the family-tree and circuit domains.
+We also tested its performance on more complex, real-world
+data. As there is no standard test corpus for sketch recog-
+nition, we collected our own sketches and have made them
+available online to encourage others to compare their results
+with those presented here [Oltmans et al., 2004]. In total, we
+tested our system on 10 family tree sketches and 80 circuit
+diagram sketches, with between 23 and 110 strokes each.
+
+6.1 Qualitative Results
+Qualitative analysis reveals that the Bayes net mechanism
+successfully aggregates information from stroke data and
+context, resolves inherent ambiguities in the drawing, and
+updates its weighting of the various existing hypotheses as
+new strokes are drawn. We show through an example that
+the Bayes net scores hypotheses correctly in several respects:
+it prefers to group subshapes into the fewest number of in-
+terpretations, it allows competing interpretations to inﬂuence
+one another, it updates interpretation strengths in response to
+new stroke data, and it allows both stroke data and context to
+inﬂuence interpretation strength.
+
+To illustrate the points above, we consider in detail how the
+system responds as the user draws the three sets of strokes
+in Figure 5 (a ground symbol). To simplify the example,
+we consider a reduced circuit domain in which users draw
+
+Meas-2 Meas-3
+
+SqErr-2
+
+Meas-6 Meas-7
+
+Figure 6: The Bayes net produced in response to the strokes
+in each ground symbol in Figure 5. The shaded area shows
+the network produced in response to the ﬁrst two strokes.
+
+Name
+
+Wire-1
+Wire-2
+Wire-3
+Battery-1
+Battery-2
+Ground-1
+
+P[Shape|stroke data]
+
+after 2 strokes
+
+after 3 strokes
+
+(b)
+0.41
+0.38
+
+(a)
+(c)
+(a)
+0.4
+0.41
+0.4
+0.4
+0.4
+0.38
+0.4
+N/A N/A N/A
+0.51
+0.09
+0.51
+N/A N/A N/A 0.09
+0.51
+0.95
+
+0.51
+
+0.51
+
+0.51
+
+(b)
+0.4
+0.4
+0.4
+0.1
+0.1
+0.94
+
+(c)
+0.42
+0.38
+0.1
+0.91
+0.0
+0.03
+
+Table 1: Posterior probabilities for part of the network in Fig-
+ure 6 for each sketch in Figure 5.
+
+only wires, resistors, ground symbols and batteries. Figure 6
+shows the Bayes nets produced in response to the user’s ﬁrst
+two and ﬁrst three strokes. After the ﬁrst two strokes, the net-
+work contains only the nodes in the shaded area; after three
+strokes it contains all nodes shown. Continuous variables cor-
+responding to observation nodes were discretized into three
+values: 0 (low error: stroke data strongly supports the shape
+or constraint), 1 (medium error: stroke data weakly supports
+the shape or constraint), and 2 (high error: stroke data does
+not support the shape or constraint).
+
+Posterior probabilities are given in Table 1. For the rel-
+atively clean ground symbol (Figure 5(a)), the stroke data
+strongly supports all the shapes and constraints, so all shaded
+nodes in Figure 6 have value 0. After the ﬁrst two strokes,
+the battery symbol and the ground symbol have equal weight,
+which may seem counterintuitive: after two strokes the user
+has drawn what appears to be a complete battery, but has
+drawn only a piece of the ground symbol. Recall, however,
+that the Bayes net models not what has been drawn, but what
+the user intends to draw. After two strokes, it is equally likely
+that the user is in the process of drawing a ground symbol. Af-
+ter the third stroke, the ground symbol’s probability increases
+because there is more evidence to support it, while the bat-
+tery’s probability decreases. The fact that the ground symbol
+is preferred over the battery illustrates that the system prefers
+interpretations that result in fewer symbols (Okham’s razor).
+Interpretations that involve more of the user’s strokes have
+more support and get a higher score in the Bayes net. The fact
+that the battery symbol gets weaker as the ground symbol gets
+stronger results from the “explaining away” behavior in this
+Bayes net conﬁguration: each of the low-level components
+(the lines and the constraints) are effectively “explained” by
+the existence of the ground symbol, so the battery is no longer
+
+needed to explain their presence.
+
+Another useful property of our approach is that a small
+amount of noise in the data is counteracted by the context
+provided by higher-level shapes. The slightly noisy second
+and third strokes in Figure 5(b) cause the values of SqErr-
+2 and SqErr-3 to be 1 instead of 0 (all other shaded node
+values remain 0). Despite this noise, after three strokes the
+posterior probability of the ground symbol interpretation is
+still high (0.94), because Line-1 and all of the constraints
+are still strongly supported by the data.
+In addition, the
+probabilities for Line-2 and Line-3 are high (both 1.0, not
+shown in Table 1), indicating that the context provided by the
+ground symbol provides support for the line interpretations
+even when the evidence from the data is not as strong.
+
+On the other hand, if the data is too messy, it causes
+the probability of the higher-level interpretations to decrease.
+The sketch in Figure 5(c) causes the value of SqErr-2 to be 1,
+and SqErr-3 to be 2, and results in a low posterior probability
+for Ground-1 (0.03) and a high posterior for Battery-1 (0.91),
+because the hypothesis Line-3 is contradicted by the user’s
+third stroke. For now, the third stroke remains uninterpreted.
+
+6.2 Quantitative Results
+We ran our system on all of the sketches we collected
+and compared its performance to a baseline constraint-based
+recognition system that used a ﬁxed threshold for detect-
+ing shapes and constraints and did not reinterpret low-level
+shapes. We measured recognition performance by deter-
+mining the number of objects identiﬁed correctly in each
+sketch. Our system signiﬁcantly outperformed the baseline
+system (p (cid:3) 0.001), correctly recognizing 77% (F=0.83) of
+the shapes in the family tree diagrams and 62% (F=0.65) of
+the shapes in the circuit diagrams, while the baseline system
+correctly recognized 50% (F=0.63) and 54% (F=0.57).
+
+While not yet real time, in general our system’s processing
+time scaled well as the number of strokes increased. How-
+ever, it occasionally ran for a long period. The system had
+particular trouble with areas of the sketch that involved many
+strokes drawn close together in time and space and with do-
+mains that involve more complicated or overlapping symbols.
+This increase in processing time was due almost entirely to
+increase in Bayes net complexity.
+
+We believe we can speed up loopy BP based on the obser-
+vation that it repeatedly sends messages between the nodes
+until each node has reached a stable value. When a stroke is
+added, our system resets all messages to 1, essentially eras-
+ing the work done the last time inference was performed, even
+though most of the graph is unchanged. The algorithm should
+instead begin with the messages that remain at the end of the
+previous inference step.
+
+7 Conclusion
+We have described a model for dynamically constructing
+Bayes nets to represent varying hypotheses for the user’s
+strokes. Our model, speciﬁcally developed for the task of
+recognition, allows both stroke data and contextual data to
+inﬂuence the probability of an interpretation for the user’s
+strokes. Using noisy-OR, multiple potential higher-level
+
+interpretations mutually inﬂuence each other’s probabilities
+within the Bayes net. The net result is a sketch recognition
+approach that brings us a signiﬁcant step closer to sketching
+as a natural and powerful interface.
+
+References
+[Alvarado and Davis, 2004] C.
+
+Davis.
+SketchREAD: A multi-domain sketch recognition engine.
+In Proc. of UIST-04, 2004.
+
+Alvarado
+
+and
+
+R.
+
+[Alvarado, 2004] C. Alvarado. Multi-Domain Sketch Understand-
+
+ing. PhD thesis, MIT, 2004.
+network
+
+[bnj, 2004] Bayesian
+
+http://bnj.sourceforge.net.
+
+tools
+
+in
+
+java
+
+(bnj),
+
+2004.
+
+[Boutilier et al., 1996] C. Boutilier, N. Friedman, M. Goldszmidt,
+and D. Koller. Context-speciﬁc independence in Bayesian net-
+works. In Proc. of UAI ’96, 1996.
+
+[Futrelle and Nikolakis, 1995] R. P. Futrelle and N. Nikolakis. Efﬁ-
+cient analysis of complex diagrams using constraint-based pars-
+ing. In ICDAR-95, pages 782–790, Montreal, Canada, 1995.
+
+[Getoor et al., 1999] L. Getoor, N. Friedman, D. Koller, and A. Pf-
+effer. Learning probabilistic relational models. In Proc. of IJCAI
+’99, pages 1300–1309, 1999.
+
+[Glessner and Koller, 1995] S. Glessner and D. Koller. Construct-
+ing ﬂexible dynamic belief networks from ﬁrst-order proba-
+bilistinc knowledge bases.
+In Synbolic and Quantitatice Ap-
+proaches to Reasoning and Uncertainty, pages 217–226, 1995.
+
+[Haddawy, 1994] P. Haddawy. Generating bayesian networks from
+
+probability logic knowledge bases. In Proc. of UAI ’94, 1994.
+
+[Hammond and Davis, 2003] T. Hammond and R. Davis. LAD-
+DER: A language to describe drawing, display, and editing in
+sketch recognition. Proc. of IJCAI ’03, 2003.
+
+[Hammond and Davis, 2004] T. Hammond and R. Davis. Automat-
+ically transforming symbolic shape descriptions for use in sketch
+recognition. Proc. of AAAI ’04, 2004.
+
+[Jensen et al., 1990] F. V. Jensen, S. L. Lauritzen, and K. G. Ole-
+sen. Bayesian updating in causal probabilistic networks by local
+computations. Computational Statistics Quarterly, 4, 1990.
+
+[Kara and Stahovich, 2004] L. B. Kara and T. F. Stahovich. Hier-
+archical parsing and recognition of hand-sketched diagrams. In
+Proc. of UIST ’04, 2004.
+
+[Koller and Pfeffer, 1997] D. Koller and A. Pfeffer. Object-oriented
+
+bayesian networks. In Proc. of UAI ’97, 1997.
+
+[Laskey and Mahoney, 1997] K. B. Laskey and S. M. Mahoney.
+Network fragments: Representing knowledge for constructing
+probabilistic models. In Proc. of UAI ’97, 1997.
+
+[Oltmans et al., 2004] M. Oltmans, C. Alvarado, and R. Davis.
+Etcha sketches: Lessons learned from collecting sketch data.
+In Making Pen-Based Interaction Intelligent and Natural. AAAI
+Fall Symposium, 2004.
+
+[Pfeffer et al., 1999] A. Pfeffer, D. Koller, B. Milch,
+
+and
+K. Takusagawa. SPOOK: A system for probabilistic object-
+oriented knowledge representation. In Proc. of UAI ’99, 1999.
+
+[Weiss, 1997] Y. Weiss. Belief propagation and revision in net-
+
+works with loops. Technical report, MIT, November 1997.
+
+[Wu et al., 1999] L. Wu, S. L. Oviatt, and P. R. Cohen. Multimodal
+integration—a statistical view. IEEE Transaction on Multimedia,
+1(4):334–341, December 1999.
+
+

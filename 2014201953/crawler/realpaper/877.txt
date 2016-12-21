@@ -1,0 +1,1178 @@
+Recursive Random Fields
+
+Daniel Lowd and Pedro Domingos
+
+Department of Computer Science and Engineering
+
+University of Washington, Seattle, WA 98195-2350, USA
+
+{lowd,pedrod}@cs.washington.edu
+
+Abstract
+
+A formula in ﬁrst-order logic can be viewed as a
+tree, with a logical connective at each node, and
+a knowledge base can be viewed as a tree whose
+root is a conjunction. Markov logic [Richardson
+and Domingos, 2006] makes this conjunction prob-
+abilistic, as well as the universal quantiﬁers directly
+under it, but the rest of the tree remains purely log-
+ical. This causes an asymmetry in the treatment
+of conjunctions and disjunctions, and of universal
+and existential quantiﬁers. We propose to over-
+come this by allowing the features of Markov logic
+networks (MLNs) to be nested MLNs. We call
+this representation recursive random ﬁelds (RRFs).
+RRFs can represent many ﬁrst-order distributions
+exponentially more compactly than MLNs. We per-
+form inference in RRFs using MCMC and ICM,
+and weight learning using a form of backpropa-
+gation. Weight learning in RRFs is more power-
+ful than structure learning in MLNs. Applied to
+ﬁrst-order knowledge bases, it provides a very ﬂex-
+ible form of theory revision. We evaluate RRFs on
+the problem of probabilistic integrity constraints in
+databases, and obtain promising results.
+
+Introduction
+
+1
+Recent years have seen the development of increasingly pow-
+erful combinations of relational and probabilistic representa-
+tions, along with inference and learning algorithms for them.
+One of the most general representations to date is Markov
+logic, which attaches weights to ﬁrst-order formulas and
+views them as templates for features of Markov random ﬁelds
+[Richardson and Domingos, 2006]. While Markov logic may
+be the language of choice for many applications, its uniﬁca-
+tion of logic and probability is incomplete. This is because
+it only treats the top-level conjunction and universal quanti-
+ﬁers in a knowledge base as probabilistic, when in principle
+any logical combination can be viewed as the limiting case
+of an underlying probability distribution. In Markov logic,
+disjunctions and existential quantiﬁers remain deterministic.
+Thus the symmetry between conjunctions and disjunctions,
+and between universal and existential quantiﬁers, is lost (ex-
+cept in the inﬁnite-weight limit).
+
+For example, an MLN with the formula R(X) ∧ S(X) can
+treat worlds that violate both R(X) and S(X) as less proba-
+ble than worlds that only violate one. Since an MLN acts as
+a soft conjunction, the groundings of R(X) and S(X) simply
+appear as distinct formulas. (MLNs convert the knowledge
+base to CNF before performing learning or inference.) This
+is not possible for the disjunction R(X) ∨ S(X): no distinction
+is made between satisfying both R(X) and S(X) and satisfying
+just one. Since a universally quantiﬁed formula is effectively
+a conjunction over all its groundings, while an existentially
+quantiﬁed formula is a disjunction over them, this leads to
+the two quantiﬁers being handled differently.
+
+This asymmetry can be avoided by “softening” disjunction
+and existential quantiﬁcation in the same way that Markov
+logic softens conjunction and universal quantiﬁcation. The
+result is a representation where MLNs can have nested MLNs
+as features. We call these recursive Markov logic networks,
+or recursive random ﬁelds (RRFs) for short.
+
+RRFs have many desirable properties, including the abil-
+ity to represent distributions like noisy DNF, rules with ex-
+ceptions, and m-of-all quantiﬁers much more compactly than
+MLNs. RRFs also allow more ﬂexibilty in revising ﬁrst-
+order theories to maximize data likelihood. Standard methods
+for inference in Markov random ﬁelds are easily extended to
+RRFs, and weight learning can be carried out efﬁciently using
+a variant of the backpropagation algorithm.
+
+RRF theory revision can be viewed as a ﬁrst-order prob-
+abilistic analog of the KBANN algorithm, which initializes
+a neural network with a propositional theory and uses back-
+propagation to improve its ﬁt to data [Towell and Shavlik,
+1994]. A propositional RRF (where all predicates have zero
+arity) differs from a multilayer perceptron in that its output
+is the joint probability of its inputs, not the regression of a
+variable on others (or, in the probabilistic version, its condi-
+tional probability). Propositional RRFs are an alternative to
+Boltzmann machines, with nested features playing the role of
+hidden variables. Because the nested features are determinis-
+tic functions of the inputs, learning does not require EM, and
+inference does not require marginalizing out variables.
+
+The remainder of this paper is organized as follows. We
+begin by discussing MLNs and their limitations. We then in-
+troduce RRFs along with inference and learning algorithms
+for them, compare them to MLNs, and present preliminary
+experimental results.
+
+IJCAI-07
+
+950
+
+2 Markov Logic Networks
+A Markov logic network (MLN) consists of a set of ﬁrst-order
+formulas and weights, {(wi, fi)}, that serve as a template
+for constructing a Markov random ﬁeld. Each feature of the
+Markov random ﬁeld is a grounding of one of the formulas.
+The joint probability distribution is therefore:
+
+(cid:4)
+
+P (X = x) =
+
+1
+Z exp
+
+wini(x)
+
+(cid:2)(cid:3)
+
+i
+
+where ni is the number of true groundings of the ith formula
+given this assignment, and Z is a normalization constant so
+that the probabilities of all worlds sum to one. Richardson
+and Domingos [2006] show that, in ﬁnite domains, this gen-
+eralizes both ﬁrst-order logic and Markov random ﬁelds.
+
+Another way to think about a Markov logic network is as a
+“softening” of a deterministic knowledge base. A ﬁrst-order
+knowledge base can be represented as a conjunction of all
+groundings of all of its formulas. MLNs relax this conjunc-
+tion by allowing worlds that violate formulas, but assigning a
+per-grounding penalty for each violated formula. Worlds that
+violate many formulas are therefore possible, but less likely
+than those that violate fewer. In this way, inconsistent knowl-
+edge bases can still be useful.
+
+However, while MLNs soften conjunctions and universals,
+disjunctions and existentials remain deterministic. Just as in
+MLNs the probability of a world decreases gradually with the
+number of false groundings of a universally quantiﬁed for-
+mula, so the probability should increase gradually with the
+number of true groundings of an existentially quantiﬁed for-
+mula. RRFs accomplish this.
+
+3 Recursive Random Fields
+A recursive random ﬁeld (RRF) is a log-linear model in which
+each feature is either an observable random variable or the
+output of another recursive random ﬁeld. To build up intu-
+ition, we ﬁrst describe the propositional case, then generalize
+it to the more interesting relational case. A concrete example
+is given in Section 3.3, and illustrated in Figure 1.
+3.1 Propositional RRFs
+While our primary goal is solving relational problems, RRFs
+may be interesting in propositional domains as well. Propo-
+sitional RRFs extend Markov random ﬁelds and Boltzmann
+machines in the same way multilayer perceptrons extend
+single-layer ones. The extension is very simple in principle,
+but allows RRFs to compactly represent important concepts,
+such as m-of-n.
+It also allows RRFs to learn features via
+weight learning, which could be more effective than current
+feature-search methods for Markov random ﬁelds.
+
+The probability distribution represented by a propositional
+
+RRF is as follows:
+
+(cid:4)
+
+P (X = x) =
+
+1
+Z0
+
+exp
+
+wifi(x)
+
+(cid:2)(cid:3)
+
+i
+
+where Z0 is a normalization constant, to ensure that the prob-
+abilities of all possible states x sum to 1. What makes this
+
+different from a standard Markov random ﬁeld is that the fea-
+tures can be built up from other subfeatures to an arbitrary
+number of levels. Speciﬁcally, each feature is either:
+
+fi(x) = xj
+
+(base case), or
+
+⎞
+⎠ (recursive case)
+
+fi(x) =
+
+1
+Zi
+
+exp
+
+wijfj(x)
+
+⎛
+⎝(cid:3)
+
+j
+
+In the recursive case, the summation is over all features fj
+referenced by the “parent” feature fi. A child feature, fj,
+can appear in more than one parent feature, and thus an RRF
+can be viewed as a directed acyclic graph of features. The
+attribute values are at the leaves, and the probability of their
+conﬁguration is given by the root. (Note that the probabilistic
+graphical model represented by the RRF is still undirected.)
+Since the overall distribution is simply a recursive feature,
+
+we can also write the probability distribution as follows:
+
+P (X = x) = f0(x)
+
+Except for Z0 (the normalization of the root feature, f0),
+the per-feature normalization constants Zi can be absorbed
+into the corresponding feature weights wki in their parent fea-
+tures fk. Therefore, the user is free to choose any convenient
+normalization, or even no normalization at all.
+
+It is easy to show that this generalizes Markov random
+ﬁelds with conjunctive or disjunctive features. Each fi ap-
+proximates a conjunction when weights wij are very large.
+In the limit, fi will be 1 iff the conjunct is true. fi can also
+represent disjuncts using large negative weights, along with
+a negative weight for the parent feature fk, wki. The nega-
+tive weight wki turns the conjunction into a disjunction just
+as negation does in De Morgan’s laws. However, one can
+also move beyond conjunction and disjunction to represent
+m-of-n concepts, or even more complex distributions where
+different features have different weights.
+
+Note that features with small absolute weights have little
+effect. Therefore, instead of using heuristics or search to
+determine which attributes should appear in which feature,
+we can include all predicates and let weight learning sort out
+which attributes are relevant for which feature. This is sim-
+ilar to learning a neural network by initializing it with small
+random values. Since the network can represent any logical
+formula, there is no need to commit to a speciﬁc structure
+ahead of time. This is an attractive alternative to the tradi-
+tional inductive methods used for learning MRF features.
+
+An RRF can be seen as a type of multi-layer neural net-
+work, in which the node function is exponential (rather than
+sigmoidal) and the network is trained to maximize joint like-
+lihood. Unlike in multilayer perceptrons, where some ran-
+dom variables are inputs and some are outputs, in RRFs all
+variables are inputs, and the output is their joint probability.
+In other ways, an RRF resembles a Boltzmann machine, but
+with the greater ﬂexibility of multiple layers and learnable us-
+ing a variant of the back-propagation algorithm. RRFs have
+no hidden variables to sum out, since all nodes in the network
+have deterministic values, making inference more efﬁcient.
+3.2 Relational RRFs
+In the relational case, relations over an arbitrary number of
+objects take the place of a ﬁxed number of variables. To allow
+
+IJCAI-07
+
+951
+
+parameter tying across different groundings, we use parame-
+terized features, or parfeatures. We represent the parameter
+tuple as a vector, (cid:2)g, whose size depends on the arity of the
+parfeature. Note that (cid:2)g is a vector of logical variables (i.e.,
+arguments to predicates) as opposed to the random Boolean
+variables x (ground atoms) that represent a state of the world.
+We use subscripts to distinguish among parfeatures with dif-
+ferent parameterizations, e.g. fi,(cid:2)g(x) and fi,(cid:2)
+(cid:2)(x) represent
+different groundings of the ith parfeature.
+
+g
+
+Each RRF parfeature is deﬁned in one of two ways:
+
+fi,(cid:2)g(x) = Ri(gi1
+
+, . . . , gik)
+
+(base case)
+
+⎛
+⎝(cid:3)
+
+(cid:3)
+
+wij
+
+j
+
+(cid:2)
+(cid:2)
+g
+
+fj,(cid:2)g,(cid:2)
+
+g
+
+(cid:2)(x)
+
+⎞
+⎠ (recursive case)
+
+fi,(cid:2)g(x) =
+
+1
+Zi
+
+exp
+
+The base case is straightforward:
+it simply represents the
+truth value of a ground relation (as speciﬁed by x). There is
+one such grounding for each possible combination of param-
+eters (arguments) of the parfeature. The recursive case sums
+the weighted values of all child parfeatures. Each parameter
+gi of a child parfeature is either a parameter of the parent fea-
+ture (gi ∈ (cid:2)g) or a parameter of a child feature that is summed
+out and does not appear in the parent feature (gi ∈ (cid:2)g
+(cid:2)). (These
+(cid:2) parameters are analogous to the parameters that appear in
+(cid:2)g
+the body but not the head of a Horn clause.) Just as sums
+(cid:2)
+of child features act as conjunctions, the summations over (cid:2)g
+parameters act as universal quantiﬁers with Markov logic se-
+mantics. In fact, these generalized quantiﬁers can represent
+m-of-all concepts, just as the simple feature sums can repre-
+sent m-of-n concepts.
+
+The relational version of a recursive random ﬁeld is there-
+
+fore deﬁned as follows:
+
+P (X = x) = f0(x)
+
+where X is the set of all ground relations (e.g., R(A, B), S(A)),
+x is an assignment of truth values to ground relations, and f0
+is the root recursive parfeature (which, being the root, has no
+parameters). Since f0 is a recursive parfeature, it is normal-
+ized by the constant Z0 to ensure a valid probability distri-
+bution. (As in the propositional case, all other Zi’s can be
+absorbed into the weights of their parent features, and may
+therefore be normalized in any convenient way.)
+
+Any relational RRF can be converted into a propositional
+RRF by grounding all parfeatures and expanding all summa-
+tions. Each distinct grounding of a parfeature becomes a dis-
+tinct feature, but with shared weights.
+3.3 RRF Example
+To clarify these ideas, let us take the example knowledge base
+from Richardson and Domingos [2006]. The domain consists
+of three predicates: Smokes(g) (g is a smoker); Cancer(g)
+(g has cancer); and Friends(g, h) (g is a friend of h). We
+abbreviate these predicates as Sm(g), Ca(g), and Fr(g, h), re-
+spectively.
+
+We wish to represent three beliefs: (i) smoking causes can-
+cer; (ii) friends of friends are friends (transitivity of friend-
+ship); and (iii) everyone has at least one friend who smokes.
+
+(The most interesting belief from Richardson and Domingos
+[2006], that people tend to smoke if their friends do, is omit-
+ted here for simplicity.) We demonstrate how to represent
+these beliefs by ﬁrst converting them to ﬁrst-order logic, and
+then converting to an RRF.
+
+One can represent the ﬁrst belief, “smoking causes can-
+cer,” in ﬁrst-order logic as a universally quantiﬁed implica-
+tion: ∀g.Sm(g) ⇒ Ca(g). This implication can be rewritten
+as a disjunction: ¬Sm(g) ∨ Ca(g). From De Morgan’s laws,
+this is equivalent to: ¬(Sm(g) ∧ ¬Ca(g)), which can be rep-
+resented as an RRF feature:
+
+f1,g(x) =
+
+1
+Z1
+
+exp(w1,1Sm(g) + w1,2Ca(g))
+
+where w1,1 is positive, w1,2 is negative, and the feature
+weight w0,1 is negative (not shown above). In general, since
+RRF features can model conjunction and disjunction, any
+CNF knowledge base can be represented as an RRF. A sim-
+ilar approach works for the second belief, “friends of people
+are friends.”
+
+The ﬁrst two beliefs are also handled well by Markov logic
+networks. The key advantage of recursive random ﬁelds is in
+representing more complex formulas. The third belief, “ev-
+eryone has at least one friend who smokes,” is naturally rep-
+resented by nested quantiﬁers: ∀g.∃h.Fr(g, h) ∧ Sm(h). This
+is best represented as an RRF feature that references a sec-
+ondary feature:
+
+(cid:2)(cid:3)
+
+(cid:4)
+w3,1f4,g,h(x)
+
+h
+
+f3,g(x) =
+
+1
+Z3
+
+exp
+
+f4,g,h(x) =
+
+1
+Z4
+
+exp(w4,1Fr(g, h) + w4,2Sm(h))
+
+Note that in RRFs this feature can also represent a distribution
+over the number of smoking friends each person has, depend-
+ing on the assigned weights. It’s possible that, while almost
+everyone has at least one smoking friend, many people have
+at least two or three. With an RRF, we can actually learn this
+distribution from data.
+
+This third belief is very problematic for an MLN. First of
+all, in an MLN it is purely logical: there’s no change in prob-
+ability with the number of smoking friends once that number
+exceeds one. Secondly, MLNs do not represent the belief ef-
+ﬁciently. In an MLN, the existential quantiﬁer is converted to
+a very large disjunction:
+
+(Fr(g, A) ∧ Sm(A)) ∨ (Fr(g, B) ∧ Sm(B)) ∨ ···
+
+If there are 1000 objects in the database, then this disjunction
+is over 1000 conjunctions. Further, the MLN will convert this
+DNF into CNF form, leading to 21000 CNF clauses from each
+grounding of this rule.
+
+These features deﬁne a full joint distribution as follows:
+P (X = x) = 1
+
+Z0 exp
+
+(cid:9)(cid:10)
+(cid:10)
+(cid:10)
+
+g
+
+w0,1f1,g(x)+
+(cid:11)
+w0,2f2,g,h,i(x)
+g,h,i
+w0,3f3,g(x)
+
+g
+
+Figure 1 diagrams the ﬁrst-order knowledge base contain-
+
+ing all of these beliefs, along with the corresponding RRF.
+
+IJCAI-07
+
+952
+
+ g
+
+
+
+
+
+ g,h,i
+
+
+
+ g
+
+ h
+
+
+
+¬Sm(g)
+
+Ca(g) ¬Fr(g,h) ¬Fr(h,i) Fr(g,i)
+
+Fr(g,h) Sm(h)
+
+w0,1
+
+f0
+
+w0,2
+
+w0,3
+
+
+
+g f1,g
+
+w1,4
+
+w1,5
+
+
+w2,6
+
+g,h,i f2,g,h,i
+w2,8
+
+w2,7
+
+Sm(g)
+
+Ca(g)
+
+Fr(g,h) Fr(h,i) Fr(g,i)
+
+
+
+g f3,g
+
+w3,9
+h f9,g,h
+
+w9,11
+
+
+w9,10
+
+Fr(g,h) Sm(h)
+
+Figure 1: Comparison of ﬁrst-order logic and RRF structures. The RRF structure closely mirrors that of ﬁrst-order logic, but
+connectives and quantiﬁers are replaced by weighted sums.
+
+Inference
+
+4
+Since RRFs generalize MLNs, which in turn generalize ﬁnite
+ﬁrst-order logic and Markov random ﬁelds, exact inference
+is intractable. Instead, we use MCMC inference, in particu-
+lar Gibbs sampling. This is straightforward: we sample each
+unknown ground predicate in turn, conditioned on all other
+ground predicates. The conditional probability of a particular
+ground predicate may easily be computed by evaluating the
+relative probabilities when the predicate is true and when it is
+false.
+
+We speed this up signiﬁcantly by caching feature sums.
+When a predicate is updated, it notiﬁes its parents of the
+change so that only the necessary values are recomputed.
+
+Our current implementation of MAP inference uses it-
+erated conditional modes (ICM) [Besag, 1986], a simple
+method for ﬁnding a mode of a distribution. Starting from
+a random conﬁguration, ICM sets each variable in turn to its
+most likely value, conditioned on all other variables. This
+procedure continues until no single-variable change will fur-
+ther improve the probability. ICM is easy to implement, fast
+to run, and guaranteed to converge. Unfortunately, it has no
+guarantee of converging to the most likely overall conﬁgura-
+tion. Possible improvements include random restarts, simu-
+lated annealing, etc.
+
+We also use ICM to ﬁnd an initial state for the Gibbs sam-
+pler. By starting at a mode, we signiﬁcantly reduce the burn-
+in time and achieve better predictions sooner.
+
+5 Learning
+Given a particular RRF structure and initial set of weights, we
+learn weights using a novel variant of the back-propagation
+algorithm. As in traditional back-propagation, the goal is to
+efﬁciently compute the derivative of the loss function with
+respect to each weight in the model.
+In this case, the loss
+function is not the error in predicting the output variables, but
+rather the joint log likelihood of all variables. We must also
+consider the partition function for the root feature, Z0. For
+these computations, we extract the 1/Z0 term from f0, and
+use f0 refer to the unnormalized feature value.
+
+We begin by discussing the simpler, propositional case. We
+abbreviate fi(x) as fi for these arguments. The derivative of
+the log likelihood with respect to a weight wij consists of two
+terms:
+
+∂ log P (x)
+
+∂wij
+
+=
+
+∂ log(f0/Z0)
+
+∂wij
+
+=
+
+∂ log(f0)
+
+∂wij
+
+− ∂ log(Z0)
+
+∂wij
+
+The ﬁrst term can be evaluated with the chain rule:
+
+From the deﬁnition of fi (including the normalization Zi):
+
+∂ log(f0)
+
+∂wij
+
+∂ log(f0)
+
+∂fi
+
+∂fi
+∂wij
+
+=
+
+(cid:12)
+
+∂fi
+∂wij
+
+= fi
+
+fj − 1
+Zi
+
+(cid:13)
+
+∂Zi
+∂wij
+the
+
+chain rule,
+
+the
+From repeated applications of
+∂ log(f0)/∂fi
+term is the sum of all derivatives along
+all paths through the network from f0 to fi. Given a path
+in the feature graph {f0, fa, . . . , fk, fi},
+the derivative
+along that path takes the form f0wafawbfb ··· wkfkwi. We
+can efﬁciently compute the sum of all paths by caching the
+per-feature partials, ∂f0/∂fi, analogous to back-propagation.
+The second term, ∂ log(Z0)/∂wij, is the expected value of
+the ﬁrst term, evaluated over all possible inputs x(cid:2). Therefore,
+the complete partial derivative is:
+∂ log(f0(x))
+
+∂ log(f0(x(cid:2)))
+
+∂ log P (x)
+
+(cid:14)
+
+(cid:15)
+
+− Ex(cid:2)
+
+=
+
+∂wij
+
+∂wij
+
+∂wij
+
+where the individual components are evaluated as above.
+
+Computing the expectation is typically intractable, but it
+can be approximated using Gibbs sampling. A more efﬁcient
+alternative, used by Richardson and Domingos [2006], is to
+instead optimize the pseudo-likelihood (P ∗) [Besag, 1975]:
+
+P ∗
+
+(X=x) =
+
+P (Xt = xt|M Bx(Xt))
+
+n(cid:16)
+
+t=1
+
+where M Bx(Xt) is the state of the Markov blanket of Xt
+in the data. Pseudo-likelihood is a consistent estimator, but
+little else is known about its formal properties. It can per-
+form poorly when long chains of inference are required, but
+worked quite well in our test domain.
+
+The expression for
+
+likelihood of a propositional RRF is as follows:
+∂ log P ∗(X=x)
+
+the pseudo-log-
+
+the gradient of
+
+n(cid:3)
+P (Xt = ¬xt|M Bx(Xt))
+(cid:12)
+
+t=1
+
+×
+
+∂ log f0
+
+∂wi
+
+− ∂log f0[Xt=¬xt]
+
+∂wi
+
+(cid:13)
+
+∂wi
+
+=
+
+We can compute this by iterating over all query predicates,
+toggling each one in turn, and computing the relative likeli-
+hood and unnormalized likelihood gradient for that permuted
+
+IJCAI-07
+
+953
+
+state. Note that we compute the gradient of the unnormalized
+log likelihood as a subroutine in computing the gradient of
+the pseudo-log-likelihood. However, we no longer need to
+approximate the intractable normalization term, Z.
+
+To learn a relational RRF, we use the domain to instanti-
+ate a propositional RRF with tied weights. The number of
+features as well as the number of children per feature will de-
+pend on the number of objects in the domain. Instead of a
+weight being attached to a single feature, it is now attached to
+a set of groundings of a parfeature. The partial derivative with
+respect to a weight is therefore the sum of the partial deriva-
+tives with respect to each instantiation of the shared weight.
+
+6 RRFs vs. MLNs
+Both RRFs and MLNs subsume probabilistic models and
+ﬁrst-order logic in ﬁnite domains. Both can be trained gen-
+eratively or discriminatively using gradient descent, either
+to optimize log likelihood or pseudo-likelihood. For both,
+when optimizing log likelihood, the normalization constant
+Z0 can be approximated using the most probable explanation
+or MCMC.
+
+Any MLN can be converted into a relational RRF by trans-
+lating each clause into an equivalent parfeature. With sufﬁ-
+ciently large weights, a parfeature approximates a hard con-
+junction or disjunction over its children. However, when its
+weights are sufﬁciently distinct, a parfeature can take on a
+different value for each conﬁguration of its children. This
+allows RRFs to compactly represent distributions that would
+require an exponential number of clauses in an MLN.
+
+Any RRF can be converted to an MLN by ﬂattening the
+model, but this will typically require an exponential number
+of clauses. Such an MLN would be intractable for learning or
+inference. RRFs are therefore much better at modeling soft
+disjunction, existential quantiﬁcation, and nested formulas.
+
+In addition to being “softer” than an MLN clause, an RRF
+parfeature can represent many different MLN clauses simply
+by adjusting its weights. This makes RRF weight learning
+more powerful than MLN structure learning: an RRF with
+n + 1 recursive parfeatures (one for the root) can represent
+any MLN structure with up to n clauses, as well as many
+distributions that an n-clause MLN cannot represent.
+
+This leads to new alternatives for structure learning and
+theory revision. In a domain where little background knowl-
+edge is available, an RRF could be initialized with small ran-
+dom weights and still converge to a good statistical model.
+This is potentially much better than MLN structure learning,
+which constructs clauses one predicate at a time, and must
+adjust weights to evaluate every candidate clause.
+
+When background knowledge is available, we can begin
+by initializing the RRF to the background theory, just as
+in MLNs. However, in addition to the known dependen-
+cies, we can also add dependencies on other parfeatures or
+predicates with very small weights. Weight learning can
+learn large weights for relevant dependencies and negligi-
+ble weights for irrelevant dependencies. This is analagous to
+what the KBANN system does using neural networks [Tow-
+ell and Shavlik, 1994]. In contrast, MLNs can only do theory
+revision through discrete search.
+
+7 Experiments: Probabilistic Integrity
+
+Constraints
+
+Integrity constraints are statements in ﬁrst-order logic that
+are used to detect and repair database errors [Abiteboul et
+al., 1995]. Logical statements work well when errors are
+few and critical, but are increasingly impractical with noisy
+databases such as those that arise from the integration of mul-
+tiple databases, information extraction from the web, etc. We
+want to make these constraints probabilistic, so we can sta-
+tistically infer the types of errors and their sources. To date,
+there has been very little work on this problem. (See [Andrit-
+sos et al., 2006; Ilyas et al., 2004] for two early approaches.)
+This is a natural domain for MLNs and RRFs, since both use
+ﬁrst-order formulas to construct probability distributions over
+worlds, or databases.
+
+The two most common types of integrity constraints are
+inclusion constraints and functional dependencies. Inclusion
+constraints are of the form:
+
+∀x.(∃y.R(x, y)) ⇒ (∃z.S(x, z))
+For example,
+in Company X, R could be the relation
+“ProjectLead” (x is in charge of project y) and S could
+be the relation “ManagerOf” (x manages employee z). This
+constraint says that every project leader manages at least one
+other worker. Of course, some employees could manage other
+employees without being the lead on any project.
+
+To evaluate MLNs and RRFs on inclusion constraints, we
+generated domains consisting of 100 people and 100 projects.
+With probability 0.25, a person x is a project leader, and leads
+(or co-leads) each project y with probability 0.1. For each
+project x leads, x manages employee z with probability 0.05.
+Additional managing relationships are generated with a prob-
+ability that we vary from 0.001 to 0.1. However, the actual
+leadership and management relationships are unobserved: we
+only see noisy versions, which are corrupted with a probabil-
+ity that we vary from 0.0 to 1.0.
+
+We converted the constraint formula into an MLN and an
+RRF as described in previous sections and added the im-
+plications ProjectLead(x, y) ⇒ ProjectLead
+(cid:2)(x, y) and
+ManagerOf(x, z) ⇒ ManagerOf
+(cid:2)(x, z), where the predi-
+cates with primes are the observed ones. We found that both
+MLNs and RRFs worked better when given both directions of
+the integrity constraint, since project leaders manage people
+and managers lead projects. We learned weights to optimize
+pseudo-log-likelihood in all models. The results are shown
+in Figure 2. Each data point is an average over 10 train/test
+set pairs. RRFs show a consistent advantage over MLNs, be-
+cause they can better represent the fact that an employee who
+manages many people is probably a project leader, while an
+employee who manages few people may not be.
+
+The second type of integrity constraints, functional depen-
+dencies, are of the form:
+∀x, y1, y2.(∃z1, z2.R(x, y1, z1) ∧ R(x, y2, z2)) ⇒ y1 = y2
+In a functional dependency, each x determines a unique y
+(or an equivalence set of ys). For example, suppose Com-
+pany X has a table of parts suppliers represented by the re-
+lation Supplier(TaxID, CompanyName, PartType). A sup-
+
+IJCAI-07
+
+954
+
+d
+o
+o
+h
+i
+l
+e
+k
+i
+l
+-
+g
+o
+l
+-
+o
+d
+u
+e
+s
+P
+
+ 0
+-1000
+-2000
+-3000
+-4000
+-5000
+-6000
+
+RRF
+MLN
+
+d
+o
+o
+h
+i
+l
+e
+k
+i
+l
+-
+g
+o
+l
+-
+o
+d
+u
+e
+s
+P
+
+ 0
+
+ 0.2
+
+ 0.8
+
+ 1
+
+ 0.4
+ 0.6
+Noise level
+
+-1500
+-2000
+-2500
+-3000
+-3500
+-4000
+-4500
+
+ 0.001
+
+RRF
+MLN
+
+ 0.01
+
+ 0.1
+Prob. of management relation
+
+d
+o
+o
+h
+i
+l
+e
+k
+i
+l
+-
+g
+o
+l
+-
+o
+d
+u
+e
+s
+P
+
+-40
+-60
+-80
+-100
+-120
+-140
+-160
+-180
+-200
+
+RRF
+MLN
+
+ 0
+
+ 0.2
+
+ 0.8
+
+ 1
+
+ 0.4
+ 0.6
+Noise level
+
+d
+o
+o
+h
+i
+l
+e
+k
+i
+l
+-
+g
+o
+l
+-
+o
+d
+u
+e
+s
+P
+
+-15
+-20
+-25
+-30
+-35
+-40
+-45
+-50
+-55
+-60
+-65
+-70
+
+RRF
+MLN
+
+ 1  1.5  2  2.5  3  3.5  4  4.5  5
+
+Equivalent names per company
+
+Figure 2: Log-pseudo-likelihood of RRFs and MLNs for the inclusion constraints and functional dependencies. For inclusion
+(cid:2)(x, z) (far left)
+constraints, we vary the probability of corrupting each observed relation, ProjectLead
+and the probability of adding extra Manages(x, z) tuples (mid-left). For functional dependencies, we vary the probability of
+corrupting the company name of a supplier (mid-right) and the number of equivalent names per company (far right).
+
+(cid:2)(x, y) and Manages
+
+plier that supplies multiple types of parts may appear multi-
+ple times, but each tax ID should always be associated with
+the same company name or set of equivalent company names
+(e.g., “Microsoft,” “Microsoft, Inc.,” and “MSFT” are all
+equivalent).
+If there is noise in the database, logic alone
+cannot say which company names are equivalent and which
+are errors.
+
+For evaluating functional dependencies, we generated a
+database with 30 tax IDs, 30 company names (partitioned into
+equivalence sets of size k), and 30 part types. Each tax ID is
+associated with one set of equivalent company names, uni-
+formly selected from the 30/k name groups. For each com-
+pany name a tax ID uses, we generated part types z that the
+company supplies with probability 0.25. This simulates the
+merging of k distinct databases, each with its own company
+naming scheme but with shared identiﬁers for the other ﬁelds.
+As a ﬁnal step, we randomly corrupted company names with
+a probability that we varied from 0.0 to 1.0.
+
+The task was to predict which pairs of company names
+were equivalent, given the supplier table. The results are
+shown in Figure 2. With multiple databases at moderate lev-
+els of noise, RRFs outperform MLNs. We attribute this to
+RRFs’ ability to represent the fact that two company names
+are more likely to be equivalent if they both appear multiple
+times with the same tax ID, and to learn the appropriate form
+of this dependence.
+
+8 Conclusion
+Recursive random ﬁelds overcome some salient limitations
+of Markov logic. While MLNs only model uncertainty over
+conjunctions and universal quantiﬁers, RRFs also model un-
+certainty over disjunctions and existentials, and thus achieve a
+deeper integration of logic and probability. Inference in RRFs
+can be carried out using Gibbs sampling and iterated condi-
+tional modes, and weights can be learned using a variant of
+the back-propagation algorithm.
+
+The main disadvantage of RRFs relative to MLNs is re-
+duced understandability. One possibility is to extract MLNs
+from RRFs with techniques similar to those used to extract
+propositional theories from KBANN models. Another im-
+
+portant problem for future work is scalability. Here we plan
+to adapt many of the MLN optimizations to RRFs.
+
+Most importantly, we intend to apply RRFs to real datasets
+to better understand how they work in practice, and to see if
+their greater representational power yields better models.
+
+Acknowledgments
+This work was supported by a National Science Founda-
+tion Graduate Research Fellowship awarded to the ﬁrst au-
+thor, DARPA grant FA8750-05-2-0283 (managed by AFRL),
+DARPA contract NBCH-D030010, NSF grant IIS-0534881,
+and ONR grant N00014-05-1-0313. The views and conclu-
+sions contained in this document are those of the authors and
+should not be interpreted as necessarily representing the of-
+ﬁcial policies, either expressed or implied, of DARPA, NSF,
+ONR, or the United States Government.
+
+References
+[Abiteboul et al., 1995] S. Abiteboul, R. Hull, and V. Vianu.
+
+Foundations of Databases. Addison-Wesley, 1995.
+
+[Andritsos et al., 2006] P. Andritsos, A. Fuxman, and R.
+Miller. Clean answers over dirty databases: A probabilistic
+approach. In Proc. ICDE-06, page 30, 2006
+
+[Besag, 1975] J. Besag. Statistical analysis of non-lattice
+
+data. The Statistician, 24:179-195, 1975.
+
+[Besag, 1986] J. Besag. On the statistical analysis of dirty
+
+pictures. J. Royal Stat. Soc. B, 48:259–302, 1986.
+
+[Ilyas et al., 2004] I. Ilyas, V. Markl, P. Haas, P. Brown, and
+A. Aboulnaga. Cords: Automatic discovery of correlations
+and soft functional dependencies. In Proc. SIGMOD-04,
+pages 647–658, 2004.
+
+[Richardson and Domingos, 2006] M.
+
+and
+P. Domingos. Markov logic networks. Machine Learning,
+62:107–136, 2006.
+
+Richardson
+
+[Towell and Shavlik, 1994] G. Towell
+
+and J. Shavlik.
+Knowledge-based artiﬁcial neural networks. Artiﬁcial
+Intelligence, 70:119–165, 1994.
+
+IJCAI-07
+
+955
+
+

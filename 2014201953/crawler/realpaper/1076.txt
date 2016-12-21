@@ -1,0 +1,1122 @@
+Loopy SAM
+
+Ananth Ranganathan, Michael Kaess, and Frank Dellaert
+
+Center for Robotics and Intelligent Machines, College of Computing
+
+Georgia Institute of Technology
+
+{ananth,kaess,dellaert}@cc.gatech.edu
+
+Abstract
+
+Smoothing approaches to the Simultaneous Local-
+ization and Mapping (SLAM) problem in robotics
+are superior to the more common ﬁltering ap-
+proaches in being exact, better equipped to deal
+with non-linearities, and computing the entire robot
+trajectory. However, while ﬁltering algorithms that
+perform map updates in constant time exist, no
+analogous smoothing method is available. We aim
+to rectify this situation by presenting a smoothing-
+based solution to SLAM using Loopy Belief Prop-
+agation (LBP) that can perform the trajectory and
+map updates in constant time except when a loop
+is closed in the environment. The SLAM prob-
+lem is represented as a Gaussian Markov Ran-
+dom Field (GMRF) over which LBP is performed.
+We prove that LBP, in this case, is equivalent to
+Gauss-Seidel relaxation of a linear system. The in-
+ability to compute marginal covariances efﬁciently
+in a smoothing algorithm has previously been a
+stumbling block to their widespread use. LBP
+enables the efﬁcient recovery of the marginal co-
+variances, albeit approximately, of landmarks and
+poses. While the ﬁnal covariances are overconﬁ-
+dent, the ones obtained from a spanning tree of the
+GMRF are conservative, making them useful for
+data association. Experiments in simulation and us-
+ing real data are presented.
+
+1 Introduction
+The problem of Simultaneous Localization and Mapping
+(SLAM) is a core competency of robotics which has at-
+tracted a large amount of attention. The classical solution to
+the SLAM problem uses an Extended Kalman Filter (EKF)
+[Smith and Cheeseman, 1987] that maintains the joint distri-
+bution on the current robot pose and the landmarks in the map
+in the form of a Gaussian distribution. Since updating the co-
+variance matrix of this distribution requires O(n2) time, the
+EKF algorithm does not scale to large maps. Recent work
+on the SLAM problem has focussed on improving the time
+complexity of the solutions. One commonly used technique
+is to update the information form of the Gaussian distribu-
+tion. Though the information matrix becomes dense through
+
+Figure 1: The Gaussian Markov Random Field (GMRF) correspond-
+ing to an illustrative Smoothing and Mapping (SAM) problem with
+30 poses in the robot trajectory. Poses in the graph are shown as
+circles and landmarks as squares.
+
+repeated marginalization of poses, recently introduced tech-
+niques such as the Sparse Extended Information Filter (SEIF)
+[Thrun et al., 2004] and the Thin Junction Tree Filter (TJTF)
+[Paskin, 2003] present approximations to keep the informa-
+tion matrix sparse. The sparsity of the representation allows
+for a constant time update of the ﬁlter.
+
+In contrast to the above ﬁltering approaches which only
+compute the current robot pose with the map, a smoothing
+approach recovers the complete robot trajectory and the map.
+The smoothing information matrix naturally stays sparse over
+time without the need for any approximations. Further,
+smoothing can incorporate new information about past robot
+poses as opposed to ﬁltering approaches that cannot update
+a pose after it has been marginalized out. Even though the
+number of variables increases continuously for smoothing, in
+many real-world scenarios, especially those involving explo-
+ration, this larger matrix still contains far less entries than in
+ﬁlter-based methods [Dellaert, 2005] [Eustice et al., 2005].
+Filters are more efﬁcient then smoothing only when a limited
+number of structure points is observed repeatedly. However,
+even in this case the inability to correct previous poses may
+lead to poor results.
+
+The crucial limitation of all the above approaches based on
+the information form of the Gaussian is that recovering an es-
+timate of the map and robot pose involves a matrix inversion,
+and hence, is computationally infeasible for large systems.
+Indeed, in the case of the ﬁltering approaches such as the
+SEIF, obtaining even the mean involves a matrix inversion.
+
+IJCAI-07
+
+2191
+
+The solution is obtained in these cases through an iterative
+process that solves a linear system wherein only a constant
+number of iterations is performed at each step so as to main-
+tain the runtime bounds of the algorithm. This approximation
+is based on the assumption that the SLAM solution evolves
+only slowly over time so that a relinearization of the problem
+at each time step is not required. The iterative method, how-
+ever, still does not yield the covariance, which is needed for
+maximum-likelihood data association and also as an estimate
+of the uncertainty in the landmark locations and pose.
+
+This paper deals with the use of Loopy Belief Propagation
+(LBP) [Weiss and Freeman, 1999] to obtain an approximate
+solution to the SLAM problem, including the marginal co-
+variances on the map and pose. We consider the case wherein
+the map consists of a set of features, and build on the Smooth-
+ing and Mapping (SAM) approach as introduced in [Dellaert,
+2005], which updates the joint distribution on the robot tra-
+jectory and the map using the square root information form
+of the Gaussian distribution. Our approach is based on the
+fact that the SAM problem can be treated from the graph-
+ical model viewpoint as a Gaussian Markov Random Field
+(GMRF) [Winkler, 1995] on which inference can be per-
+formed using LBP.
+
+We provide a constant time update algorithm, which we
+call the Wildﬁre algorithm, for estimating the map and robot
+trajectory, including the marginal covariances. While a naive
+implementation of LBP requires O(n) time to update the
+marginal distributions, where n is the number of nodes in the
+graph, the Wildﬁre algorithm discards negligibly small mes-
+sages between nodes. Subsequently, only those nodes which
+have either received or sent signiﬁcant messages get updated.
+We show that the number of nodes involved in a signiﬁcant
+message exchange is O(1) unless a signiﬁcant event (such as
+loop closing) occurs when the complete graph may get up-
+dated, increasing the time bound to O(n).
+
+Relinearization of the GMRF graph, which is required
+since the SAM problem is non-linear in general, is performed
+in constant time using a technique similar to the Wildﬁre al-
+gorithm in that only nodes that have changed are relinearized.
+Moreover, it need only be done periodically when the differ-
+ence between the current estimate and the linearization point
+exceeds a speciﬁed threshold. As before, relinearization may
+take linear time after a signiﬁcant update of the GMRF graph.
+We prove that LBP on a GMRF is equivalent to Gauss-
+Seidel relaxation and provides the exact MAP estimates of
+the nodes. The covariances are, however, overconﬁdent due
+to the approximate nature of the inference. As a conservative
+approximation, the covariances obtained by restricting infer-
+ence to a spanning tree of the GMRF graph can be used to
+perform data association.
+
+In terms of related work, closest are the relaxation based
+approaches given in [Duckett et al., 2000; Frese and Duckett,
+2003]. However, these are unable to compute the marginal
+covariances on the poses and landmarks. Graphical SLAM
+[Folkesson and Christensen, 2004] is another method that
+builds a graphical model of the smoothing problem. Our ap-
+proach shares many common features with Graphical SLAM,
+including the ability to modify data association on the ﬂy,
+and increase efﬁciency by eliminating variables judiciously.
+
+In addition, our algorithm is incremental and largely runs in
+O(1) time, which are advantages over Graphical SLAM.
+
+2 Smoothing and Mapping
+We begin by reviewing the SAM framework as given in [Del-
+laert, 2005]. In the smoothing framework, our aim is to re-
+cover the maximum a posteriori (MAP) estimate for the entire
+trajectory X Δ= {xi : i ∈ 0 . . . M } and landmark locations
+(the map) L Δ= {lj : j ∈ 1 . . . N }, given the landmark mea-
+surements Z Δ= {zk : k ∈ 1 . . . K} and odometry U Δ= {ui}.
+This can be computed by maximizing the joint posterior on
+the trajectory and landmark locations P (X, L|Z)
+
+Θ∗ Δ= argmax
+
+P (X, L|Z, U )
+
+(1)
+
+Θ
+
+where Θ Δ= {X, L} is the set of unknown variables, i.e the
+robot trajectory and landmark locations. The posterior can be
+factorized using Bayes law as
+
+P (X, L|Z, U ) ∝ P (Z, U |X, L)P (X, L)
+
+(cid:2)M
+(cid:2)K
+
+i=1
+
+P (x0)
+
+∝
+
+P (xi|xi−1, ui)
+P (zk|xik
+)
+, ljk
+
+k=1
+
+(2)
+
+Here P (xi|xi−1, ui) is the motion model, parameterized by
+the odometry ui, and P (zk|xik
+) is the landmark measure-
+ment model, assuming that the correspondences (ik, jk) are
+known. The prior on the initial pose P (x0) is taken to be a
+constant, usually the origin, while the priors on the remaining
+poses and landmark locations are assumed to be uniform.
+
+, ljk
+
+We assume Gaussian motion and measurement models, as
+is standard in the SLAM literature. The motion model is
+given as xi = fi(xi−1, ui)+wi, where wi is zero-mean Gaus-
+sian noise with covariance matrix Qi. Similarly, the measure-
+ment equation is given as zk = hk(xik
+) + vk where vk is
+normally distributed zero-mean measurement noise with co-
+variance Rk.
+
+, ljk
+
+In practice, only linearized versions of the motion and mea-
+surement models are considered, for example for use in the
+Extended Kalman Filter (EKF) approach to SLAM [Smith et
+al., 1990], with multiple iterations being used to obtain con-
+vergence to the minimum. In the following, we will assume
+that either a good linearization point is available or that we are
+working on one iteration of a non-linear optimization method.
+It can be shown [Dellaert, 2005] that this results in a sparse
+linear least squares problem in δΘ
+
+(cid:3)
+
+M(cid:4)
+
+δΘ∗ = argmin
+
+δΘ
+
+K(cid:4)
+
+(cid:4)F i−1
+
+i
+
+δxi−1 + Gi
+
+iδxi − ai(cid:4)2
+Qi
+
+i=1
+
+(cid:4)H ik
+
+k δxik
+
++ J jk
+
+k δljk
+
+− ck(cid:4)2
+Rk
+
+(cid:5)
+
++
+
+(3)
+
+k=1
+
+i
+
+where F i−1
+is the sparse Jacobian of fi(.) at the lineariza-
+i − fi(x0
+, ui) is the odome-
+tion point x0
+i−1 and ai
+try prediction error. Analogously, H ik
+k are respec-
+tively the sparse Jacobians of hk(.) with respect to a change
+
+i−1
+k and J jk
+
+Δ= x0
+
+IJCAI-07
+
+2192
+
+),
+Δ= zk − hk(x0
+) is the measurement prediction
+ik
+||.||Σ is the Mahalanobis distance with respect to the
+i = −Id×d , d
+
+in xik and ljk , evaluated at the linearization point (x0
+ik
+and ck
+error.
+covariance matrix Σ and we use the matrix Gi
+being the dimension of xi, to avoid treating δxi specially.
+
+, l0
+jk
+
+, l0
+jk
+
+The solution to the least squares problem (3) is given by
+the linear system AδΘ − b = 0 where A = J T J is the
+Hessian matrix, J being the system Jacobian matrix obtained
+by assembling the individual measurement Jacobians, and
+b = J T e where e is the vector of all the measurement errors.
+
+SAM as a Markov Random Field
+We now show that inference on the posterior (2) can be per-
+formed by placing the SAM problem in a Markov Random
+Field (MRF) framework. The graph of an MRF is undi-
+rected and its adjacency structure indicates which variables
+are linked by a common factor (a measurement or constraint).
+A pairwise MRF is described by a factored probability den-
+
+sity given as
+
+P (X, L) ∝
+
+(cid:6)
+
+(cid:6)
+
+φ(yi)
+
+ψ(yi, yj)
+
+(4)
+
+i
+
+{i,j}
+
+where the second product is over the pairwise cliques {i, j},
+counted once. The posterior (2) can be modeled as a pair-
+wise MRF where the singleton cliques correspond to marginal
+prior distributions or singleton measurements (such as GPS)
+on the unknown variables and the edge cliques correspond to
+the motion and measurement likelihoods respectively.
+
+For the linear case considered in the previous section, these
+
+equations translate to
+
+− ln φ(yi) ∝
+
+− ln ψ(xi−1, xi) ∝
+
+− ln ψ(xik
+
+, ljk
+
+) ∝
+
+1
+2
+1
+2
+1
+2
+
+(cid:4)xi − μi(cid:4)2
+Pi
+
+(cid:4)F i−1
+
+i
+
+δxi−1 + Gi
+
+iδxi − ai(cid:4)2
+
+Qi(5)
+
+(cid:4)H ik
+
+k δxik
+
++ J jk
+
+k δljk
+
+− ck(cid:4)2
+Rk
+
+where yi ∈ {X, L}. This gives us a Gaussian Markov Ran-
+dom Field (GMRF) corresponding to the linearized SAM
+problem. Note that in the context of the SAM problem, the
+singleton clique factors are most often set to unity except for
+the ﬁrst pose, which is clamped to the origin.
+
+3 Loopy Belief Propagation for SAM
+We use Loopy Belief propagation (LBP) on the SAM GMRF
+to solve the linear system (3) and obtain not only the MAP
+values of the unknown variables but also the covariances.
+For ease of computation, we use the information form of the
+Gaussian to specify the single and pairwise clique potentials
+in the GMRF given by (5), wherein these are expressed using
+the information vector η and the information matrix Λ, and
+we deﬁne the information form as
+
+(cid:7)
+
+(cid:8)
+
+where C is an additive constant. If Λ is full-rank, equation
+(6) corresponds to a Gaussian density as
+
+N (x; Λ−1η, Λ−1) = N (x; μ, P )
+
+where K is a constant of proportionality.
+
+Using this formulation, we can write the edge potentials
+from (5) as ψ(xi, lj) ∝ N −1(yij ; ηij, Λij) , where yij is the
+vector [ xi
+, and we have dropped the index k from the
+corresponding pair {ik, jk} for convenience. The distribution
+parameters are then given as
+
+lj ]T
+
+(cid:9)
+
+ηij
+
+Δ=
+
+(cid:11)
+
+ηi
+ij
+ηj
+ij
+
+ij Λij
+Λii
+Λji
+ij Λjj
+
+ij
+
+ij
+
+Λij
+
+Δ=
+
+(cid:10)
+(cid:12)
+
+=
+
+=
+
+(cid:10)
+(cid:10)
+
+(cid:9)
+(cid:9)
+
+H i
+k
+J j
+k
+
+H i
+k
+J j
+k
+
+R−1
+
+k ck
+
+(cid:9)
+
+R−1
+
+k
+
+(cid:10)T
+
+(8)
+
+(9)
+
+H i
+k
+J j
+k
+
+and the potentials on the edges linking two poses are deﬁned
+analogously.
+
+The GMRF potentials on the singleton cliques are similarly
+deﬁned as φ(yi) = N −1(yi; ηi, Λi) where yi ∈ {X, L}, and
+ηi = Λiμi, Λi = P −1
+follows from (5) and (7). The poten-
+tials φ(yi) represent the beliefs on the unknowns and if only
+a uniform prior exists on an MRF node yi, both ηi and Λi can
+be set to zero. Note that setting Λi to zero is equivalent to
+having a Gaussian prior with inﬁnite covariance.
+
+i
+
+Belief Propagation
+The goal of belief propagation in our case is to ﬁnd the
+marginal probability, or the belief, P (yi) of a node yi ∈ Θ =
+{X, L} in the SAM graph. A complete characterization of
+the belief propagation algorithm for GMRFs is beyond the
+scope of this paper, but we provide the high-level equations
+and data ﬂow below. Details can be found in [Weiss and Free-
+man, 1999].
+
+The beliefs are computed using a message passing algo-
+rithm wherein each node passes messages to its neighbors
+and in turn uses its incoming messages to compute its belief.
+While belief propagation is guaranteed to compute the correct
+beliefs only if the graphical model does not contain loops, it
+has been proven that it ﬁnds the correct MAP solution for
+Gaussian graphical models even in the presence of loops, i.e
+the means of the beliefs are correct while the covariances are
+incorrect in general [Weiss and Freeman, 1999].
+
+LBP works by repeatedly computing the messages and be-
+liefs for every node in the graph starting with constant mes-
+sages [Weiss and Freeman, 1999], either in synchronous or
+asynchronous fashion. This sweep over the graph is iterated
+until the beliefs converge. Denoting the current iteration by
+a discrete time superscript t, the belief parameters (the infor-
+mation vector and matrix) for node yi are given as
+
+mt
+
+i = ηi +
+
+M t
+
+i = Λi +
+
+mt−1
+
+ji
+
+M t−1
+
+ji
+
+(10)
+
+(11)
+
+and the parameters of the message Mij (yj) from node yi to
+node yj as
+
+(cid:4)
+(cid:4)
+
+j∈Ni
+
+j∈Ni
+
+(cid:13)
+
+(cid:13)
+(cid:13)
+
+N −1(x; η, Λ) Δ= exp
+
+C + ηT x −
+
+xT Λx
+
+(6)
+
+mt
+
+ij = ηj
+
+ij − Λji
+
+ij
+
+Λii
+
+ij + M t
+
+i − M t−1
+
+ji
+
+1
+2
+
+(cid:14)−1
+(cid:14)
+(cid:14)−1 Λij
+
+ji
+
+ηi
+ij + mt
+
+i − mt−1
+
+(12)
+
+M t
+
+ij = Λjj
+
+ij − Λji
+
+ij
+
+Λii
+
+ij + M t
+
+i − M t−1
+
+ji
+
+ij (13)
+
+(7)
+
+where use has been made of the deﬁnitions in (8) and (9).
+
+IJCAI-07
+
+2193
+
+Algorithm 1 The Wildﬁre algorithm for LBP
+
+1. Push the most recently added nodes and their neighbors in the
+
+SAM graph G(V, E) onto the queue Q
+
+2. Do until Q is empty
+
+(a) Pop node y from Q and compute messages Mt
+
+yk for all
+
+k ∈ Ny using (12-13)
+
+yk − Mt−1
+
+(b) If Mt
+yk >  , push k onto Q
+(c) Update the belief B(y) using (10-11)
+
+Figure 2: The Wildﬁre algorithm only updates nodes with signif-
+icant message deviations, starting from the most recently added
+node.
+In normal operation (left) only the frontier of the graph is
+updated. However, during loop closings (right) most of the graph
+is updated. Updated poses are shown in brown (dark) while the un-
+changed nodes are in yellow (light). The robot is moving counter-
+clockwise starting at the bottom.
+
+4 Constant Time Loopy SAM
+Each iteration of LBP as deﬁned above is O(n) where n is the
+number of nodes in the graph. This is too slow to be useful,
+especially since the trajectory is included in the node count.
+We can, however, improve this bound to O(1) for incremen-
+tal operation, i.e. when new nodes or edges are added to the
+GMRF.
+
+The key observation to getting a constant time algorithm is
+that at each step only a few of the nodes get updated, i.e. ex-
+perience an actual change in their values, and these nodes
+are the ones that have been recently added to the graph. If
+we commence the belief updation sweep in every iteration
+of LBP from the most recently added node, the new mes-
+sages are initially seen to deviate from their previous values
+by large amounts. However, these deviations become smaller
+as we move further back in the graph. Once the message de-
+viations become negligible (smaller than some pre-speciﬁed
+signiﬁcance threshold), the beliefs no longer change and the
+remaining nodes need not be updated.
+
+The Wildﬁre algorithm, so called because the message de-
+viations from the previous iteration spread like wildﬁre from
+their point of origin and gradually become negligible, is illus-
+trated in Figure 2. The algorithm implementation features a
+queue onto which nodes with signiﬁcant message deviations
+on incoming edges are pushed. A summary of the algorithm
+is given in Algorithm 1.
+
+The Wildﬁre algorithm has O(1) running time since in
+most situations the number of edges with large message devi-
+ations is O(1). However, this is not true when special events
+such as loop closures occur as shown in Figure 2. In such
+instances, the complete graph is updated resulting in O(n)
+complexity. Note that no special clause is required to handle
+these instances - the algorithm automatically updates all the
+nodes in the graph as the message deviations do not die down.
+Relinearization of the SAM graph, which involves comput-
+ing the clique potentials at new linearization points, can also
+be performed using the Wildﬁre algorithm, the only differ-
+ence being that the deviations of the node beliefs from their
+respective linearization points are now used instead of the
+message deviations. In this case, however, two variants are
+possible. One technique is to delay relinearization until the
+belief deviations are greater than a certain threshold for some
+given proportion of nodes in the graph. As this proportion
+approaches unity, relinearization becomes O(n) but is per-
+formed only very rarely. A second strategy is to perform re-
+linearization at regular time intervals so that it remains O(1).
+The choice between these strategies depends on the type of
+application, the environment, and size of the SAM graph.
+
+We now have all the components to describe the Loopy
+SAM algorithm. At each step, a new pose node, new mea-
+surement links and possibly new landmark nodes, are added
+to the SAM GMRF. A ﬁxed number of LBP iterations are
+then performed using the Wildﬁre algorithm to update the be-
+liefs on the nodes. Periodically, relinearization is performed,
+again using a variant of the Wildﬁre algorithm. The means
+of the pose and landmark nodes in the SAM GMRF, obtained
+from the belief information vector and matrix at each node,
+correspond to the MAP solutions for the trajectory and the
+map respectively.
+
+4.1 Marginal Covariances
+
+We now show how to recover the approximate marginal co-
+variances of the nodes from the LBP beliefs. An important
+use of the covariances is to bound the search area for possible
+correspondences in data association. This is usually done us-
+ing the projection of the combined pose and landmark uncer-
+tainty into the measurement space, the computation of which
+requires knowledge of the marginal covariances of the poses
+and landmarks.
+
+The inverse of the belief information matrix at each node
+in the SAM GMRF gives the marginal covariance. While in
+general the belief obtained from LBP can be overconﬁdent
+or underconﬁdent, it has been proven to be always overcon-
+ﬁdent for Gaussian MRFs with pairwise cliques [Weiss and
+Freeman, 1999]. Overconﬁdent covariances cannot be used
+for data association since this results in many valid corre-
+spondences being rejected. A ﬁrst conservative approxima-
+tion would be to use the inverse of the diagonal blocks of the
+system Hessian matrix as the marginal covariances. However,
+this results in overly conservative estimates.
+
+A better approximation can be obtained by restricting mes-
+sage passing to a spanning tree of the SAM GMRF. Since the
+spanning tree is obtained by deleting edges from the GMRF
+and inference on it is exact, we get a conservative estimate of
+the true marginal covariances that is also better than our ﬁrst
+
+IJCAI-07
+
+2194
+
+Update time per step
+
+Update
+Messages
+Beliefs
+
+)
+c
+e
+s
+(
+ 
+
+e
+m
+T
+
+i
+
+0.16
+
+0.14
+
+0.12
+
+0.1
+
+0.08
+
+0.06
+
+0.04
+
+0.02
+
+500
+
+1000
+
+1500
+
+2000
+
+2500
+Steps
+
+3000
+
+3500
+
+4000
+
+4500
+
+5000
+
+Figure 4: Runtime for a simulation consisting of 5000 steps. The
+times for the message and belief computation, and the total update
+step are shown. All times were obtained on a 1.8GHz Linux machine
+using an implementation of the algorithm in Ocaml. Note the two
+spikes (one at the very end) corresponding to loop closures.
+
+system Jacobian J , and e is the corresponding measurement
+error. This result is true since we have
+
+mt
+
+j − mt−1
+
+ij
+
+= ηj +
+
+mt−1
+
+kj = m−i
+
+j
+
+(cid:4)
+
+k∈Nj \i
+
+j
+
+j − M t−1
+
+where m−i
+is the estimate of mj without considering node
+yj, and similarly M t
+j =
+m−i
+j holds by the deﬁnition of the information form of the
+Gaussian, substituting these identities and the deﬁnitions of η
+and Λ from (8-9) into the message equation (12) gives us the
+result (15).
+
+. Since M −i
+
+ij = M −i
+
+j y−i
+
+j
+
+Using (15) in the belief equation (10), we get
+
+(cid:4)
+
+(cid:4)
+
+mt
+
+i = ηi +
+
+−
+
+Aij y−i
+
+j
+
+j∈Ni
+= ηi + bi −
+
+j∈Ni
+
+Aijy−i
+
+j
+
+(16)
+
+J T
+kj iekj
+
+(cid:4)
+
+j∈Ni
+
+which closely corresponds to the relaxation equation (14).
+Hence, the MAP computation in LBP is simply a modiﬁed
+version of Gauss-Seidel relaxation.
+
+6 Results
+
+Linear Gaussian Simulations
+
+We ﬁrst present the results of applying our approach in a con-
+trolled simulation devoid of non-linearities. The simulation
+consisted of an environment with randomly placed, uniformly
+distributed landmarks. The robot followed a large 8-shaped
+ﬁgure in this environment and the run included two loop clo-
+sures at the “waist” of the 8-ﬁgure.
+
+Figure 4 gives the results for a linear simulation consist-
+ing of 5000 steps, i.e. a trajectory of length 5000. The total
+number of nodes in the SAM GMRF was 6742. It can be
+veriﬁed that the algorithm is O(1), and the two spikes in the
+graph corresponding to the loop closures are also clearly vis-
+ible. The spikes occur since the LBP update makes a sweep
+through the whole graph in these instances.
+
+Figure 3: (top) A spanning tree of the GMRF graph, with edges col-
+ored blue (dark), for a linear simulation. (bottom) Covariances for
+the same simulation - ground truth is shown in blue (thin dark), over-
+conﬁdent LBP covariances are shown in green (light), and conserva-
+tive covariance estimates obtained by restricting BP to the spanning
+tree are shown in red (thick dark).
+
+order approximation. Maintenance of the spanning tree and
+message passing on it require extra work. However, the span-
+ning tree can be extended at each step in O(1) so that, with
+the use of the Wildﬁre algorithm, the overall scheme still re-
+mains constant time. Figure 3 illustrates the nature of this
+approximation.
+
+5 Loopy SAM and Gauss-Seidel Relaxation
+We prove in this section that computing the MAP solution
+using LBP for a GMRF is equivalent to a modiﬁed form of
+Gauss-Seidel relaxation, which is commonly used to solve
+linear systems. Relaxation has previously been used in the
+context of SLAM [Duckett et al., 2000] but is not capable of
+recovering the marginal covariances, a short-coming that LBP
+overcomes. The equivalence of the MAP portion of LBP and
+relaxation is an interesting result that connects our technique
+with a well-understood method from linear algebra.
+
+Relaxation solves the linear system AδΘ − b = 0 , encoun-
+tered in Section 2, by iterating over a set of equations, each
+of which updates the value of exactly one unknown using the
+current estimate of all the others
+Aiiyi = bi −
+
+(cid:4)
+
+Aijyj
+
+(14)
+
+j(cid:4)=i
+
+where the sum is over all the variables except yi, and yi ∈
+Θ = {X, L} as before.
+
+We begin our proof by noting that the message from yj to
+
+yi given by (12) can be re-written as
+
+mt
+
+ji = J T
+
+kiek − Aij y−i
+
+j
+
+(15)
+
+where y−i
+is the estimate of yj without considering the node
+yi, k is the index of the measurement linking yi and yj in the
+
+j
+
+IJCAI-07
+
+2195
+
+the fact that the covariances become incorrect due to multiple
+use of the same evidence when it is propagated around a loop
+in the graph.
+
+It is future work to deﬁne rigorous bounds on the covari-
+ance obtained from LBP, and also investigate avenues to re-
+cover the exact covariance using related techniques, an exam-
+ple being [Sudderth et al., 2004].
+
+Acknowledgements
+The authors were partly supported during this work by the
+National Science Foundation award IIS - 0448111 ”CA-
+REER: Markov Chain Monte Carlo Methods for Large Scale
+Correspondence Problems in Computer Vision and Robotics”
+
+References
+[Dellaert, 2005] F. Dellaert. Square Root SAM: Simultaneous lo-
+In
+
+cation and mapping via square root information smoothing.
+Robotics: Science and Systems (RSS), 2005.
+
+[Duckett et al., 2000] T. Duckett, S. Marsland, and J. Shapiro.
+Learning globally consistent maps by relaxation. In IEEE Intl.
+Conf. on Robotics and Automation (ICRA), San Francisco, CA,
+2000.
+
+[Eustice et al., 2005] R. Eustice, H. Singh, and J. Leonard. Exactly
+Sparse Delayed-State Filter. In IEEE Intl. Conf. on Robotics and
+Automation (ICRA), Barcelona, Spain, 2005.
+
+[Folkesson and Christensen, 2004] J. Folkesson and H. I. Chris-
+tensen. Graphical SLAM - a self-correcting map. In IEEE Intl.
+Conf. on Robotics and Automation (ICRA), volume 1, pages 383
+– 390, 2004.
+
+[Frese and Duckett, 2003] U. Frese and T. Duckett. A multigrid ap-
+proach for accelerating relaxation-based SLAM. In Proc. of the
+IJCAI-03 on Reasoning with Uncertainty in Robotics, 2003.
+
+[Paskin, 2003] M.A. Paskin. Thin junction tree ﬁlters for simulta-
+neous localization and mapping. In Intl. Joint Conf. on Artiﬁcial
+Intelligence (IJCAI), 2003.
+
+[Smith and Cheeseman, 1987] R. Smith and P. Cheeseman. On the
+Intl. J. of
+
+representation and estimation of spatial uncertainty.
+Robotics Research, 5(4):56–68, 1987.
+
+[Smith et al., 1990] R. Smith, M. Self, and P. Cheeseman. Esti-
+mating uncertain spatial relationships in Robotics. In I. Cox and
+G. Wilfong, editors, Autonomous Robot Vehicles, pages 167–193.
+Springer-Verlag, 1990.
+
+[Sudderth et al., 2004] E. B. Sudderth, M. J. Wainwright, and A. S.
+Willsky. Embedded trees: Estimation of Gaussian Processes on
+graphs with cycles.
+IEEE Transactions on Signal Processing,
+52(11):3136–3150, 2004.
+
+[Thrun et al., 2004] S. Thrun, Y. Liu, D. Koller, A.Y. Ng,
+Z. Ghahramani, and H. Durrant-Whyte. Simultaneous localiza-
+tion and mapping with sparse extended information ﬁlters. Intl.
+J. of Robotics Research, 23(7-8):693–716, 2004.
+
+[Weiss and Freeman, 1999] Yair Weiss and William T. Freeman.
+Correctness of belief propagation in Gaussian graphical models
+of arbitrary topology.
+In Advances in Neural Information Pro-
+cessing Systems (NIPS), pages 673–679, 1999.
+
+[Winkler, 1995] G. Winkler. Image analysis, random ﬁelds and dy-
+
+namic Monte Carlo methods. Springer Verlag, 1995.
+
+Figure 5: Trajectory and map computed from the Victoria Park
+dataset overlaid on satellite imagery of the park.
+
+6.1 Victoria Park Dataset
+
+We applied our algorithm to the Sydney Victoria Park
+dataset (available at http://www.acfr.usyd.edu.
+au/homepages/academic/enebot), a popular test
+dataset in the SLAM community. The trajectory consists of
+6968 poses along an approximately 4 kilometer long trajec-
+tory. Landmarks were obtained by running a simple tree-
+detection algorithm on the laser range data, yielding 158 tree-
+like features and a total of 3631 measurements.
+
+Figure 5 shows the resulting computed trajectory and map,
+where the landmarks are shown using crosses, overlaid on an
+image of the park. The GPS trajectory, which was not used in
+the estimation, is also shown for reference. This demonstrates
+the applicability of our technique to real-world data.
+
+7 Conclusion
+
+We presented an algorithm to perform smoothing-based
+SLAM using Loopy Belief Propagation (LBP). We provide a
+ﬂavor of LBP that makes map and trajectory updates constant
+time except when closing loops in the environment. In this
+case, LBP is equivalent to a modiﬁed version of Gauss-Seidel
+relaxation, a result that we proved here.
+
+While our technique has advantages over existing state-of-
+the-art in that we can recover the marginal covariances in
+O(1) time, these are a heuristic approximation to the true
+covariances. It is our experience that the LBP covariances
+are of good quality when the robot is exploring new areas
+in the environment but become highly overconﬁdent when it
+revisits previously visited areas. In general, the more loopy
+the GMRF, the more overconﬁdent the covariances from LBP.
+This observation can be intuitively explained by appealing to
+
+IJCAI-07
+
+2196
+
+

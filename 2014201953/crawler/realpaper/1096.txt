@@ -1,0 +1,1736 @@
+The Effect of Restarts on the Efﬁciency of Clause Learning
+
+Jinbo Huang
+
+Logic and Computation Program
+
+National ICT Australia
+
+Canberra, ACT 0200 Australia
+
+jinbo.huang@nicta.com.au
+
+Abstract
+
+Given the common use of restarts in today’s clause
+learning SAT solvers, the task of choosing a good
+restart policy appears to have attracted remarkably
+little interest. On the other hand, results have
+been reported on the use of different restart poli-
+cies for combinatorial search algorithms. Such re-
+sults are not directly applicable to clause learn-
+ing SAT solvers, as the latter are now under-
+stood as performing a form of resolution, some-
+thing fundamentally different from search (in the
+sense of backtracking search for satisfying assign-
+ments). In this paper we provide strong evidence
+that a clause learning SAT solver could beneﬁt sub-
+stantially from a carefully designed restart policy
+(which may not yet be available). We begin by
+pointing out that the restart policy works together
+with other aspects of a SAT solver in determining
+the sequence of resolution steps performed by the
+solver, and hence its efﬁciency.
+In this spirit we
+implement a prototype clause learning SAT solver
+that facilitates restarts at arbitrary points, and con-
+duct experiments on an extensive set of industrial
+benchmarks using various restart policies, includ-
+ing those used by well-known SAT solvers as well
+as a universal policy proposed in 1993 by Luby
+et al. The results indicate a substantial impact of
+the restart policy on the efﬁciency of the solver, and
+provide motivation for the design of better restart
+policies, particularly dynamic ones.
+
+1 Introduction
+Propositional satisﬁability (SAT) is the problem of determin-
+ing whether a propositional formula, traditionally in conjunc-
+tive normal form (CNF), has a satisfying assignment—an as-
+signment of truth values to its variables making it evaluate to
+true. In this paper we focus on a class of algorithms for SAT
+that has become known as conﬂict-driven clause learning, or
+clause learning for short. These algorithms are currently the
+best for large SAT instances that arise from industrial appli-
+cations, such as formal veriﬁcation [Berre and Simon, 2005].
+Clause learning SAT solvers have grown out of their prede-
+cessors that implemented variants of a systematic search algo-
+
+rithm known as DPLL [Davis et al., 1962], which solves SAT
+by selecting a variable and determining, recursively, whether
+the formula can be satisﬁed by setting that variable to either
+value. In fact, the initial intuition for learning clauses and
+appending them to the CNF formula was to help prune the
+DPLL search, as discussed in earlier work [Marques-Silva
+and Sakallah, 1996].
+
+It has been shown, however, that clause learning as prac-
+ticed in today’s SAT solvers, assuming unlimited restarts, cor-
+responds to a proof system exponentially more powerful than
+that of DPLL [Beame et al., 2004]. Speciﬁcally, each learn-
+ing step is in fact a sequence of resolution steps, of which
+the learned clause is the ﬁnal resolvent; conversely, a reso-
+lution proof can be simulated in polynomial time by repeat-
+edly (i) learning each of the resolvents in the proof and (ii)
+restarting (this assumes a deviation from standard practice:
+the freedom to ignore assignments made by unit propagation).
+Clause learning can hence be as powerful as general resolu-
+tion, while DPLL has been known to correspond to the expo-
+nentially weaker tree-like resolution [Beame et al., 2004].
+
+Despite the dependence of this theoretical result on the as-
+sumption of unlimited restarts, remarkably little has been said
+in the literature on the importance of choosing a good restart
+policy in practice. This is in stark contrast, for example, to the
+sustained quest by researchers for better decision heuristics.
+We argue that this imbalance of attention is doing a disservice
+to the SAT community, because with the modern understand-
+ing of clause learning, it can be seen that the decision heuris-
+tic, together with the restart policy and other components of
+the solver, determines the sequence of resolution steps per-
+formed by the solver and hence its efﬁciency.
+
+In this paper we would like to take a step toward study-
+ing the importance of restart policies in clause learning SAT
+solvers, with a view to motivating further work on designing
+more effective policies. To this end we have created a small
+prototype SAT solver, called TINISAT, which implements the
+essentials of a modern clause learning solver and is designed
+to facilitate adoption of arbitrary restart policies. After choos-
+ing and ﬁxing a reasonably effective decision heuristic, we
+conducted experiments using an extensive set of large indus-
+trial benchmarks, on which we ran versions of TINISAT using
+different restart policies including those used by well-known
+SAT solvers and particularly one proposed in [Luby et al.,
+1993] based on a sequence of run lengths of the following
+
+IJCAI-07
+
+2318
+
+form: 1, 1, 2, 1, 1, 2, 4, 1, 1, 2, 1, 1, 2, 4, 8, . . . The results we
+have obtained indicate a substantial impact of the restart pol-
+icy on the efﬁciency of the solver. Speciﬁcally, all nontrivial
+restart policies we experimented with did signiﬁcantly better
+than if restarts were disabled, and exhibited considerably dif-
+ferent performance among themselves. More interestingly,
+this difference in performance appears more marked when
+one looks at individual benchmarks or benchmark families,
+as opposed to the whole set in aggregate, which suggests that
+substantial performance gains may be possible by using ap-
+propriate dynamic restart policies (all policies compared in
+this paper are static ones).
+
+The rest of the paper is organized as follows: We present
+the simple design of TINISAT and use it as the basis for dis-
+cussing the semantics of modern clause learning, leading to
+an analytical explanation why restart policies are important.
+We then describe our experimental setup including the vari-
+ous restart policies we shall use and our attempts to identify a
+reasonable decision heuristic so that all policies can be tested
+on competitive ground. We then report the results obtained
+and make a number of important observations. Finally, we
+discuss related work and present our conclusions.
+
+2 Essentials of Clause Learning
+We start by presenting the design of a simple SAT solver,
+TINISAT, that (i) boasts the essentials of modern clause learn-
+ing technology, and (ii) provides a basis for our discussion of
+the importance of restart policies later in the section. The
+top-level procedure of TINISAT, implemented in under 800
+lines of C++, is given in Algorithm 1, which operates on an
+implicit CNF formula whose satisﬁability is in question.
+
+if (literal = selectLiteral()) == nil then
+
+return SATISFIABLE
+
+if !decide(literal) then
+
+repeat
+
+Algorithm 1 TINISAT
+1: loop
+2:
+3:
+4:
+5:
+6:
+7:
+8:
+9:
+10:
+11:
+12:
+13:
+
+else
+
+learnClause()
+if assertionLevel() == 0 then
+return UNSATISFIABLE
+
+if restartPoint() then
+
+backtrack(1)
+
+backtrack(assertionLevel())
+
+until assertLearnedClause()
+
+The following components of a modern clause learn-
+ing SAT solver can be identiﬁed in Algorithm 1: deci-
+sion heuristic (selectLiteral), unit propagation (decide, as-
+sertLearnedClause), clause learning (learnClause, back-
+track), restarts (restartPoint, backtrack). We assume famil-
+iarity with the common terminology for DPLL and clause
+learning algorithms, and assume that (i) 1-UIP [Zhang et
+al., 2001] is used as the learning scheme, (ii) no clauses are
+ever deleted (hence the algorithm is complete1), (iii) all func-
+
+tions have deterministic behavior,2 and (iv) the ﬁrst decision
+is made in decision level 2:
+level 1 is reserved for literals
+found to be implied by the CNF formula, and level 0 to signal
+derivation of the empty clause. The functions involved have
+the following semantics:
+
+• selectLiteral uses some decision heuristic to select a
+free variable and then select one of its two literals, and
+returns it, or returns nil if no free variables exist.
+
+• decide increments the decision level, sets the given lit-
+eral to true, and performs unit propagation; it returns true
+iff no empty clause is derived.
+
+• learnClause performs 1-UIP learning to derive an im-
+plicate of the CNF formula, and sets the assertion level
+(i) to 0 if the empty clause is derived, (ii) to 1 if a unit
+clause is derived, and otherwise (iii) to the second high-
+est decision level among literals of the derived clause.
+
+• assertionLevel returns the assertion level, which has
+
+been set by the last call to learnClause.
+
+• restartPoint returns true iff the solver is to restart now
+
+according to some restart policy.
+
+• backtrack(k) undoes all variable assignments in deci-
+
+sion levels > k, and sets the decision level to k.
+
+• assertLearnedClause adds the learned clause to the
+clause pool, performs unit propagation if the current de-
+cision level equals the assertion level (this is the condi-
+tion under which the learned clause becomes unit), and
+returns true iff no empty clause is derived.
+
+2.1 Restarts and Backtracks Uniﬁed
+Note that under this design all that is needed to adopt a given
+restart policy is to implement restartPoint accordingly. It is
+also interesting to note that a normal backtrack after learn-
+ing (Line 12) and a complete restart (Line 10) can both be
+regarded as special cases of a more general scheme [Lynce
+and Silva, 2002] where the solver can backtrack to any level
+between 0 and the current decision level (exclusive). What
+we would like to stress here, however, is that the partic-
+ular scheme used by most clause learning SAT solvers to-
+day, namely backtracking to the assertion level (except when
+restarting), has obscured their original characteristics (inher-
+ited from DPLL) as systematic search algorithms. In particu-
+lar, these solvers do not perform branching anymore: The set-
+ting of a literal occurs on Line 4, but the setting of its negation
+is never explicitly tried (and possibly never tried at all even
+implicitly).
+
+For example, suppose assignments {A, B, C, D} have
+been made in decision levels 2, 3, 4, 5, respectively, before the
+empty clause is derived in level 5, and suppose the following
+clause is learned: A ∨ D. This clause says that the two deci-
+sions made in levels 2 and 5 alone are responsible for the con-
+ﬂict. Now, despite the fact that simply ﬂipping the value of
+variable D in level 5 could well result in a satisﬁable subprob-
+lem, Line 12 insists on taking the solver back to the assertion
+
+1It can be shown that each learned clause is subsumed by no
+existing clause [Zhang, 2005]. Since the algorithm keeps learning
+distinct clauses it will always terminate.
+
+2The learning scheme, clause deletion policy, and use of ran-
+domness are all important factors that affect the efﬁciency of clause
+learning SAT solvers, but are beyond the scope of this paper.
+
+IJCAI-07
+
+2319
+
+level, which is 2, erasing assignments {D, C, B} on the way.
+The learned clause then gets asserted in level 2 (Line 13),
+and implies D (because the assignment A is present, making
+the clause unit), triggering a round of unit propagation. No-
+tice that the branches {A, B, C} and {A, B}, which can well
+contain solutions, have been skipped over without ever being
+explored.
+
+It should be emphasized here, as we already alluded to,
+that this behavior is not a peculiarity of TINISAT, but is the
+common practice of most current clause learning SAT solvers
+we have seen, including Chaff, BerkMin, MiniSat, and Siege.
+(The earlier solver GRASP, though, used a different back-
+tracking scheme such that no branch was skipped over unless
+proven to contain no solutions.)
+
+2.2
+
+Importance of Restarts
+
+efﬁciency of clause learning SAT solvers even when no ran-
+domness is present (which will be the case in our experiments
+with TINISAT in Section 4).
+
+In this section we have provided a new understanding of
+modern clause learning through the design of TINISAT, a con-
+crete and simple clause learning SAT solver, leading to an an-
+alytical argument that the restart policy matters. We now pro-
+ceed to support this argument with an empirical study of con-
+crete restart policies using real-world SAT benchmarks and
+the TINISAT solver.
+
+3 Experimental Setup
+
+We describe in this section the restart policies we shall ex-
+periment with, the decision heuristic to be used with these
+policies in the experiments, and our choice of benchmarks.
+
+This shift of paradigm in backtracking, as we discussed, ob-
+scures the characteristics of clause learning SAT solvers as
+systematic search algorithms. For this reason we propose to
+view the modern practice of clause learning not as a version
+of DPLL search enhanced with resolution,3 but as a pure res-
+olution algorithm in its own right. In fact, what Algorithm 1
+does is nothing other than the following 3-step cycle:
+
+3.1 Restart Policies
+
+In choosing the set of restart policies for our empirical study,
+we have aimed to include those that are currently used by
+well-known SAT solvers as well as some less conventional
+ones that may have escaped the attention of the clause learn-
+ing community. Speciﬁcally, we shall experiment with the
+following seven restart policies:
+
+(1) set variables till hitting a conﬂict;
+
+(2) derive a clause by resolution;
+
+(3) unset some variables and go back to (1).
+
+For unsatisﬁable formulas, this loop terminates on deriving
+the empty clause in (2); for satisﬁable formulas, it terminates
+when (1) “happens” to exhaust all variables without conﬂict.
+In this context the importance of the restart policy be-
+comes prominent: Together with the existing backtracking
+scheme, it dictates the set of assignments to undo in (3),
+which, together with the decision heuristic, ultimately de-
+termines the entire sequence of resolution steps performed
+in (2). In other words, the decision heuristic, backtracking
+scheme, and restart policy can all be understood as serving a
+single purpose, that of guiding the resolution process.
+
+Consider for example a clause learning SAT solver that has
+run on a hard instance for a period of time without restarts.
+The solver has now accumulated a considerable number of
+learned clauses, which have helped update the variable and
+literal scores as are maintained by decision heuristics typical
+in clause learning SAT solvers. These new scores represent,
+in a way, the solver’s current state of belief about the order in
+which future decisions should be made, having taken into ac-
+count all the conﬂicts discovered so far. Without the freedom
+of restarts, however, the solver would not be able to fully ex-
+ecute its belief because it is bound by the decisions that have
+been made earlier. In particular, note that these early deci-
+sions were made without the beneﬁt of the new knowledge in
+the form of all the conﬂicts discovered since. This, we be-
+lieve, is the main reason why restarts can help improve the
+
+3Recall that each learning step is a sequence of resolution steps
+the ﬁnal resolvent of which is recorded as the “learned clause”
+[Beame et al., 2004].
+
+• N: a policy calling for no restarts at all.
+• M: a geometric policy used in MiniSat v1.14 [E´en and
+S¨orensson, 2005] with an initial restart interval of 100
+conﬂicts, which increases by a factor of 1.5 after each
+restart. We will denote it by (100, 1.5).
+
+• Z: a ﬁxed-interval policy used in Chaff II, also known
+as the 2004 version of zChaff [Moskewicz et al., 2001],
+with a restart interval of 700 conﬂicts, denoted (700, 1).
+• B: a ﬁxed-interval policy used in BerkMin [Goldberg
+and Novikov, 2002] with a restart interval of 550 con-
+ﬂicts, denoted (550, 1).
+
+• G: a geometric policy (32, 1.1), which we have added to
+improve the balance between ﬁxed-interval and geomet-
+ric policies we consider.
+
+• S: a ﬁxed-interval policy used in Siege [Ryan, 2004]
+interval of 16000 conﬂicts, denoted
+
+with a restart
+(16000, 1).
+
+• L: a class of policies proposed in [Luby et al., 1993] for
+randomized algorithms based on the following sequence
+of run lengths: 1, 1, 2, 1, 1, 2, 4, 1, 1, 2, 1, 1, 2, 4, 8, . . .
+(deﬁned below).
+In our experiments we take a
+“unit run” in this sequence to be 32 conﬂicts (we
+have experimented with other units as well;
+see
+http://rsise.anu.edu.au/˜jinbo/tinisat/). Hence the actual
+restart intervals are: 32, 32, 64, 32, 32, 64, 128, . . . We
+denote this policy by (Luby’s, unit=32).
+
+The ﬁrst six of these policies are straightforward, while
+Luby’s policy can be formally deﬁned as the sequence
+t1, t2, t3, . . . such that:
+
+(cid:2)
+
+ti =
+
+2k−1,
+ti−2k−1+1,
+
+if i = 2k − 1;
+if 2k−1 ≤ i < 2k − 1.
+
+IJCAI-07
+
+2320
+
+We have chosen Luby’s policy because of an interesting
+property it has: In the context of a particular class of ran-
+domized algorithms, known as Las Vegas algorithms, [Luby
+et al., 1993] proved that this policy is universally optimal in
+the sense that (i) it achieves an expected running time that is
+only a logarithmic factor slower than the true optimal policy,
+which is determined by the speciﬁc running time distribution
+of the algorithm on a speciﬁc problem instance, and (ii) no
+other universal policy can do better by more than a constant
+factor. (The theoretical relevance of this property to clause
+learning remains an interesting question though.)
+
+3.2 Decision Heuristic
+
+To make our comparison of restart policies more meaning-
+ful, we have taken steps to ensure that other components
+of the SAT solver are tuned toward their best performance.
+Rather than low-level optimizations, however, we focused
+on choosing a reasonably effective decision heuristic. Based
+on experiments using a subset of our full benchmark suite
+(described below), we found that a version of the VSIDS
+heuristic [Moskewicz et al., 2001] combined with BerkMin’s
+practice of choosing literals from recent unsatisﬁed conﬂict
+clauses [Goldberg and Novikov, 2002] tended to work well.
+
+Speciﬁcally, for each literal we keep a score that is ini-
+tially the number of its occurrences in the original clauses. On
+learning a clause, we increment the score of every literal by 1
+for each of its occurrences in clauses that are involved in the
+resolution process. The scores of all literals are halved once
+every 128 conﬂicts. When a decision is called for (Line 2 of
+Algorithm 1), we pick a (free) literal with the highest score
+from the most recently learned clause that has not been sat-
+isﬁed, and set it to true; if no such clause exists we pick any
+(free) literal with the highest score.
+
+3.3 Benchmarks
+
+We use the entire set of industrial benchmarks distributed
+by Miroslav Velev of Carnegie Mellon University at
+http://www.ece.cmu.edu/˜mvelev/, except sss.1.0, sss.1.0a,
+sss-sat-1.0, vliw-sat-1.0, and vliw-sat-1.1 as they are too
+easy,4 and dlx-iq-unsat-2.0 as the download appeared to be
+incomplete. This gives us 22 benchmark families with 251
+instances totaling about 25GB in size—hence the CNF for-
+mulas have an average size of about 100MB.
+
+4 Results
+
+Our experiments consist of running TINISAT with each of
+the seven restart policies on the entire set of benchmarks.
+For additional reference points, we have also run MiniSat
+v1.14 [E´en and S¨orensson, 2005] and Siege v4 [Ryan, 2004]
+(given seed 123456789 for its random number generator) on
+the same set of benchmarks. All our experiments were con-
+ducted on a cluster of 16 AMD Athlon 64 processors running
+at 2GHz with 2GB of RAM under SuSE Linux 9.3 Profes-
+sional. A time limit of 2 hours was imposed on all runs of the
+
+4These ﬁve families contain a total of 357 instances, which were
+solved by Siege v4 in 428 seconds, TINISAT-L in 506 seconds, Min-
+iSat v1.14 in 661 seconds, and Chaff II in 1971 seconds.
+
+solvers, allowing us to complete all the experiments in about
+80 CPU days.
+
+The overall results are shown in Table 1.
+
+In the second
+and third columns we report for each benchmark family the
+number of instances and their total size (in megabytes). In the
+remaining columns we report the number of instances solved
+by each solver for each benchmark family. The total number
+of instances solved by each solver and the total time it spent
+on all instances (including the 2 hours in case it did not solve
+the instance) are reported in the two bottom rows.
+
+The ﬁrst observation we make from these results is that
+restarts deﬁnitely helped: All the six nontrivial policies did
+signiﬁcantly better than the no-restarts policy. Even the least
+effective of them allowed TINISAT to ﬁnish 2.43 days sooner
+and solve 37 more instances than the no-restarts policy.
+
+Our second observation is that Luby’s universal policy ap-
+pears to outperform all the rest on this particular set of bench-
+marks (albeit by only a small margin in some cases). Given
+that the optimality of Luby’s policy was originally proved for
+Las Vegas algorithms, this empirical result provides motiva-
+tion for extending the theoretical study of Luby’s policy to
+clause learning algorithms.
+
+To give a more concrete picture of the impact of the restart
+policy on the efﬁciency of the solver, we present detailed re-
+sults in Tables 2 and 3 for two of the benchmark families
+where TINISAT solved all instances using every policy. For
+space constraints we only include three policies in each ta-
+ble: the no-restarts policy and the worst and best of the rest.
+Results on Siege are also included as a reference point.
+
+An interesting observation to make from Tables 2 and 3 is
+that the difference in performance between the restart poli-
+cies becomes more substantial now that we look at individual
+benchmark families, as opposed to the whole set in aggregate
+(bottom two rows of Table 1). For example, policy L out-
+performs policy M in running time by only a factor of 1.2
+in Table 1, but a factor of 2.5 in Table 2.
+In fact we can
+also see in Table 1 that none of the policies is consistently
+best across all benchmark families (in terms of the number
+of solved instances). While this explains the decreased dif-
+ference between policies when results are aggregated, it also
+suggests that substantial performance gains would be possible
+if one were to use an appropriate dynamic policy that could
+adapt to a given benchmark or benchmark family.
+
+We would like to remind the reader here that all these ex-
+periments with TINISAT were conducted with a ﬁxed deci-
+sion heuristic, learning method, and backtracking scheme. As
+we have discussed, all these components work in combina-
+tion with the restart policy to determine the efﬁciency of the
+solver. Hence we view the design of better restart policies as
+an opportunity among possibly many others of bringing about
+a new generation of clause learning SAT solvers. Finally,
+we note that detailed results of the experiments described in
+this section, as well as TINISAT, can be downloaded from
+http://rsise.anu.edu.au/˜jinbo/tinisat/.
+
+5 Related Work
+
+While in this work we have focused on restart policies for
+clause learning, in previous work researchers have studied
+
+IJCAI-07
+
+2321
+
+Table 1: Overall results on running TINISAT with seven restart policies: N = No restarts; M = (100, 1.5); Z = (700, 1); B =
+(550, 1); G = (32, 1.1); S = (16000, 1); L = (Luby’s, unit=32). Cutoff was 2 hours.
+
+Benchmark
+Family
+
+Number of
+Instances
+
+Size
+(MB)
+
+dlx-iq-unsat-1.0
+engine-unsat-1.0
+fvp-sat.3.0
+fvp-unsat.1.0
+fvp-unsat.2.0
+fvp-unsat.3.0
+liveness-sat-1.0
+liveness-unsat-1.0
+liveness-unsat-2.0
+npe-1.0
+pipe-ooo-unsat-1.0
+pipe-ooo-unsat-1.1
+pipe-sat-1.0
+pipe-sat-1.1
+pipe-unsat-1.0
+pipe-unsat-1.1
+vliw-sat-2.0
+vliw-sat-2.1
+vliw-sat-4.0
+vliw-unsat-2.0
+vliw-unsat-3.0
+vliw-unsat-4.0
+
+32
+10
+20
+4
+22
+6
+10
+12
+9
+6
+15
+14
+10
+10
+13
+14
+9
+10
+10
+9
+2
+4
+
+4543
+
+62
+414
+
+4
+74
+243
+1264
+1134
+537
+695
+1452
+775
+1662
+984
+989
+760
+1611
+3680
+3076
+695
+124
+405
+
+N
+
+10
+7
+1
+4
+22
+0
+6
+4
+3
+2
+6
+7
+9
+9
+8
+9
+5
+4
+10
+0
+0
+1
+
+Number of Instances Solved
+
+M
+
+32
+7
+16
+4
+22
+0
+5
+4
+3
+4
+7
+8
+6
+7
+8
+9
+8
+2
+10
+1
+0
+1
+
+Z
+
+32
+8
+9
+4
+22
+0
+8
+4
+3
+3
+7
+8
+9
+10
+9
+11
+5
+1
+10
+1
+1
+1
+
+B
+
+32
+7
+9
+4
+22
+0
+9
+4
+3
+4
+7
+8
+10
+10
+8
+11
+6
+2
+10
+1
+0
+1
+
+G
+
+32
+7
+18
+4
+22
+0
+6
+4
+3
+3
+7
+8
+5
+10
+8
+11
+8
+5
+10
+2
+0
+1
+
+S
+
+32
+7
+17
+4
+22
+1
+4
+4
+3
+4
+7
+8
+9
+10
+8
+10
+9
+6
+10
+2
+0
+1
+
+L
+
+32
+7
+14
+4
+22
+0
+7
+4
+3
+3
+7
+8
+10
+10
+9
+11
+9
+5
+10
+2
+2
+1
+
+MiniSat
+
+Siege
+
+23
+7
+11
+4
+20
+0
+7
+4
+3
+3
+3
+3
+6
+8
+4
+4
+6
+2
+10
+0
+0
+0
+
+17
+7
+20
+4
+22
+5
+6
+4
+3
+3
+8
+9
+10
+10
+12
+14
+9
+2
+7
+7
+2
+1
+
+Total
+Total Time on All Instances (days)
+
+251
+
+25180
+
+127
+11.28
+
+164
+8.85
+
+166
+8.49
+
+168
+8.56
+
+174
+8.00
+
+178
+7.80
+
+180
+7.68
+
+128
+11.45
+
+182
+7.45
+
+Table 2: Detailed results for fvp-unsat-2.0, all unsatisﬁable except 7pipe bug. Abbreviations: Dec. (decisions), Con. (conﬂicts),
+Res. (restarts). Times are in seconds. Three policies included: Policy N (no restarts) and the worst and best of the rest.
+
+Benchmark
+
+Number of
+
+Vars Clauses
+
+Dec.
+
+TINISAT-N
+Con.
+
+Res. Time (s)
+
+6695
+892
+2pipe
+7026
+834
+2pipe 1 ooo
+8213
+925
+2pipe 2 ooo
+27533
+2468
+3pipe
+26561
+2223
+3pipe 1 ooo
+29981
+2400
+3pipe 2 ooo
+33270
+2577
+3pipe 3 ooo
+80213
+5237
+4pipe
+74554
+4647
+4pipe 1 ooo
+82207
+4941
+4pipe 2 ooo
+89473
+5233
+4pipe 3 ooo
+5525
+96480
+4pipe 4 ooo
+9471 195452
+5pipe
+8441 187545
+5pipe 1 ooo
+8851 201796
+5pipe 2 ooo
+9267 215440
+5pipe 3 ooo
+5pipe 4 ooo
+9764 221405
+5pipe 5 ooo 10113 240892
+6pipe
+15800 394739
+6pipe 6 ooo 17064 545612
+23910 751118
+7pipe
+7pipe bug
+24065 731850
+
+3014
+2509
+2895
+19265
+11702
+16688
+22712
+69238
+44644
+54429
+65850
+73743
+101530
+94343
+97195
+123283
+216620
+116861
+577706
+496762
+1188862
+166382
+
+1170
+1089
+1371
+6566
+5455
+7435
+10182
+24060
+18764
+22013
+22820
+30316
+18176
+30709
+33725
+33839
+78339
+37552
+208817
+124712
+388233
+17509
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0.04
+0.04
+0.06
+0.54
+0.45
+0.70
+1.09
+5.46
+3.72
+5.14
+5.74
+8.33
+6.03
+11.49
+13.58
+17.53
+52.23
+17.99
+273.60
+181.56
+764.32
+13.89
+
+Dec.
+
+3174
+3147
+3085
+22157
+12629
+23334
+27407
+95579
+55785
+71958
+88936
+169434
+110712
+117321
+140816
+149626
+265416
+141425
+571806
+463974
+1168826
+542511
+
+TINISAT-M
+Con.
+
+Res. Time (s)
+
+Dec.
+
+TINISAT-L
+Con.
+
+Res. Time (s)
+
+Dec.
+
+Siege
+Con.
+
+Time (s)
+
+1287
+1387
+1356
+8404
+5245
+9943
+12487
+37319
+23445
+29928
+34633
+81833
+14569
+37638
+48862
+48628
+87930
+42796
+184524
+125891
+318819
+143273
+
+4
+5
+5
+9
+8
+9
+10
+12
+11
+12
+12
+14
+10
+12
+13
+13
+15
+13
+16
+15
+18
+16
+
+0.05
+0.06
+0.06
+0.74
+0.44
+1.04
+1.37
+8.49
+5.35
+7.36
+9.50
+35.62
+4.27
+18.16
+29.24
+28.17
+56.29
+24.41
+192.17
+153.58
+497.61
+119.26
+
+1066
+2938
+1210
+2766
+1412
+3133
+7599
+20805
+6257
+15806
+10164
+23500
+9038
+23423
+25041
+80798
+22797
+56859
+26652
+74383
+23385
+76519
+29030
+88729
+14135
+131655
+31560
+104141
+33414
+123345
+30881
+120410
+64407
+236519
+30269
+121361
+88171
+453483
+404756
+85444
+876368 130092
+144616
+14526
+
+16
+19
+22
+86
+65
+117
+100
+250
+220
+253
+227
+254
+126
+254
+268
+254
+509
+254
+640
+636
+998
+131
+
+0.04
+0.05
+0.06
+0.72
+0.59
+1.14
+1.05
+6.17
+5.06
+6.70
+6.22
+8.17
+4.67
+12.43
+15.02
+13.96
+35.57
+15.50
+73.44
+81.42
+171.05
+10.27
+
+1741
+4155
+2423
+4541
+2269
+4552
+8718
+25197
+7620
+16073
+9465
+23858
+11997
+26745
+31725
+98531
+27800
+59881
+30660
+70755
+33116
+82797
+36656
+90161
+15618
+139115
+58115
+146601
+55019
+145892
+47582
+133506
+90128
+254647
+47137
+150600
+518038
+91997
+485418 146967
+997777 131085
+282794
+12309
+
+0.06
+0.10
+0.09
+0.53
+0.49
+0.69
+1.01
+4.03
+3.51
+4.15
+4.93
+5.53
+2.58
+13.55
+13.60
+12.06
+23.14
+12.47
+28.77
+63.59
+59.19
+4.21
+
+Total
+
+3566233 1122852
+
+0 1383.53
+
+4249058 1300197
+
+252 1193.24
+
+3186313 686550 5699
+
+469.3
+
+3761634 900147
+
+258.25
+
+Table 3: Detailed results for vliw-sat-4.0, all satisﬁable. Abbreviations: Dec. (decisions), Con. (conﬂicts), Res. (restarts).
+Times are in seconds. Three policies included: Policy N (no restarts) and the worst and best of the rest. Cutoff was 2 hours.
+
+Benchmark
+
+Number of
+
+Vars
+
+Clauses
+
+Dec.
+
+TINISAT-N
+Con.
+
+Res. Time (s)
+
+74911439 2906904
+
+0 10546.68 68081899 346142
+
+17 2028.97 48311156 109837 1154 1488.98
+
+11836.74
+
+IJCAI-07
+
+2322
+
+bug1
+bug2
+bug3
+bug4
+bug5
+bug6
+bug7
+bug8
+bug9
+bug10
+
+Total
+
+521188 13378641
+521158 13378532
+521046 13376161
+520721 13348117
+520770 13380350
+521192 13378781
+521147 13378010
+521179 13378617
+521187 13378624
+521182 13378625
+
+9881446
+7680490
+4447142
+7670838
+7754522
+8808865
+7893893
+7793145
+6045105
+6935993
+
+604996
+267252
+2098
+563100
+86586
+362411
+595572
+340079
+40574
+44236
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+2199.98
+712.04
+57.72
+2045.31
+582.81
+1246.53
+1603.23
+1557.75
+289.25
+252.06
+
+Dec.
+
+8521585
+6189255
+4447142
+6246054
+7459833
+7811661
+6125501
+6166611
+6871992
+8242265
+
+TINISAT-S
+Con. Res. Time (s)
+
+49471
+17318
+2098
+43329
+29041
+44263
+19414
+38239
+46122
+56847
+
+3
+1
+0
+2
+1
+2
+1
+2
+2
+3
+
+242.00
+118.74
+57.75
+229.49
+190.47
+219.33
+115.87
+216.89
+284.25
+354.18
+
+Dec.
+
+6064544
+6274425
+3327664
+5710694
+4620905
+5449328
+4070162
+4564989
+3547174
+4681271
+
+TINISAT-L
+Con.
+
+Res. Time (s)
+
+Dec.
+
+Siege
+Con. Time (s)
+
+22613
+11959
+2781
+16378
+7980
+13250
+8026
+10454
+5713
+10683
+
+220
+125
+36
+156
+92
+126
+92
+122
+62
+123
+
+236.31 4138878 26364
+174.57 3185190 16616
+76.90 4460466 24509
+187.37 4092308 19896
+133.09
+160.90 4138295 37005
+120.43 4008315 15148
+151.55
+
+–
+
+–
+
+–
+
+–
+
+154.52
+102.06
+153.75
+132.98
+
+–
+
+199.82
+103.39
+
+–
+
+97.72 4475278 30692
+
+190.22
+
+150.14
+
+–
+
+–
+
+–
+
+the use of restarts in combinatorial search algorithms. Fixed-
+interval as well as dynamic restart policies, for example, were
+studied in [Gomes et al., 1998; Kautz et al., 2002] using a
+randomized version of Satz [Li and Anbulagan, 1997], a SAT
+solver based on pure DPLL search (without clause learning).
+Another example is found in [Walsh, 1999], where a geomet-
+ric policy was found to be particularly effective for search
+problems that exhibit a “small world” topology.
+
+These previous studies of restart policies were based on
+the observation that for many combinatorial search prob-
+lems, repeated runs of a randomized search algorithm on the
+same problem instance (or, similarly, runs of a deterministic
+search algorithm on random instances of a problem) exhibit
+a “heavy-tailed” distribution [Gomes et al., 1997], meaning
+that any run has a nonnegligible probability of taking expo-
+nentially longer than all previous runs that have been seen.
+Intuitively, a restart policy can help combat this unpredictabil-
+ity of search performance by cutting off runs before they take
+too long in the hope that one of the future runs will succeed
+quickly.
+
+Interestingly, part of this opportunistic thinking appears
+to remain valid in the context of clause learning, which as
+we discussed performs resolution instead of search. After
+all, one cannot always predict the performance of a clause
+learning solver on a particular problem instance, either, given
+its known performance on similar instances (for a quick re-
+minder of this fact, see the performance of Siege in Table 3).
+We believe, therefore, that the applicability of these previous
+results to clause learning SAT solvers will be an interesting
+topic for future work.
+
+6 Conclusions
+Through the design of a simple clause learning SAT solver,
+we have established a new formulation of modern clause
+learning where all aspects of the solver can be understood
+as collectively serving the single purpose of guiding a reso-
+lution process. This leads to an analytical argument for the
+importance of the restart policy in clause learning, which we
+studied empirically by comparing the performance of various
+policies on a large number of challenging industrial bench-
+marks. Our results indicate a substantial impact of the restart
+policy on the efﬁciency of the clause learning solver. We view
+this work as a step toward a better understanding of the role
+played by restarts in clause learning, and hope that it will
+motivate further work on the design of more effective restart
+policies, particularly dynamic ones which we have not con-
+sidered in this work.
+
+Acknowledgments
+Thanks to Andrew Slater for help with running the experi-
+ments and to the anonymous reviewers for commenting on an
+earlier version of this paper. National ICT Australia is funded
+by the Australian Government’s Backing Australia’s Ability
+initiative, in part through the Australian Research Council.
+
+References
+[Beame et al., 2004] Paul Beame, Henry A. Kautz, and Ashish Sab-
+harwal. Towards understanding and harnessing the potential
+
+of clause learning. Journal of Artiﬁcial Intelligence Research,
+22:319–351, 2004.
+
+[Berre and Simon, 2005] Daniel Le Berre and Laurent Simon. The
+http://www.satcompetition.org/,
+
+Annual SAT Competitions.
+2005.
+
+[Davis et al., 1962] Martin Davis, George Logemann, and Donald
+Loveland. A machine program for theorem proving. Journal of
+the ACM, (5)7:394–397, 1962.
+
+[E´en and S¨orensson, 2005] Niklas E´en and Niklas S¨orensson.
+In
+
+MiniSat—A SAT solver with conﬂict-clause minimization.
+SAT 2005 Competition, 2005.
+
+[Goldberg and Novikov, 2002] Eugene Goldberg
+
+Novikov. BerkMin: A fast and robust SAT-solver.
+Automation and Test in Europe (DATE), pages 142–149, 2002.
+
+and Yakov
+In Design
+
+[Gomes et al., 1997] Carla P. Gomes, Bart Selman, and Nuno
+Crato. Heavy-tailed distributions in combinatorial search. In Pro-
+ceedings of the Third International Conference on Principles and
+Practice of Constraint Programming (CP), pages 121–135, 1997.
+
+[Gomes et al., 1998] Carla P. Gomes, Bart Selman, and Henry A.
+Kautz. Boosting combinatorial search through randomization. In
+Proceedings of the 15th National Conference on Artiﬁcial Intel-
+ligence (AAAI), pages 431–437, 1998.
+
+[Kautz et al., 2002] Henry A. Kautz, Eric Horvitz, Yongshao Ruan,
+Carla P. Gomes, and Bart Selman. Dynamic restart policies. In
+Proceedings of the 18th National Conference on Artiﬁcial Intel-
+ligence (AAAI), pages 674–681, 2002.
+
+[Li and Anbulagan, 1997] Chu Min Li and Anbulagan. Heuristics
+based on unit propagation for satisﬁability problems.
+In Pro-
+ceedings of the 15th International Joint Conference on Artiﬁcial
+Intelligence (IJCAI), pages 366–371, 1997.
+
+[Luby et al., 1993] Michael Luby, Alistair Sinclair, and David
+Infor-
+
+Zuckerman. Optimal speedup of Las Vegas algorithms.
+mation Processing Letters, 47(4):173–180, 1993.
+
+[Lynce and Silva, 2002] Inˆes Lynce and Jo˜ao P. Marques Silva.
+Complete unrestricted backtracking algorithms for satisﬁability.
+In Fifth International Symposium on Theory and Applications of
+Satisﬁability Testing (SAT), 2002.
+
+[Marques-Silva and Sakallah, 1996] Joao Marques-Silva
+
+and
+Karem Sakallah. GRASP—A new search algorithm for sat-
+isﬁability.
+In Proceedings of the International Conference on
+Computer Aided Design (ICCAD), pages 220–227, 1996.
+
+[Moskewicz et al., 2001] Matthew Moskewicz, Conor Madigan,
+Ying Zhao, Lintao Zhang, and Sharad Malik. Chaff: Engineer-
+ing an efﬁcient SAT solver. In Proceedings of the 38th Design
+Automation Conference (DAC), pages 530–535, 2001.
+
+[Ryan, 2004] Lawrence Ryan.
+
+Efﬁcient algorithms for clause-
+learning SAT solvers. Master’s thesis, Simon Fraser University,
+School of Computing Science, 2004.
+
+[Walsh, 1999] Toby Walsh. Search in a small world. In Proceed-
+ings of the 16th International Joint Conference on Artiﬁcial In-
+telligence (IJCAI), pages 1172–1177, 1999.
+
+[Zhang et al., 2001] L. Zhang, C. Madigan, M. Moskewicz, and
+S. Malik. Efﬁcient conﬂict driven learning in a Boolean satis-
+ﬁability solver. In Proceedings of the International Conference
+on Computer Aided Design (ICCAD), pages 279–285, 2001.
+
+[Zhang, 2005] Lintao Zhang. On subsumption removal and on-the-
+In Proceedings of the Eighth Interna-
+ﬂy CNF simpliﬁcation.
+tional Conference on Theory and Applications of Satisﬁability
+Testing (SAT), pages 482–489, 2005.
+
+IJCAI-07
+
+2323
+
+

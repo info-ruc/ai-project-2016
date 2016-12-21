@@ -1,0 +1,1186 @@
+BLOG: Probabilistic Models with Unknown Objects∗
+
+Brian Milch, Bhaskara Marthi, Stuart Russell, David Sontag, Daniel L. Ong and Andrey Kolobov
+
+Computer Science Division
+
+University of California
+Berkeley, CA 94720-1776
+
+{milch, bhaskara, russell, dsontag, dlong, karaya1}@cs.berkeley.edu
+
+Abstract
+
+This paper introduces and illustrates BLOG, a formal lan-
+guage for deﬁning probability models over worlds with
+unknown objects and identity uncertainty. BLOG uniﬁes
+and extends several existing approaches. Subject to cer-
+tain acyclicity constraints, every BLOG model speciﬁes
+a unique probability distribution over ﬁrst-order model
+structures that can contain varying and unbounded num-
+bers of objects. Furthermore, complete inference algo-
+rithms exist for a large fragment of the language. We
+also introduce a probabilistic form of Skolemization for
+handling evidence.
+
+Introduction
+
+1
+Human beings and AI systems must convert sensory input
+into some understanding of what’s out there and what’s going
+on in the world. That is, they must make inferences about
+the objects and events that underlie their observations. No
+pre-speciﬁed list of objects is given; the agent must infer the
+existence of objects that were not known initially to exist.
+
+In many AI systems, this problem of unknown objects is
+engineered away or resolved in a preprocessing step. How-
+ever, there are important applications where the problem is
+unavoidable. Population estimation, for example, involves
+counting a population by sampling from it randomly and mea-
+suring how often the same object is resampled; this would
+be pointless if the set of objects were known in advance.
+Record linkage, a task undertaken by an industry of more
+than 300 companies, involves matching entries across multi-
+ple databases. These companies exist because of uncertainty
+about the mapping from observations to underlying objects.
+Finally, multi-target tracking systems perform data associa-
+tion, connecting, say, radar blips to hypothesized aircraft.
+
+Probability models for such tasks are not new: Bayesian
+models for data association have been used since the
+1960s [Sittler, 1964]. The models are written in English and
+mathematical notation and converted by hand into special-
+purpose code.
+In recent years, formal representation lan-
+guages such as graphical models [Pearl, 1988] have led to
+general inference algorithms, more sophisticated models, and
+automated model selection (structure learning). In Sec. 7, we
+review several ﬁrst-order probabilistic languages (FOPLs)
+
+that explicitly represent objects and the relations between
+them. However, most FOPLs only deal with ﬁxed sets of ob-
+jects, or deal with unknown objects in limited and ad hoc
+ways. This paper introduces BLOG (Bayesian LOGic), a
+compact and intuitive language for deﬁning probability dis-
+tributions over outcomes with varying sets of objects.
+
+We begin in Sec. 2 with three example problems, each of
+which involves possible worlds with varying object sets and
+identity uncertainty. We describe generative processes that
+produce such worlds, and give the corresponding BLOG mod-
+els. Sec. 3 observes that these possible worlds are naturally
+viewed as model structures of ﬁrst-order logic. It then deﬁnes
+precisely the set of possible worlds corresponding to a BLOG
+model. The key idea is a generative process that constructs a
+world by adding objects whose existence and properties de-
+pend on those of objects already created. In such a process,
+the existence of objects may be governed by many random
+variables, not just a single population size variable. Sec. 4
+discusses how a BLOG model speciﬁes a probability distribu-
+tion over possible worlds.
+
+Sec. 5 solves a previously unnoticed “probabilistic
+Skolemization” problem: how to specify evidence about
+objects—such as radar blips—that one didn’t know existed.
+Finally, Sec. 6 brieﬂy discusses inference in unbounded out-
+come spaces, stating a sampling algorithm and a complete-
+ness theorem for a large class of BLOG models, and giving
+experimental results on one particular model.
+
+2 Examples
+In this section we examine three typical scenarios with un-
+known objects—simpliﬁed versions of the population estima-
+tion, record linkage, and multitarget tracking problems men-
+tioned above. In each case, we provide a short BLOG model
+that, when combined with a suitable inference engine, consti-
+tutes a working solution for the problem in question.
+Example 1. An urn contains an unknown number of balls—
+say, a number chosen from a Poisson distribution. Balls are
+equally likely to be blue or green. We draw some balls from
+the urn, observing the color of each and replacing it. We
+cannot tell two identically colored balls apart; furthermore,
+observed colors are wrong with probability 0.2. How many
+balls are in the urn? Was the same ball drawn twice?
+
+∗This work was supported by DARPA under award 03-000219,
+
+and by an NSF Graduate Research Fellowship to B. Milch.
+
+The BLOG model for this problem, shown in Fig. 1, de-
+scribes a stochastic process for generating worlds. The ﬁrst 4
+
+1 type Color; type Ball; type Draw;
+
+1 guaranteed Citation Cite1, Cite2, Cite3, Cite4;
+
+2 random Color TrueColor(Ball);
+3 random Ball BallDrawn(Draw);
+4 random Color ObsColor(Draw);
+
+5 guaranteed Color Blue, Green;
+6 guaranteed Draw Draw1, Draw2, Draw3, Draw4;
+
+7 #Ball ∼ Poisson[6]();
+
+8 TrueColor(b) ∼ TabularCPD[[0.5, 0.5]]();
+
+2 #Researcher ∼ NumResearchersDistrib();
+3 #Publication: (Author) -> (r) ∼ NumPubsDistrib();
+
+4 Title(p) ∼ TitlePrior();
+5 Name(r) ∼ NamePrior();
+
+6 PubCited(c) ∼ Uniform(Publication p);
+
+7 TitleString(c) ∼ TitleObs(Title(PubCited(c)));
+8 AuthorString(c) ∼ AuthorObs(Name(Author(PubCited(c))));
+
+9 BallDrawn(d) ∼ Uniform({Ball b});
+
+9 CitString(c) ∼ CitDistrib(TitleString(c),AuthorString(c));
+
+10 ObsColor(d)
+11
+12
+13
+
+if (BallDrawn(d) != null) then
+
+∼ TabularCPD[[0.8, 0.2], [0.2, 0.8]]
+
+(TrueColor(BallDrawn(d)));
+
+Figure 1: BLOG model for the urn-and-balls scenario of Ex. 1
+with four draws.
+
+lines introduce the types of objects in these worlds—colors,
+balls, and draws—and the functions that can be applied to
+these objects. Lines 5–7 specify what objects may exist in
+each world. In every world, the colors are blue and green and
+there are four draws; these are the guaranteed objects. On the
+other hand, different worlds have different numbers of balls,
+so the number of balls that exist is chosen from a prior—a
+Poisson with mean 6. Each ball is then given a color, as spec-
+iﬁed on line 8. Properties of the four draws are ﬁlled in by
+choosing a ball (line 9) and an observed color for that ball
+(lines 10–13). The probability of the generated world is the
+product of the probabilities of all the choices made.
+Example 2. We have a collection of citations that refer to
+publications in a certain ﬁeld. What publications and re-
+searchers exist, with what titles and names? Who wrote which
+publication, and which publication does each citation refer
+to? For simplicity, we just consider the title and author-name
+strings in these citations, which are subject to errors of vari-
+ous kinds, and we assume only single-author publications.
+
+Fig. 2 shows a BLOG model for this example, based on
+the model in [Pasula et al., 2003]. The BLOG model de-
+ﬁnes the following generative process. First, sample the to-
+tal number of researchers from some distribution; then, for
+each researcher r, sample the number of publications by that
+researcher. Sample the publications’ titles and researchers’
+names from appropriate prior distributions. Then, for each ci-
+tation, sample the publication cited by choosing uniformly at
+random from the set of publications. Sample the title and au-
+thor strings used in each citation from string corruption mod-
+els conditioned on the true attributes of the cited publication;
+ﬁnally, generate the full citation string according to a format-
+ting model.
+Example 3. An unknown number of aircraft exist in some
+volume of airspace. An aircraft’s state (position and veloc-
+ity) at each time step depends on its state at the previous time
+step. We observe the area with radar: aircraft may appear as
+identical blips on a radar screen. Each blip gives the approxi-
+mate position of the aircraft that generated it. However, some
+blips may be false detections, and some aircraft may not be
+detected. What aircraft exist, and what are their trajectories?
+Are there any aircraft that are not observed?
+
+The BLOG model for this scenario (Fig. 3) describes the
+following process: ﬁrst, sample the number of aircraft in the
+
+Figure 2: BLOG model for Ex. 2 with four observed citations
+(type and function declarations are omitted).
+
+area. Then, for each time step t (starting at t = 0), choose the
+state (position and velocity) of each aircraft given its state at
+time t − 1. Also, for each aircraft a and time step t, possibly
+generate a radar blip r with Source(r) = a and Time(r) = t.
+Whether a blip is generated or not depends on the state of the
+aircraft—thus the number of objects in the world depends on
+certain objects’ attributes. Also, at each step, generate some
+false alarm blips r′ with Source(r′) = null. Finally, sample
+the position for each blip given the true state of its source
+aircraft (or using a default distribution for a false-alarm blip).
+
+3 Syntax and Semantics: Possible Worlds
+3.1 Outcomes as ﬁrst-order model structures
+The possible outcomes for Ex. 1 through Ex. 3 are structures
+containing many related objects, which we will treat formally
+as model structures of ﬁrst-order logic. A model structure
+provides interpretations for the symbols of a ﬁrst-order lan-
+guage. (Usually, ﬁrst-order languages are described as having
+predicate, function, and constant symbols. For conciseness,
+we view all symbols as function symbols; predicates are just
+functions that return a Boolean value, and constants are just
+zero-ary functions.)
+
+For Ex. 1, the language has function symbols such as
+TrueColor(b) for the true color of ball b; BallDrawn(d) for the
+ball drawn on draw d; and Draw1 for the ﬁrst draw. (Statisti-
+cians might use indexed families of random variables such as
+{TrueColorb}, but this is mainly a matter of taste.)
+
+1 type Aircraft; type Blip;
+
+2 random R6Vector State(Aircraft, NaturalNum);
+3 random R3Vector ApparentPos(Blip);
+
+4 nonrandom NaturalNum Pred(NaturalNum) = Predecessor;
+
+5 generating Aircraft Source(Blip);
+6 generating NaturalNum Time(Blip);
+
+7 #Aircraft ∼ NumAircraftDistrib();
+
+8 State(a, t)
+9
+10
+
+if t = 0 then ∼ InitState()
+else ∼ StateTransition(State(a, Pred(t)));
+
+11 #Blip: (Source, Time) -> (a, t)
+12 ∼ DetectionDistrib(State(a, t));
+
+13 #Blip: (BlipTime) -> (t)
+14 ∼ NumFalseAlarmsDistrib();
+
+15 ApparentPos(r)
+16
+17
+
+if (BlipSource(r) = null) then ∼ FalseAlarmDistrib()
+else ∼ ObsDistrib(State(Source(r), Time(r)));
+
+Figure 3: BLOG model for Ex. 3.
+
+To eliminate meaningless random variables, we use a
+typed, free logical language, in which every object has a type
+and in which functions may be partial. Each function sym-
+bol f has a type signature (τ0, . . . , τk), where τ0 is the return
+type of f and τ1, . . . , τk are the argument types. A partial
+function applied to arguments outside its domain returns the
+special value null, which is not of any type.
+
+The truth of any ﬁrst-order sentence is determined by a
+model structure for the corresponding language. A model
+structure speciﬁes the extension of each type and the inter-
+pretation for each function symbol:
+Deﬁnition 1. A model structure ω of a typed, free, ﬁrst-order
+language consists of an extension [τ ]ω for each type τ , which
+may be an arbitrary set, and an interpretation [f ]ω for each
+function symbol f. If f has return type τ0 and argument types
+τ1, . . . , τk, then [f ]ω is a function from [τ1]ω × · · · × [τk]ω to
+[τ0]ω ∪ {null}.
+
+A BLOG model deﬁnes a probability distribution over a
+particular set of model structures. In Ex. 1, identity uncer-
+tainty arises because [BallDrawn]ω (Draw1) might be equal
+to [BallDrawn]ω (Draw2) in one structure but not another.
+The set of balls, [Ball]ω, can also vary between structures.
+
+3.2 Outcomes with ﬁxed object sets
+BLOG models for ﬁxed object sets have ﬁve kinds of state-
+ments. A type declaration, such as the two statements on line
+1 of Fig. 3, introduces a type. Certain types, namely Boolean,
+NaturalNum, Integer, String, Real, and RkVector (for each
+k ≥ 2) are already provided. A random function declaration,
+such as line 2 of Fig. 3, speciﬁes the type signature for a func-
+tion symbol whose values will be chosen randomly in the gen-
+erative process. A nonrandom function deﬁnition, such as the
+one on line 4 of Fig. 3, introduces a function whose interpreta-
+tion is ﬁxed in all possible worlds. In our implementation, the
+interpretation is given by a Java class (Predecessor in this
+example). A guaranteed object statement, such as line 5 in
+Fig. 1, introduces and names some distinct objects that exist
+in all possible worlds. For the built-in types, the obvious sets
+of guaranteed objects and constant symbols are predeﬁned.
+The set of guaranteed objects of type τ in BLOG model M is
+denoted GM (τ ). Finally, for each random function symbol,
+a BLOG model includes a dependency statement specifying
+how values are chosen for that function. We postpone further
+discussion of dependency statements to Sec. 4.
+
+The ﬁrst four kinds of statements listed above deﬁne a par-
+ticular typed ﬁrst-order language LM for a model M. The
+set of possible worlds of M, denoted ΩM , consists of those
+model structures of LM where the extension of each type τ
+is GM (τ ), and all nonrandom function symbols (including
+guaranteed constants) have their given interpretations.
+
+For each random function f and tuple of appropriately
+typed guaranteed objects o1, . . . , ok, we can deﬁne a random
+variable (RV) Vf [o1, . . . , ok] (ω) , [f ]ω (o1, . . . , ok). The
+possible worlds are in one-to-one correspondence with full
+instantiations of these basic RVs. Thus, a joint distribution
+for the basic RVs deﬁnes a distribution over possible worlds.
+
+3.3 Unknown objects
+In general, a BLOG model deﬁnes a generative process in
+which objects are added iteratively to a world. To describe
+
+such processes, we ﬁrst introduce generating function decla-
+rations, such as lines 5–6 of Fig. 3. Unlike other functions,
+generating functions such as Source or Time have their val-
+ues set when an object is added. A generating function must
+take a single argument of some type τ (namely Blip in the
+example); it is then called a τ -generating function.
+
+Generative steps that add objects to the world are described
+by number statements. For instance, line 11 of Fig. 3 says
+that for each aircraft a and time step t, the process adds some
+number of blips r such that Source(r) = a and Time(r) = t.
+In general, the beginning of a number statement has the
+form: #τ : (g1, . . . , gk) –> (x1, . . . , xk) where τ is a
+type, g1, . . . , gk are τ -generating functions, and x1, . . . , xk
+are logical variables. (For types that are generated ab initio
+with no generating functions, the () -> () is omitted, as
+in Fig. 1.) The inclusion of a number statement means that
+for each appropriately typed tuple of objects o1, . . . , ok (the
+appropriate types are the return types of g1, . . . , gk), the gen-
+erative process adds some number (possibly zero) of objects
+q of type τ such that [gi]ω (q) = oi for i = 1, . . . , k.
+
+Object generation can even be recursive: for instance, in
+a model for phylogenetic trees, we could have a generating
+function Parent that takes a species and returns a species;
+then we could model speciation events with a number state-
+ment that begins: #Species: (Parent) -> (p).
+
+We can also view number statements more declaratively:
+
+Deﬁnition 2. Let ω be a model structure of LM , and con-
+sider a number statement for type τ with generating functions
+g1, . . . , gk. An object q ∈ [τ ]ω satisﬁes this number statement
+applied to o1, . . . , ok in ω if [gi]ω (q) = oi for i = 1, . . . , k,
+and [g]ω (q) = null for all other τ -generating functions g.
+
+Note that if a number statement for type τ omits one of the
+τ -generating functions, then this function takes on the value
+null for all objects satisfying that number statement. For in-
+stance, Source is null for objects satisfying the false-detection
+number statement on line 13 of Fig. 3. Also, a BLOG model
+cannot contain two number statements with the same set of
+generating functions. This ensures that each object o has ex-
+actly one generation history, which can be found by tracing
+back the generating functions on o.
+
+The set of possible worlds ΩM is the set of model struc-
+tures that can be constructed by M’s generative process. To
+complete the picture, we must explain not only how many
+objects are added on each step, but also what these ob-
+jects are.
+It turns out to be convenient to deﬁne the gen-
+erated objects as follows: when a number statement with
+type τ and generating functions g1, . . . , gk is applied to
+generating objects o1, . . . , ok, the generated objects are tu-
+ples {(τ, (g1, o1), . . . , (gk, ok), n) : n = 1, . . . , N }, where
+N is the number of objects generated. Thus in Ex. 3,
+the aircraft are pairs (Aircraft, 1), (Aircraft, 2), etc., and
+the blips generated by aircraft are nested tuples such as
+(Blip, (Source, (Aircraft, 2)), (Time, 8), 1). The tuple en-
+codes the object’s generation history; of course, it is purely
+internal to the semantics and remains invisible to the user.
+
+The set of all objects (nested tuples) of type τ that can be
+generated from the guaranteed objects via ﬁnitely many re-
+cursive applications of number statements is called the uni-
+verse of τ , and denoted UM (τ ). In each possible world, the
+extension of τ is some subset of UM (τ ).
+
+Deﬁnition 3. For a BLOG model M, the set of possible
+worlds ΩM is the set of model structures ω of LM such that:
+
+1. for each type τ , GM (τ ) ⊆ [τ ]ω ⊆ UM (τ );
+2. nonrandom functions have the speciﬁed interpretations;
+3. for each number statement
+in M with type τ and
+generating functions g1, . . . , gk, and each appropri-
+ately typed tuple of generating objects (o1, . . . , ok) in
+the set of objects in [τ ]ω that satisfy this num-
+ω,
+ber statement applied to these generating objects is
+{(τ, (g1, o1), . . . , (gk, ok), n) : n = 1, . . . , N } for some
+natural number N;
+
+4. for every type τ , each element of [τ ]ω satisﬁes some
+
+number statement applied to some objects in ω.
+
+Note that by part 3 of this deﬁnition, the number of objects
+generated by any given application of a number statement in
+world ω is a ﬁnite number N. However, a world can still con-
+tain inﬁnitely many non-guaranteed objects if some number
+statements are applied recursively, or are triggered for every
+natural number (like the ones generating radar blips in Ex. 3).
+With a ﬁxed set of objects, it was easy to deﬁne a set of ba-
+sic RVs such that a full instantiation of the basic RVs uniquely
+identiﬁed a possible world. To achieve the same effect with
+unknown objects, we need two kinds of basic RVs:
+Deﬁnition 4. For a BLOG model M, the set VM of basic
+random variables consists of:
+
+• for each random function f with type signature
+(τ0, . . . , τk) and each tuple of objects (o1, . . . , ok) ∈
+UM (τ1) × · · · × UM (τk), a function application RV
+Vf [o1, . . . , ok] (ω) that is equal to [f ]ω (o1, . . . , ok) if
+o1, . . . , ok all exist in ω, and null (or false for Boolean
+RVs) otherwise;
+• for each number statement with type τ and generating
+functions g1, . . . , gk that have return types τ1, . . . , τk,
+and each tuple of objects (o1, . . . , ok) ∈ UM (τ1)×· · ·×
+UM (τk), a number RV N(τ,g1,...,gk) [o1, . . . , ok] (ω)
+equal to the number of objects that satisfy this number
+statement applied to o1, . . . , ok in ω.
+
+Intuitively, each step in the generative world-construction
+process determines the value of a basic variable. The crucial
+result about basic RVs is the following:
+Proposition 1. For any BLOG model M and any complete
+instantiation of VM , there is at most one model structure in
+ΩM consistent with this instantiation.
+
+For
+
+instance,
+
+the basic RVs
+
+Equating objects with tuples might
+
+seem unneces-
+it becomes very helpful when
+sarily complicated, but
+(which
+we deﬁne a Bayes net over
+we do in Sec. 4.2).
+the sole parent
+of VApparentPos [(Blip, (Source, (Aircraft, 2)), (Time, 8), 1)] is
+VState [(Aircraft, 2), 8]. It might seem more elegant to assign
+numbers to objects as they are generated, so that the exten-
+sion of each type in each possible world would be simply a
+preﬁx of the natural numbers. Speciﬁcally, we could num-
+ber the aircraft arbitrarily, and then number the radar blips
+lexicographically by aircraft and time step. Then we would
+have basic RVs such as VApparentPos [23], representing the ap-
+parent aircraft position for blip 23. But blip 23 could be gen-
+erated by any aircraft at any time step. In fact, the parents
+of VApparentPos [23] would have to include all the #Blip and
+State variables in the model. So, deﬁning objects as tuples
+yields a much simpler Bayes net.
+
+4 Syntax and Semantics: Probabilities
+4.1 Dependency statements
+Dependency and number statements specify exactly how the
+steps are carried out in our generative process. Consider
+the dependency statement for State(a, t) beginning on line
+8 of Fig. 3. This statement is applied for every basic RV of
+the form VState [a, t] where a ∈ UM (Aircraft) and t ∈ N.
+If t = 0, the conditional distribution for State(a, t) is given
+by the elementary CPD InitState; otherwise it is given
+by the elementary CPD StateTransition, which takes
+State(a, Pred(t)) as an argument. These elementary CPDs
+deﬁne distributions over objects of type R6Vector (the return
+type of State). In our implementation, elementary CPDs are
+Java classes with a method getProb that returns the proba-
+bility of a particular value given a list of CPD arguments.
+
+A dependency statement begins with a function symbol f
+and a tuple of logical variables x1, . . . , xk representing the ar-
+guments to this function. In a number statement, the variables
+x1, . . . , xk represent the generating objects. In either case,
+the rest of the statement consists of a sequence of clauses.
+When the statement is not abbreviated, the syntax for the
+ﬁrst clause is
+if cond then ∼ elem-cpd(arg1, . . .,
+argN ). The cond portion is a formula of LM (in which only
+x1, . . . , xk can occur as free variables) specifying the con-
+dition under which this clause should be used to sample a
+value for a basic RV. More precisely, if the possible world
+constructed so far is ω, then the applicable clause is the ﬁrst
+one whose condition is satisﬁed in ω (assuming for the mo-
+ment that ω is complete enough to determine the truth val-
+ues of the conditions). If no clause’s condition is satisﬁed,
+or if the basic RV refers to objects that do not exist in ω,
+then the value is set by default to false for Boolean functions,
+null for other functions, and zero for number variables. If the
+condition in a clause is just “true”, then the whole string
+“if true then” may be omitted.
+
+In the applicable clause, each CPD argument is evaluated
+in ω. The resulting values are then passed to the elementary
+CPD. In the simplest case, the arguments are terms or formu-
+las of LM , such as State(a, Pred(t)). An argument can also
+be a set expression of the form {τ y : ϕ}, where τ is a type, y
+is a logical variable, and ϕ is a formula. The value of such an
+expression is the set of objects o ∈ [τ ]ω such that ω satisﬁes
+ϕ with y bound to o. If the formula ϕ is just true it can be
+omitted: this is the case on line 9 of Fig. 1.
+
+We require that the elementary CPDs obey two rules re-
+lated to non-guaranteed objects. First, a CPD should never
+assign positive probability to objects that do not exist in the
+partially completed world ω. Thus, we allow an elementary
+CPD to assign positive probability to a non-guaranteed object
+only if the object was passed in as a CPD argument. Second,
+an elementary CPD cannot “peek” at the tuple representations
+of objects that are passed in: it must be invariant to permuta-
+tions of the non-guaranteed objects.
+
+4.2 Declarative semantics
+So far we have explained BLOG semantics procedurally, in
+terms of a generative process. To facilitate both knowledge
+engineering and the development of learning algorithms, we
+would like to have declarative semantics. The standard ap-
+proach — which is used in most existing FOPLs — is to say
+
+that a BLOG model deﬁnes a certain Bayesian network (BN)
+over the basic RVs. In this section we discuss how that ap-
+proach needs to be modiﬁed for BLOG.
+
+We will write σ to denote an instantiation of a set of RVs
+vars(σ), and σX to denote the value that σ assigns to X. If
+a BN is ﬁnite, then the probability it assigns to each com-
+plete instantiation σ is P (σ) = QX∈vars(σ) pX (σX |σPa(X)),
+where pX is the CPD for X and σPa(X) is σ restricted to the
+parents of X. In an inﬁnite BN, we can write a similar expres-
+sion for each ﬁnite instantiation σ that is closed under the par-
+ent relation (that is, X ∈ vars(σ) implies Pa(X) ⊆ vars(σ)).
+If the BN is acyclic and each variable has ﬁnitely many an-
+cestors, then these probability assignments deﬁne a unique
+distribution [Kersting and De Raedt, 2001].
+
+The difﬁculty is that in the BN corresponding to a BLOG
+model, variables often have inﬁnite parent sets. For instance,
+the BN for Ex. 1 has an inﬁnite number of basic RVs of the
+form VTrueColor [b]: if it had only a ﬁnite number N of these
+RVs, it could not represent outcomes with more than N balls.
+Furthermore, each of these VTrueColor [b] RVs is a parent of
+each VObsColor [d] RV, since if BallDrawn(d) happens to be
+b, then the observed color on draw d depends directly on the
+color of ball b. So the VObsColor [d] nodes have inﬁnitely many
+parents. In such a model, assigning probabilities to ﬁnite in-
+stantiations that are closed under the parent relation does not
+deﬁne a unique distribution: in particular, it tells us nothing
+about the VObsColor [d] variables.
+
+We required instantiations to be closed under the par-
+ent relation so that the factors pX (σX |σPa(X)) would be
+well-deﬁned. But we may not need the values of all of X’s
+parents in order to determine the conditional distribution
+for X.
+For instance, knowing VBallDrawn [d] = (Ball, 13)
+and VTrueColor [(Ball, 13)] = Blue is sufﬁcient to determine
+the distribution for VObsColor [d]: the colors of all the other
+balls are irrelevant in this context. We can read off this
+context-speciﬁc independence from the dependency state-
+ment for ObsColor in Fig. 1 by noting that the instantiation
+(VBallDrawn [d] = (Ball, 13), VTrueColor [(Ball, 13)] = Blue)
+sole CPD argument
+determines
+instantiation
+TrueColor(BallDrawn(d)).
+supports the variable VObsColor [d] (see [Milch et al., 2005]).
+Deﬁnition 5. An instantiation σ supports a basic RV V of
+the form Vf [o1, . . . , ok] or Np [o1, . . . , ok] if all possible
+worlds consistent with σ agree on (1) whether all the objects
+o1, . . . , ok exist, and, if so, on (2) the applicable clause in the
+dependency or number statement for V and the values for the
+CPD arguments in that clause.
+
+the
+We say this
+
+of
+
+the
+
+value
+
+Note that some RVs, such as NBall [] in Ex. 1, are supported
+by the empty instantiation. We can now generalize the notion
+of being closed under the parent relation.
+Deﬁnition 6. A ﬁnite instantiation σ is self-supporting if its
+instantiated variables can be numbered X1, . . . , XN such
+that for each n ≤ N, the restriction of σ to {X1, . . . , Xn−1}
+supports Xn.
+
+This deﬁnition lets us give semantics to BLOG models in
+a way that is meaningful even when the corresponding BNs
+contain inﬁnite parent sets. We will write pV (v | σ) for the
+probability that V ’s dependency or number statement assigns
+to the value v, given an instantiation σ that supports V .
+
+Deﬁnition 7. A distribution P over ΩM satisﬁes a BLOG
+model M if for every ﬁnite, self-supporting instantiation σ
+with vars(σ) ⊆ VM :
+
+P (Ωσ) = QN
+
+n=1pXn(σXn | σ{X1,...,Xn−1})
+
+where Ωσ is the set of possible worlds consistent with σ and
+X1, . . . , XN is a numbering of σ as in Def. 6.
+
+A BLOG model is well-deﬁned if there is exactly one prob-
+ability distribution that satisﬁes it. Recall that a BN is well-
+deﬁned if it is acyclic and each variable has a ﬁnite set of an-
+cestors. Another way of saying this is that each variable can
+be “reached” by enumerating its ancestors in a ﬁnite, topolog-
+ically ordered list. The well-deﬁnedness criterion for BLOG
+is similar, but deals with ﬁnite, self-supporting instantiations
+rather than ﬁnite, topologically ordered lists of variables.
+Theorem 1. Let M be a BLOG model. Suppose that VM
+is at most countably inﬁnite,1 and for each V ∈ VM and
+ω ∈ ΩM , there is a self-supporting instantiation that agrees
+with ω and includes V . Then M is well-deﬁned.
+
+The theorem follows from a result in [Milch et al., 2005]
+that deals with distributions over full instantiations of a set
+of RVs. Prop. 1 makes the connection between full instantia-
+tions of VM and possible worlds.
+
+To check that the criterion of Thm. 1 holds for a partic-
+ular example, we need to consider each basic RV. In Ex. 1,
+the number RV for balls is supported by the empty instan-
+tiation, so in every world it is part of a self-supporting in-
+stantiation of size one. Each TrueColor(b) RV depends only
+on whether its argument exists, so these variables participate
+in self-supporting instantiations of size two. Similarly, each
+BallDrawn variable depends only on what balls exist. To sam-
+ple an ObsColor(d) variable, we need to know BallDrawn(d)
+and TrueColor(BallDrawn(d)), so these variables are in self-
+supporting instantiations of size four. Similar arguments can
+be made for Examples 2 and 3. Of course, we would like
+to have an algorithm for checking whether a BLOG model is
+well-deﬁned; the criteria given in Thm. 2 in Sec. 6.2 are a ﬁrst
+step in this direction.
+
+5 Evidence and Queries
+Because a well-deﬁned BLOG model M deﬁnes a distribution
+over model structures, we can use arbitrary sentences of LM
+as evidence and queries. But sometimes such sentences are
+not enough. In Ex. 3, the user observes radar blips, which are
+not referred to by any terms in the language. The user could
+assert evidence about the blips using existential quantiﬁers,
+but then how could he make a query of the form, “Did this
+blip come from the same aircraft as that blip?”
+
+A natural solution is to allow the user to extend the lan-
+guage when evidence arrives, adding constant symbols to re-
+fer to observed objects.
+In many cases, the user observes
+some new objects, introduces some new symbols, and assigns
+the symbols to the objects in an uninformative order. To han-
+dle such cases, BLOG includes a special macro. For instance,
+given 4 radar blips at time 8, one can assert:
+
+{Blip r: Time(r) = 8} = {Blip1, Blip2, Blip3, Blip4};
+
+1This is satisﬁed if the Real and RkVector types are not argu-
+ments to random functions or return types of generating functions.
+
+This introduces the new constants Blip1, . . . , Blip4 and as-
+serts that there are exactly 4 radar blips at time 8.
+
+Formally, the macro augments the model with dependency
+statements for the new symbols. The statements implement
+sampling without replacement; for our example, we have
+
+Blip1 ∼ Uniform({Blip r : (Time(r) = 8)});
+Blip2 ∼ Uniform({Blip r : (Time(r) = 8) & (Blip1 != r)});
+and so on. Once the model has been extended this way,
+the user can make assertions about the apparent positions of
+Blip1, Blip2, etc., and then use these symbols in queries.
+
+These new constants resemble Skolem constants, but con-
+ditioning on assertions about the new constants is not the
+same as conditioning on an existential sentence. For exam-
+ple, suppose you go into a new wine shop, pick up a bottle at
+random, and observe that it costs $40. This scenario is cor-
+rectly modeled by introducing a new constant Bottle1 with a
+Uniform CPD. Then observing that Bottle1 costs over $40
+suggests that this is a fancy wine shop. On the other hand, the
+mere existence of a $40+ bottle does not suggest this, because
+almost every shop has some bottle at over $40.
+
+Inference
+
+6
+Because the set of basic RVs of a BLOG model can be inﬁnite,
+it is not obvious that inference for well-deﬁned BLOG models
+is even decidable. However, the generative process intuition
+suggests a rejection sampling algorithm. We present this al-
+gorithm not because it is particularly efﬁcient, but because it
+demonstrates the decidability of inference for a large class of
+BLOG models (see Thm. 2 below) and illustrates several is-
+sues that any BLOG inference algorithm must deal with. At
+the end of this section, we present experimental results from
+a somewhat more efﬁcient likelihood weighting algorithm.
+
+6.1 Rejection sampling
+Suppose we are given a partial instantiation e as evidence, and
+a query variable Q. Our rejection sampling algorithm starts
+by imposing an arbitrary numbering on the the basic RVs.
+To generate each sample, it starts with an empty instantiation
+σ. Then it repeats the following process: scan the basic RVs
+in the imposed order until we reach the ﬁrst RV V that is
+supported by σ but not already instantiated in σ; sample a
+value v for V according to V ’s dependency statement; and
+augment σ with the assignment V = v. It continues until all
+the query and evidence variables have been sampled. If the
+sample is consistent with the evidence e, then it increments a
+counter Nq, where q is the sampled value of Q. Otherwise, it
+rejects this sample. After N accepted samples, the estimate
+of P (Q = q | e) is Nq/N.
+
+This algorithm requires a subroutine that determines
+whether a partial instantiation σ supports a basic RV V , and
+if so, returns a sample from V ’s conditional distribution. For
+a basic RV V of the form Vf [o1, . . . , ok] or Np [o1, . . . , ok],
+the subroutine begins by checking the values of the relevant
+number variables in σ to determine whether all of o1, . . . , ok
+exist. If some of these number variables are not instantiated,
+then σ does not support V . If some of o1, . . . , ok do not ex-
+ist, the subroutine returns the default value for V .
+If they
+do all exist, the subroutine follows the semantics for depen-
+dency statements discussed in Sec. 4.1. First, it iterates over
+the clauses in the dependency (or number) statement until it
+
+reaches a clause whose condition is either undetermined or
+determined to be true given σ (if all the conditions are deter-
+mined to be false, then it returns the default value for V ). If
+the condition is undetermined, then σ does not support V . If
+it is determined to be true, then the subroutine evaluates each
+of the CPD arguments in this clause. If σ determines the val-
+ues of all the arguments, then the subroutine samples a value
+for V by passing those values to the sample method of this
+clause’s elementary CPD. Otherwise, σ does not support V .
+To evaluate terms and quantiﬁer-free formulas, we use a
+straightforward recursive algorithm. The base case looks up
+the value of a particular function application RV in σ and re-
+turns “undetermined” if it is not instantiated. A formula may
+be determined even if some of its subformulas are not deter-
+mined: for example, α ∧ β is determined to be false if α is
+false. It is more complicated to evaluate set expressions such
+as {Blip r: Time(r) = 8}, which can be used as CPD
+arguments. A naive algorithm for evaluating this expression
+would ﬁrst enumerate all the objects of type Blip (which re-
+quires certain number variables to be instantiated), then select
+the blips r that satisfy Time(r) = 8. But Fig. 3 speciﬁes that
+there may exist some blips for each aircraft a and each natu-
+ral number t: since there are inﬁnitely many natural numbers,
+some worlds contain inﬁnitely many blips. Fortunately, the
+number of blips r with Time(r) = 8 is necessarily ﬁnite: in
+every world there are a ﬁnite number of aircraft, and each
+one generates a ﬁnite number of blips at time 8. We have
+an algorithm that scans the formula within a set expression
+for generating function restrictions such as Time(r) = 8, and
+uses them to avoid enumerating inﬁnite sets when possible.
+A similar method is used for evaluating quantiﬁed formulas.
+
+6.2 Termination criteria
+In order to generate each sample, the algorithm above repeat-
+edly instantiates the ﬁrst variable that is supported but not yet
+instantiated, until it instantiates all the query and evidence
+variables. When can we be sure that this will take a ﬁnite
+amount of time? The ﬁrst way this process could fail to termi-
+nate is if it goes into an inﬁnite loop while checking whether a
+particular variable is supported. This happens if the program
+ends up enumerating an inﬁnite set while evaluating a set ex-
+pression or quantiﬁed formula. We can avoid this by ensuring
+that all such expressions in the BLOG model are ﬁnite once
+generating function restrictions are taken into account.
+
+The sample generator also fails to terminate if it never con-
+structs an instantiation that supports a particular query or ev-
+idence variable. To see how this can happen, consider calling
+the subroutine described above to sample a variable V .
+If
+V is not supported, the subroutine will realize this when it
+encounters a variable U that is relevant but not instantiated.
+Now consider a graph over basic variables where we draw an
+edge from U to V when the evaluation process for V hits U
+in this way. If a variable is never supported, then it must be
+part of a cycle in this graph, or part of a receding chain of
+variables V1 ← V2 ← · · · that is extended inﬁnitely.
+
+The graph constructed in this way varies from sample to
+sample: for instance, sometimes the evaluation process for
+VObsColor [d] will hit VTrueColor [(Ball, 7)], and sometimes it
+will hit VTrueColor [(Ball, 13)]. However, we can rule out cy-
+cles and inﬁnite receding chains in all these graphs by consid-
+ering a more abstract graph over function symbols and types.
+
+Deﬁnition 8. The symbol graph for a BLOG model M is a
+directed graph whose nodes are the types and random func-
+tion symbols of M, where the parents of a type τ or function
+symbol f are:
+
+• the random function symbols that occur on the right
+hand side of the dependency statement for f or some
+number statement for τ ;
+• the types of variables that are quantiﬁed over in formu-
+las or set expressions on the right hand side of such a
+statement;
+• the types of the arguments for f or the return types of
+generating functions for τ .
+
+If the sampling subroutine for a basic RV V hits a basic RV
+U, then there must be an edge from U’s function symbol (or
+type, if U is a number RV) to V ’s function symbol (or type)
+in the symbol graph. This property, along with ideas from
+[Milch et al., 2005], allows us to prove the following:
+Theorem 2. Suppose M is a BLOG model where:
+
+1. uncountable built-in types do not serve as function argu-
+
+ments or as the return types of generating functions;
+
+2. each quantiﬁed formula and set expression ranges over a
+ﬁnite set once generating function restrictions are taken
+into account;
+
+3. the symbol graph is acyclic.
+
+Then M is well-deﬁned. Also, for any evidence instantiation
+e and query variable Q, the rejection sampling algorithm de-
+scribed in Sec. 6.1 converges to the posterior P (Q|e) deﬁned
+by the model, taking ﬁnite time per sampling step.
+
+The criteria in Thm. 2 are very conservative: in particular,
+when we construct the symbol graph, we ignore all structure
+in the dependency statements and just check for the occur-
+rence of function and type symbols. These criteria are satis-
+ﬁed by the models in Figures 1 and 2. However, the model in
+Fig. 3 does not satisfy the criteria because there is a self-loop
+from State to State. The criteria do not exploit the fact that
+State(a, t) depends only on State(a, Pred(t)), and the non-
+random function Pred is acyclic. Friedman et al. [1999] have
+already dealt with this issue in the context of probabilistic re-
+lational models; their algorithm can be adapted to obtain a
+stronger version of Thm. 2 that covers Fig. 3.
+
+6.3 Experimental results
+Milch et al. [2005] describe a guided likelihood weighting
+algorithm that uses backward chaining from the query and
+evidence nodes to avoid sampling irrelevant variables. This
+algorithm can also be adapted to BLOG models. We applied
+this algorithm for Ex. 1, asserting that 10 balls were drawn
+and all appeared blue, and querying the number of balls in
+the urn. The top graph of Fig. 4 shows that when the prior for
+the number of balls is uniform over {1, . . . , 8}, the posterior
+puts more weight on small numbers of balls; this makes sense
+because the more balls there are in the urn, the less likely it is
+that they are all blue. The bottom graph, using a Poisson(6)
+prior, shows a similar but less pronounced effect. Note that
+the posterior probabilities computed by the likelihood weight-
+ing algorithm are very close to the exact values (computed by
+exhaustive enumeration). These results could not be obtained
+using any algorithm that constructed a single ﬁxed BN, since
+the number of potentially relevant VTrueColor [b] variables is
+inﬁnite in the Poisson case.
+
+y
+t
+i
+l
+i
+
+b
+a
+b
+o
+r
+P
+
+y
+t
+i
+l
+i
+
+b
+a
+b
+o
+r
+P
+
+ 0.45
+
+ 0.4
+
+ 0.35
+
+ 0.3
+
+ 0.25
+
+ 0.2
+
+ 0.15
+
+ 0.1
+
+ 0.05
+
+ 0
+
+ 1
+
+ 2
+
+ 0.18
+
+ 0.16
+
+ 0.14
+
+ 0.12
+
+ 0.1
+
+ 0.08
+
+ 0.06
+
+ 0.04
+
+ 0.02
+
+ 0
+
+ 0
+
+ 4
+
+ 3
+ 6
+Number of balls in urn
+
+ 5
+
+ 7
+
+ 8
+
+ 5
+
+ 10
+
+ 15
+
+ 20
+
+ 25
+
+Number of balls in urn
+
+Figure 4: Distribution for the number of balls in the urn
+(Ex. 1). Dashed lines are the uniform prior (top) or Poisson
+prior (bottom); solid lines are the exact posterior given that
+10 balls were drawn and all appeared blue; and plus signs
+are posterior probabilities computed by 5 independent runs
+of 20,000 samples (top) or 100,000 samples (bottom).
+
+7 Related Work
+Gaifman [1964] was the ﬁrst to suggest deﬁning a probability
+distribution over ﬁrst-order model structures. Halpern [1990]
+deﬁnes a language in which one can make statements about
+such distributions: for instance, that the probability of the
+set of worlds that satisfy Flies(Tweety) is 0.8. Probabilis-
+tic logic programming [Ng and Subrahmanian, 1992] can be
+seen as an application of this approach to Horn-clause knowl-
+edge bases. Such an approach only deﬁnes constraints on
+distributions, rather than deﬁning a unique distribution.
+
+Most ﬁrst-order probabilistic languages (FOPLs) that de-
+ﬁne unique distributions ﬁx the set of objects and the interpre-
+tations of (non-Boolean) function symbols. Examples include
+relational Bayesian networks [Jaeger, 2001] and Markov
+logic models [Domingos and Richardson, 2004]. Prolog-
+based languages such as probabilistic Horn abduction [Poole,
+1993], PRISM [Sato and Kameya, 2001], and Bayesian logic
+programs [Kersting and De Raedt, 2001] work with Herbrand
+models, where the objects are in one-to-one correspondence
+with the ground terms of the language.
+
+There are a few FOPLs that allow explicit reference uncer-
+tainty, i.e., uncertainty about the interpretations of function
+symbols. Among these are two languages that use indexed
+RVs rather than logical notation: BUGS [Gilks et al., 1994]
+and indexed probability diagrams (IPDs) [Mjolsness, 2004].
+Reference uncertainty can also be represented in probabilistic
+relational models (PRMs) [Koller and Pfeffer, 1998], where
+
+a “single-valued complex slot” corresponds to an uncertain
+unary function. PRMs are unfortunately restricted to unary
+functions (attributes) and binary predicates (relations). Prob-
+abilistic entity-relationship models [Heckerman et al., 2004]
+lift this restriction, but represent reference uncertainty using
+relations (such as Drawn(d, b)) and special mutual exclusivity
+constraints, rather than with functions such as BallDrawn(d).
+Multi-entity Bayesian network logic (MEBN) [Laskey, 2004]
+is similar to BLOG in allowing uncertainty about the values
+of functions with any number of arguments.
+
+The need to handle unknown objects has been appreciated
+since the early days of FOPL research: Charniak and Gold-
+man’s plan recognition networks (PRNs) [1993] can con-
+tain unbounded numbers of objects representing hypothe-
+sized plans. However, external rules are used to decide what
+objects and variables to include in a PRN. While each pos-
+sible PRN deﬁnes a distribution on its own, Charniak and
+Goldman do not claim that the various PRNs are all approxi-
+mations to some single distribution over outcomes.
+
+Some more recent FOPLs do deﬁne a single distribution
+over outcomes with varying objects.
+IPDs allow uncer-
+tainty over the index range for an indexed family of RVs.
+PRMs and their extensions allow a variety of forms of un-
+certainty about the number (or existence) of objects satisfy-
+ing certain relational constraints [Koller and Pfeffer, 1998;
+Getoor et al., 2001] or belonging to each type [Pasula et al.,
+2003]. However, there is no uniﬁed syntax or semantics for
+dealing with unknown objects in PRMs. MEBNs take yet
+another approach: an MEBN model includes a set of unique
+identiﬁers, for each of which there is an “identity” RV indi-
+cating whether the named object exists.
+
+Our approach to unknown objects in BLOG can be seen as
+unifying the PRM and MEBN approaches. Number state-
+ments neatly generalize the various ways of handling un-
+known objects in PRMs: number uncertainty [Koller and Pf-
+effer, 1998] corresponds to a number statement with a sin-
+gle generating function; existence uncertainty [Getoor et al.,
+2001] can be modeled with two or more generating functions
+(and a CPD whose support is {0, 1}); and domain uncertainty
+[Pasula et al., 2003] corresponds to a number statement with
+no generating functions. There is also a correspondence be-
+tween BLOG and MEBN logic: the tuple representations in
+a BLOG model can be thought of as unique identiﬁers in an
+MEBN model. The difference is that BLOG determines which
+objects actually exist in a world using number variables rather
+than individual existence variables.
+
+Finally, it is informative to compare BLOG with the IBAL
+language [Pfeffer, 2001], in which a program deﬁnes a dis-
+tribution over outputs that can be arbitrary nested data struc-
+tures. An IBAL program could implement a BLOG-like gen-
+erative process with the outputs viewed as logical model
+structures. But the declarative semantics of such a program
+would be less clear than the corresponding BLOG model.
+
+8 Conclusion
+BLOG is a representation language for probabilistic models
+with unknown objects. It contributes to the solution of a very
+general problem in AI: intelligent systems must represent and
+reason about objects, but those objects may not be known
+a priori and may not be directly and uniquely identiﬁed by
+
+perceptual processes. Our approach deﬁnes generative mod-
+els that create ﬁrst-order model structures by adding objects
+and setting function values; everything else follows naturally
+from this design decision. Much remains to be done, espe-
+cially on inference: we expect to employ MCMC with user-
+deﬁned and possibly adaptive proposal distributions, and to
+develop algorithms that work directly with objects rather than
+at the lower level of basic RVs.
+
+References
+[Charniak and Goldman, 1993] E. Charniak and R. P. Goldman. A
+
+Bayesian model of plan recognition. AIJ, 64(1):53–79, 1993.
+
+[Domingos and Richardson, 2004] P. Domingos and M. Richard-
+son. Markov logic: A unifying framework for statistical rela-
+tional learning.
+In Proc. ICML Wksp on Statistical Relational
+Learning and Its Connections to Other Fields, 2004.
+
+[Friedman et al., 1999] N. Friedman, L. Getoor, D. Koller, and
+A. Pfeffer. Learning probabilistic relational models. In Proc. 16th
+IJCAI, pages 1300–1307, 1999.
+
+[Gaifman, 1964] H. Gaifman. Concerning measures in ﬁrst order
+
+calculi. Israel J. Math., 2:1–18, 1964.
+
+[Getoor et al., 2001] L. Getoor, N. Friedman, D. Koller, and
+B. Taskar. Learning probabilistic models of relational structure.
+In Proc. 18th ICML, pages 170–177, 2001.
+
+[Gilks et al., 1994] W. R. Gilks, A. Thomas, and D. J. Spiegelhalter.
+A language and program for complex Bayesian modelling. The
+Statistician, 43(1):169–177, 1994.
+
+[Halpern, 1990] J. Y. Halpern. An analysis of ﬁrst-order logics of
+
+probability. AIJ, 46:311–350, 1990.
+
+[Heckerman et al., 2004] D. Heckerman, C. Meek, and D. Koller.
+Probabilistic models for relational data. Technical Report MSR-
+TR-2004-30, Microsoft Research, 2004.
+
+[Jaeger, 2001] M. Jaeger. Complex probabilistic modeling with re-
+cursive relational Bayesian networks. Annals of Math and AI,
+32:179–220, 2001.
+
+[Kersting and De Raedt, 2001] K. Kersting and L. De Raedt. Adap-
+
+tive Bayesian logic programs. In 11th Int. Conf. on ILP, 2001.
+
+[Koller and Pfeffer, 1998] D. Koller and A. Pfeffer. Probabilistic
+frame-based systems. In Proc. 15th AAAI, pages 580–587, 1998.
+[Laskey, 2004] K. B. Laskey. MEBN: A logic for open-world prob-
+abilistic reasoning. Technical report, George Mason Univ., 2004.
+[Milch et al., 2005] B. Milch, B. Marthi, D. Sontag, S. Russell,
+D. L. Ong, and A. Kolobov. Approximate inference for inﬁnite
+contingent Bayesian networks. In 10th AISTATS Wksp, 2005.
+
+[Mjolsness, 2004] E. Mjolsness. Labeled graph notations for graph-
+ical models. Technical Report 04-03, School of Information and
+Computer Science, UC Irvine, 2004.
+
+[Ng and Subrahmanian, 1992] R. T. Ng and V. S. Subrahmanian.
+Probabilistic logic programming. Information and Computation,
+101(2):150–201, 1992.
+
+[Pasula et al., 2003] H. Pasula, B. Marthi, B. Milch, S. Russell, and
+I. Shpitser. Identity uncertainty and citation matching. In NIPS
+15. MIT Press, Cambridge, MA, 2003.
+
+[Pearl, 1988] J. Pearl. Probabilistic Reasoning in Intelligent Sys-
+tems. Morgan Kaufmann, San Francisco, revised edition, 1988.
+[Pfeffer, 2001] A. Pfeffer. IBAL: A probabilistic rational program-
+
+ming language. In Proc. 17th IJCAI, pages 733–740, 2001.
+
+[Poole, 1993] D. Poole. Probabilistic Horn abduction and Bayesian
+
+networks. AIJ, 64(1):81–129, 1993.
+
+[Sato and Kameya, 2001] T. Sato and Y. Kameya. Parameter learn-
+ing of logic programs for symbolic-statistical modeling. JAIR,
+15:391–454, 2001.
+
+[Sittler, 1964] R. W. Sittler. An optimal data association problem
+in surveillance theory. IEEE Trans. Military Electronics, MIL-
+8:125–139, 1964.
+
+

@@ -1,0 +1,1014 @@
+Edge Partitioning in External-Memory Graph Search
+
+Rong Zhou
+
+Eric A. Hansen
+
+Palo Alto Research Center
+
+Dept. of Computer Science and Eng.
+
+3333 Coyote Hill Road
+Palo Alto, CA 94304
+
+rzhou@parc.com
+
+Mississippi State University
+Mississippi State, MS 39762
+
+hansen@cse.msstate.edu
+
+Abstract
+
+There is currently much interest in using exter-
+nal memory, such as disk storage,
+to scale up
+graph-search algorithms. Recent work shows that
+the local structure of a graph can be leveraged
+to substantially improve the efﬁciency of external-
+memory graph search. This paper introduces a
+technique, called edge partitioning, which exploits
+a form of local structure that has not been con-
+sidered in previous work. The new technique im-
+proves the scalability of structured approaches to
+external-memory graph search, and also guaran-
+tees the applicability of these approaches to any
+graph-search problem. We show its effectiveness
+in an external-memory graph-search algorithm for
+domain-independent STRIPS planning.
+
+1 Introduction
+Breadth-ﬁrst search, A*, and related graph-search algorithms
+store generated nodes in memory in order to be able to detect
+duplicates and prevent node regeneration. The scalability of
+these graph-search algorithms can be dramatically increased
+by storing nodes in external memory, such as disk storage.
+Because random access of disk is several orders of magni-
+tude slower than internal memory, external-memory graph-
+search algorithms use duplicate-detection strategies that seri-
+alize disk access in a way that minimizes disk I/O.
+
+A widely-used approach to external-memory graph search
+is delayed duplicate detection [Stern and Dill, 1998; Korf,
+2004; Edelkamp et al., 2004].
+In its original and simplest
+form, delayed duplicate detection expands a set of nodes (e.g.,
+the nodes on the search frontier) without checking for du-
+plicates, stores the generated nodes (including duplicates) in
+a disk ﬁle, and eventually removes the duplicates by sort-
+ing the ﬁle. In keeping with its use by theoretical computer
+scientists in analyzing the complexity of external-memory
+graph search [Munagala and Ranade, 1999], delayed dupli-
+cate detection makes no assumptions about the structure of
+the search graph (except that it is undirected and unweighted).
+the performance of external-
+memory graph search can be signiﬁcantly improved by ex-
+ploiting the structure of a graph in order to localize mem-
+ory references. Zhou and Hansen (2004; 2005; 2006b) pro-
+
+Recent work shows that
+
+pose a technique called structured duplicate detection that
+exploits local structure that is captured in an abstract repre-
+sentation of the graph. For graphs with sufﬁcient local struc-
+ture, structured duplicate detection outperforms delayed du-
+plicate detection because it never generates duplicates, even
+temporarily, and thus has lower overhead and reduced com-
+plexity. Korf and Schulze (2005) show how to improve the
+performance of delayed duplicate detection by using similar
+local structure to reduce the delay between generation of du-
+plicates and their eventual detection and removal.
+
+Although approaches that exploit a graph’s local structure
+are very effective, they depend on a graph-search problem
+having the appropriate kind of local structure, and a sufﬁcient
+amount of it, in order to be effective. Thus one can legit-
+imately question whether these approaches will be equally
+effective for all graphs, or effective at all for some graphs.
+In this paper, we introduce a technique that exploits a dif-
+ferent kind of local structure than is exploited in previous
+work. The kind of local structure exploited by this technique
+is in some sense created by the way the algorithm expands
+nodes, in particular, by use of a novel form of incremental
+node expansion. The new technique, called edge partition-
+ing, can localize memory references in any graph, no matter
+what its structure – even a fully-connected graph. Moreover,
+the way this new technique localizes memory references com-
+plements the kind of local graph structure that is exploited by
+previous approaches. This allows the new technique to be
+combined with previously-developed approaches in order to
+create a more powerful external-memory graph-search algo-
+rithm. In this paper, we focus on how to use edge partition-
+ing to improve the performance of structured duplicate detec-
+tion. We implement it in an external-memory graph-search al-
+gorithm for domain-independent STRIPS planning that uses
+structured duplicate detection, and show that it greatly im-
+proves scalability. At the close of the paper, we discuss how
+edge partitioning can also be used to exploit local structure in
+delayed duplicate detection.
+
+2 Structured duplicate detection
+Structured duplicate detection (SDD) [Zhou and Hansen,
+2004] is an approach to external-memory graph search that
+leverages local structure in a graph to partition stored nodes
+between internal memory and disk in such a way that dupli-
+cate detection can be performed immediately, during node ex-
+
+IJCAI-07
+
+2410
+
+pansion, and no duplicates are ever generated.
+
+The local structure that is leveraged by this approach is
+revealed by a state-space projection function that is a many-
+to-one mapping from the original state space to an abstract
+state space, in which each abstract state corresponds to a set
+of states in the original state space. If a state x is mapped to
+an abstract state y, then y is called the image of x. One way
+to create a state-space projection function is by ignoring the
+value of some state variables. For example, if we ignore the
+positions of all tiles in the Eight Puzzle and consider only the
+position of the “blank,” we get an abstract state space that has
+only nine abstract states, one corresponding to each possible
+position of the blank.
+
+Given a state-space graph and state-space projection func-
+tion, an abstract state-space graph is constructed as follows.
+The set of nodes in the abstract graph, called the abstract
+nodes, corresponds to the set of abstract states. An abstract
+node y(cid:2) is a successor of an abstract node y if and only if there
+exist two states x(cid:2) and x in the original state space, such that
+(1) x(cid:2) is a successor of x, and (2) x(cid:2) and x map to y(cid:2) and y,
+respectively, under the state-space projection function.
+
+Figure 1(b) shows the abstract state-space graph created by
+the simple state-space projection function that maps a state
+into an abstract state based only on the position of the blank.
+Each abstract node Bi in Figure 1(b) corresponds to the set
+of states with the blank located at position i in Figure 1(a).
+
+In structured duplicate detection, stored nodes in the origi-
+nal search graph are divided into “nblocks” with each nblock
+corresponding to a set of nodes that maps to the same ab-
+stract node. Given this partition of stored nodes, structured
+duplicate detection uses the concept of duplicate-detection
+scope to localize memory references in duplicate detection.
+The duplicate-detection scope of a node x in the original
+search graph is deﬁned as all stored nodes (or equivalently,
+all nblocks) that map to the successors of the abstract node
+y that is the image of node x under the projection function.
+In the Eight Puzzle example, the duplicate-detection scope of
+nodes that map to abstract node B0 consists of nodes that map
+to abstract node B1 and those that map to abstract node B3.
+The concept of duplicate-detection scope allows a search
+algorithm to check duplicates against a fraction of stored
+nodes, and still guarantee that all duplicates are found. An
+external-memory graph search algorithm can use RAM to
+store nblocks within the current duplicate-detection scope,
+and use disk to store other nblocks when RAM is full.
+
+SDD is designed to be used with a search algorithm that
+expands a set of nodes at a time, such as breadth-ﬁrst search,
+where the order in which nodes in the set are expanded can be
+adjusted to minimize disk I/O. SDD’s strategy for minimiz-
+ing disk I/O is to order node expansions such that changes of
+duplicate-detection scope occur as infrequently as possible,
+and, when they occur, they involve change of as few nblocks
+as possible. When RAM is full, nblocks outside the cur-
+rent duplicate-detection scope are ﬂushed to disk. Writing
+the least-recently used nblocks to disk is one way to select
+which nblocks to write to disk. When expanding nodes in a
+different nblock, any nblocks in its duplicate-detection scope
+that are stored on disk are swapped into RAM.
+
+Figure 1: Panel (a) shows all possible positions of the blank for
+the Eight Puzzle. Panel (b) shows an abstract state-space graph that
+is created by the state-space projection function that considers the
+position of the “blank” only.
+
+3 Edge Partitioning
+
+The kind of local structure that is exploited by SDD is cap-
+tured in an abstract state-space graph when the maximum
+outdegree of any abstract node is small relative to the to-
+tal number of abstract nodes. The largest outdegree of any
+abstract node reﬂects the largest duplicate-detection scope,
+and this in turn determines the internal-memory require-
+ments of the search algorithm. Experiments in several do-
+mains suggest that this form of local structure is present
+in many search problems [Zhou and Hansen, 2004; 2005;
+2006b]. However it is present in varying degrees, and there is
+no guarantee that it is present in every search problem. More-
+over, the degree to which it is present can affect the degree of
+scalability that is possible.
+
+This motivates the development of a technique that makes
+SDD effective regardless of whether, and to what degree, this
+kind of local structure is present. In fact, the new technique
+we introduce is effective even if the abstract state-space graph
+is fully-connected, and thus captures no local structure at all.
+The idea behind this technique is that the local structure ex-
+ploited by SDD can be created, in some sense, by expanding
+nodes incrementally, which means generating only some of
+the successors of a node at a time, and generating the other
+successors later. Incremental node expansion makes it pos-
+sible to partition the original duplicate-detection scope into
+smaller duplicate-detection scopes, and this can signiﬁcantly
+reduce the internal memory requirements of the algorithm.
+
+In the original form of SDD, the duplicate-detection scope
+of a node being expanded is deﬁned as all stored nodes that
+map to any abstract node that is a successor of the abstract
+node that is the image of the node being expanded. Thus
+the largest duplicate-detection scope reﬂects the largest num-
+ber of successors of a node in the abstract graph. But this
+assumes that all successors are generated at the same time.
+If nodes are expanded incrementally, it is possible to subdi-
+vide this duplicate-duplicate scope into smaller scopes, one
+for each pair of abstract node and successor abstract node, or,
+equivalently, one for each outgoing abstract edge.
+
+This is the key idea of edge partitioning. It considers a set
+of nodes that map to a particular abstract node, and a par-
+ticular outgoing abstract edge, and only applies the opera-
+tors that correspond to the abstract edge, in order to generate
+only the successor nodes that correspond to the successor ab-
+stract node along that edge. As a result, in edge partitioning,
+
+IJCAI-07
+
+2411
+
+the duplicate-detection scope consists of only a single nblock
+corresponding to the single abstract node that is the successor
+of an abstract edge. At a later point in the algorithm, a differ-
+ent outgoing abstract edge is considered, and a different set
+of operators are applied to the same set of nodes, in order to
+generate additional successor nodes with potential duplicates
+in a different nblock. Eventually, all operators are applied to
+a set of nodes and they become fully expanded. Note that full
+expansion of a node now requires a sequence of incremental
+expansions.
+
+3.1 Operator grouping
+
+The state-space projection function and abstract state space
+graph used by SDD with edge partitioning are the same as for
+SDD in its original form. But since nodes are expanded incre-
+mentally, and only one abstract edge is considered at a time,
+it is now important to identify which operators are associated
+with each abstract edge, in order to know which successors
+to generate. We refer to this annotation of the edges of the
+abstract graph as operator grouping. We point out that an
+“operator” here refers to an instantiated (or grounded) opera-
+tor. For example, the Eight Puzzle has a total of 192 grounded
+operators, even though there are only four (left, right, up, and
+down) operators prior to instantiation.
+
+Operator grouping is built on top of state abstraction. Let
+O be the set of all instantiated operators of a search problem.
+An operator o ∈ O is applicable to an abstract node y if and
+only if there exists a state x in the original state space, such
+that (a) o is applicable to x, and (b) x maps to y. Consider the
+Eight Puzzle. There are 2× 8 = 16 operators that are applica-
+ble to abstract node B0, because the blank, when located at
+the top-left corner of the puzzle board, can move either right
+(B0 → B1) or down (B0 → B3), and each move has 8 differ-
+ent instantiations, depending on which tile of the Eight Puz-
+zle is moved into the blank position. Similarly, each of the
+abstract nodes B2, B6, and B8 has 16 applicable operators.
+Abstract nodes B1, B3, B5, and B7 each have 3 × 8 = 24
+applicable operators, and abstract node B4 has 4 × 8 = 32
+applicable operators.
+
+Once the set of applicable operators for each abstract node
+is determined, operator grouping identiﬁes, for each applica-
+ble operator, the abstract edge it is associated with. An ab-
+stract edge (y, y(cid:2)) is an edge in the abstract graph that con-
+nects a pair of abstract nodes y and y(cid:2), if and only if y(cid:2) is a
+successor of y. We refer to y (y(cid:2)) as the source (destination)
+of abstract edge (y, y(cid:2)).
+
+Let Oy be the set of operators applicable to abstract node
+y. An operator o ∈ Oy is associated with an abstract edge
+(y, y(cid:2)) if and only if there exists two states x and x(cid:2) in the
+original state space, such that (1) o is applicable to x, (2) x(cid:2) is
+the resulting state after applying o to x, and (3) x and x(cid:2) map
+to y and y(cid:2), respectively. For operators with deterministic
+effects, it is easy to see that for every o ∈ Oy, there is a unique
+abstract edge (y, y(cid:2)) that o is associated with. Essentially,
+there is a many-to-one mapping from the operator space to
+the abstract-edge space.
+
+To exploit local structure in the operator space, edge parti-
+tioning uses operator grouping to divide the set of applicable
+operators Oy for abstract node y into operator groups, one
+
+for each successor of y in the abstract graph. An operator
+group Oy,y (cid:2) is a subset of Oy that consists of all the opera-
+tors that are associated with abstract edge (y, y(cid:2)). Note that
+Oy,y (cid:2) ∩ Oy,y (cid:2)(cid:2) = ∅ for all y(cid:2) (cid:6)= y(cid:2)(cid:2), and
+
+(cid:2)
+
+Oy,y (cid:2) = Oy,
+
+y (cid:2)∈successors(y)
+
+where successors(y) is the set of successors of y in the ab-
+stract graph.
+
+Although the technique of operator grouping is presented
+here in the context of searching implicitly-represented graphs
+(i.e., graphs represented by a start state and a set of oper-
+ators for generating successors), it should be clear that the
+same technique applies with little modiﬁcation to searching
+explicitly-represented graphs (i.e., graphs represented by a set
+of vertices and a set of edges).
+
+3.2 Edge-partitioned duplicate-detection scope
+
+The idea of edge partitioning for SDD is to subdivide the
+duplicate-detection scope into smaller scopes, one for each
+abstract edge, and use only the operator group that is associ-
+ated with the abstract edge to generate successors at a time.
+This leads to the concept of duplicate-detection scope for an
+abstract edge, which is deﬁned as follows.
+
+Deﬁnition 1 The duplicate-detection scope for an abstract
+edge is the set of stored nodes that map to the destination
+of the abstract edge.
+
+The duplicate-detection scope for an abstract edge is guar-
+anteed to contain only nodes that map to a single abstract
+node, regardless of the structure of the abstract graph. The
+following theorem follows from the deﬁnition.
+
+Theorem 1 The duplicate-detection scope for an abstract
+edge contains all stored duplicates of the successors gener-
+ated by applying its corresponding operator group to the set
+of nodes that map to the source of the abstract edge.
+
+Theorem 1 guarantees that edge partitioning only needs to
+store a single nblock in RAM, in order to catch all the du-
+plicates that could be generated, even in the worst case. This
+works in the following way. For each abstract edge (y, y(cid:2)),
+edge partitioning uses operators o ∈ Oy,y (cid:2) to generate suc-
+cessors for nodes that map to abstract node y. After edge par-
+titioning has expanded these nodes using one operator group,
+it uses a different operator group Oy,y (cid:2)(cid:2) to generate succes-
+sors for the same nblock, until all operator groups have been
+used in generating successors for the nblock. Then it chooses
+a different nblock to expand next.
+
+Because not all successors are generated by edge partition-
+ing when a node is expanded, we call a node expansion in
+edge partitioning an incremental expansion. Nodes eventu-
+ally become fully expanded, once all operators are applied.
+
+3.3 Example
+
+We use the following example to illustrate how edge parti-
+tioning works in SDD. Let xi be a search node that represents
+a state of the Eight Puzzle with the blank located at position
+i as shown in Figure 1(a). Suppose there are only two stored
+
+IJCAI-07
+
+2412
+
+nodes {a0, b0} that map to abstract node B0 shown in Fig-
+ure 1(b). Let {a1, a3} and {b1, b3} be the successors of a0
+and b0, respectively. (The subscript encodes the position of
+the blank.) When edge partitioning expands nodes a0 and
+b0, it ﬁrst uses operators o ∈ OB0,B1 . This corresponds to
+moving the blank to the right, to generate the ﬁrst two suc-
+cessor nodes a1 and b1. Note that only nodes that map to
+abstract node B1 need to be stored in RAM when a1 or b1
+is being generated. Next, edge partitioning uses operators
+o ∈ OB0,B3 , which correspond to moving the blank down,
+to generate the third and fourth successor nodes a3 and b3.
+This time, only nodes that map to abstract node B3 need to
+be stored in RAM.
+
+4 Implementation
+
+Before discussing some strategies for implementing SDD
+with edge partitioning in an efﬁcient way, we review the key
+steps in implementing SDD.
+
+First, before the search begins, SDD uses a state-state pro-
+jection function to create an abstract graph that (hopefully)
+captures local structure in the original search graph. The
+state-space projection function partitions stored nodes into
+nblocks (one for each node in the abstract graph) that can
+be moved between RAM and disk, and so each nblock must
+be able to ﬁt in RAM. The state-space projection function
+can be hand-crafted or automatically generated, as described
+in [Zhou and Hansen, 2006b].
+
+Like delayed duplicate detection, SDD is designed to be
+used as part of a search algorithm that expands a set of nodes
+at a time, such as the frontier nodes in breadth-ﬁrst search.
+The idea of SDD is to expand these nodes in an order that
+minimizes disk I/O. This is accomplished by expanding nodes
+with the same duplicate-detection scope consecutively, and
+minimizing changes of duplicate-detection scope during ex-
+pansion of all nodes. A simple and effective heuristic is to ex-
+pand nodes in order of nblock, with nblocks ordered accord-
+ing to a breadth-ﬁrst traversal of the abstract graph. When
+RAM is full, SDD needs to decide which nblocks to move
+from RAM to disk. A simple and effective heuristic is to
+write the least-recently used nblocks to disk.
+
+SDD with edge partitioning uses a similar strategy of try-
+ing to minimize changes of duplicate-detection scope during
+expansion of a set of nodes. The difference is that it consid-
+ers the duplicate-detection scope for an abstract edge, and this
+requires incremental node expansion. A simple and effective
+heuristic is to apply operators to nodes in order of nblock,
+and, for each nblock, in order of outgoing abstract edge.
+
+We next consider some ways to improve performance. To
+reduce the overhead of operator grouping, our implementa-
+tion uses a lazy approach in which operator grouping for an
+abstract node is only computed immediately before the ﬁrst
+time a node that maps to it is expanded. Because there could
+be a number of abstract nodes that do not have any nodes that
+map to them during search, this approach avoids the over-
+head of operator grouping for these abstract nodes. We have
+observed that the effectiveness of this approach tends to in-
+crease with the size of the abstract graph.
+
+Our implementation also uses a lazy approach to reading
+
+nodes from disk. Upon switching to a duplicate-detection
+scope that consists of nodes stored on disk, our implemen-
+tation does not read these nodes from disk immediately. In-
+stead, it waits until the ﬁrst time a node is generated. The
+reason for this is that when a single operator group is used to
+generate successors for nodes in an nblock, it may not gener-
+ate any successor node, if (a) the nodes to which the operators
+in the group are applicable have not yet been generated, or (b)
+the generated successor nodes have an f -cost greater than an
+upper bound used in branch-and-bound search. The lazy ap-
+proach avoids the overhead of reading nodes from disk (in
+order to setup the duplicate-detection scope in RAM) if no
+successors are generated by an operator group for an nblock.
+
+As previously discussed, SDD needs to decide which
+nblocks to move from RAM to disk, when RAM is full.
+Except for the nblocks that make up the current duplicate-
+detection scope, any nblocks can potentially be ﬂushed to
+disk. But this means if an nblock does not include itself as
+part of its own duplicate-detection scope, it may be ﬂushed to
+disk even when its nodes are being expanded. While this is
+allowed in our implementation, it should be avoided as much
+as possible for efﬁciency reasons. We make two simple mod-
+iﬁcations to the least-recently used algorithm to ensure this.
+First, instead of updating the time stamp of an nblock every
+time it is accessed, its time stamp is only updated when (a) the
+current duplicate-detection scope changes and (b) the nblock
+is the next to be expanded or is part of the new scope. This
+also simpliﬁes the maintenance of the clock, which needs
+no updates until the duplicate-detection scope changes. The
+second modiﬁcation is that instead of moving forward the
+clock by one clock tick when the duplicate-detection scope
+changes, our algorithm advances it by two clock ticks. Then
+the time stamp of the to-be-expanded nblock is set to one
+clock tick earlier than the new clock time. Finally, the time
+stamps of all the nblocks within the new duplicate-detection
+scope are updated to the new clock time. As a result, if
+the nblock to be expanded next does not belong to the new
+duplicate-detection scope, it is the last to be ﬂushed to disk,
+since its time stamp is more recent than any other ﬂushable
+nblock and earlier than any non-ﬂushable nblock, which has
+a time stamp equal to the current clock time.
+
+Finally, recall that edge partitioning expands nodes in a
+single nblock multiple times, one for each operator group.
+This affects the strategy with which to remove nodes stored
+on disk for the currently-expanding nblock. While the sim-
+plest strategy is to remove these nodes from disk as soon as
+they are swapped into RAM, it may incur extra overhead if
+these nodes must be written back to disk shortly after, in or-
+der to make room for newly-generated nodes. Note that nodes
+in the currently-expanding nblock do not change as long as
+the operator group used to generate the successors is not as-
+sociated with an abstract edge whose source and destination
+are the same (i.e., a “self loop”). Because self loops are easy
+to detect, our implementation postpones the removal of nodes
+stored on disk for the currently-expanding nblock until a “self
+loop” operator group, which (if any) is always the last opera-
+tor group applied to an nblock in our implementation, is used
+to expand the nblock.
+
+IJCAI-07
+
+2413
+
+SDD
+
+SDD + Edge Partitioning
+
+Problem
+depots-7
+blocks-16
+trucks-9
+storage-12
+freecell-4
+elevator-15
+gripper-10
+logistics-9
+driverlog-13
+satellite-7
+trucks-10
+depots-10
+
+RAM
+2,662,253
+3,194,703
+7,085,621
+5,520,445
+11,447,191
+1,540,657
+13,736,629
+5,159,767
+49,533,873
+12,839,146
+-
+-
+
+Disk
+9,524,314
+5,527,227
+20,888,173
+230,451,662
+114,224,688
+126,194,100
+328,271,632
+540,438,586
+2,147,482,093
+571,912,557
+-
+-
+
+Exp
+16,801,412
+18,075,779
+54,348,820
+282,931,334
+208,743,830
+430,804,933
+2,007,116,254
+1,138,753,911
+2,766,380,501
+838,488,709
+-
+-
+
+Secs
+342
+387
+3,995
+9,141
+14,717
+16,487
+35,052
+41,028
+108,051
+160,687
+-
+-
+
+RAM
+742,988
+1,069,901
+953,642
+891,585
+2,218,545
+61,900
+1,069,901
+742,988
+4,299,806
+429,971
+7,085,621
+41,278,228
+
+Disk
+10,705,324
+6,997,695
+26,106,623
+221,072,558
+122,033,806
+127,685,640
+340,780,440
+544,285,237
+2,147,483,535
+584,308,516
+231,515,502
+1,373,427,385
+
+Increm Exp
+191,263,008
+395,738,702
+590,454,354
+2,914,075,502
+4,206,478,527
+12,775,795,015
+13,366,646,793
+9,856,519,138
+38,879,000,039
+28,532,162,097
+6,282,870,888
+26,548,426,038
+
+Secs
+460
+823
+5,982
+9,071
+22,960
+60,229
+36,377
+49,004
+122,877
+129,608
+70,963
+90,644
+
+Table 1: Comparison of structured duplicate detection (SDD) with and without using edge partitioning on STRIPS planning
+problems. Columns show peak number of nodes stored in RAM (RAM), peak number of nodes stored on disk (Disk), number
+of full node expansions (Exp), number of incremental node expansions (Increm Exp), and running time in CPU seconds (Secs).
+A ‘-’ symbol indicates that the algorithm cannot solve the problem within 2 GB of RAM.
+
+5 Computational results
+
+We implemented SDD with edge partitioning in a domain-
+independent STRIPS planner that uses as its underlying
+search algorithm breadth-ﬁrst heuristic search [Zhou and
+Hansen, 2006a]. The reason for using breadth-ﬁrst heuristic
+search is that it uses internal memory very efﬁciently. Build-
+ing SDD with edge partitioning on top of it improves the over-
+all efﬁciency of search by limiting the need to access disk.
+
+Our search algorithm uses regression planning to ﬁnd op-
+timal sequential plans. As an admissible heuristic, it uses the
+max-pair heuristic [Haslum and Geffner, 2000]. We tested
+our external-memory STRIPS planner in ten different do-
+mains from the biennial planning competition, including two
+domains (trucks and storage) from the most recent competi-
+tion. Experiments were performed on an AMD Operton 2.4
+GHz processor with 4 GB of RAM and 1 MB of L2 cache.
+
+Table 1 compares the performance of SDD with and with-
+out edge partitioning. These problems are among the largest
+in each of the ten planning domains that SDD with edge par-
+titioning can solve without either (a) using more than 2 GB
+of RAM or (b) taking more than 2 CPU days of running time.
+Two problems (trucks-10 and depots-10) can only be solved
+within these limits using edge partitioning. For these two do-
+mains, the table also includes the largest instances that can be
+solved without edge partitioning. Both versions of SDD use
+the same state-space projection function.
+
+Table 1 shows a couple of interesting things. First, it shows
+that edge partitioning can reduce the internal-memory re-
+quirements of SDD by an average factor of 11 times for these
+planning problems. In doing so, it only increases the peak
+number of nodes stored on disk by about 7.5%. Second, it
+shows that the overhead that results from using an incremen-
+tal approach to expanding nodes is rather inexpensive. Al-
+though on average there are 16.8 times as many incremental
+expansions when edge partitioning is used as there are full
+expansions when it is not, this only increases running time
+by 53% on average. Note that the extra time taken by edge
+partitioning includes time for operator grouping.
+
+Indirectly, the table shows roughly how much internal
+
+memory is saved by using SDD with edge partitioning instead
+of A*. The number of full node expansions in SDD gives an
+estimate of how many nodes A* would need to store in order
+to solve the problem, since A* has to store every node it ex-
+pands, and breadth-ﬁrst heuristic search (with an optimal up-
+per bound) expands roughly the same number of nodes as A*,
+disregarding ties. Based on the number of full node expan-
+sions shown in Table 1, A* would need, on average, at least
+1, 340 times more internal memory to solve these problems
+than breadth-ﬁrst heuristic search with SDD and edge parti-
+tioning . Because this estimate ignores the memory needed
+by A* to store the Open list, which is usually larger than the
+Closed list, it is actually a considerable underestimate.
+
+As the results show, SDD without edge partitioning is al-
+ready very effective in solving these STRIPS planning prob-
+lems, which indicates that these search problems contain a
+great deal of the kind of local structure that SDD exploits.
+This means that these problems actually present a serious
+challenge for edge partitioning, which must identify addi-
+tional structure that can be exploited to reduce internal mem-
+ory requirements even further. For search problems for which
+SDD without edge partitioning is less effective, SDD with
+edge partitioning is likely to reduce internal memory require-
+ments by a much larger ratio.
+
+Since edge partitioning is effective even when the abstract
+graph used by SDD does not capture any local structure, one
+might wonder whether such local structure is useful anymore.
+Although it is no longer needed to reduce internal memory re-
+quirements, it is still useful in reducing time complexity. First
+of all, if a problem can be solved by SDD without edge parti-
+tioning, the time overhead of incremental node expansion can
+be avoided. If edge partitioning is used, then the more local
+structure (i.e., the fewer successor nodes of an abstract node
+in the abstract graph), the fewer incremental expansions are
+needed before a node is fully expanded, and the overhead of
+incremental node expansion is reduced. The results in Table 1
+show that edge partitioning reduces the amount of internal
+memory needed in exchange for an increase in average run-
+ning time, although the actual increase is still fairly modest.
+
+IJCAI-07
+
+2414
+
+6 Application to delayed duplicate detection
+
+So far, we have described how to use edge partitioning in
+SDD, where it improves scalability by reducing internal-
+memory requirements. In particular, it reduces the proportion
+of generated nodes that need to be stored in internal memory
+at any one time in order to ensure detection of all duplicates.
+As we now show, edge partitioning can also be used in a form
+of delayed duplicate detection (DDD) that uses local structure
+to reduce the delay between generation of nodes and eventual
+detection and removal of duplicates. This has the advantage
+of reducing the disk storage requirements of DDD. We begin
+with a review of DDD and then describe how edge partition-
+ing can enhance its performance.
+
+6.1 Delayed duplicate detection
+
+DDD alternates between two phases; successor generation
+and duplicate elimination. Depending on how duplicates are
+eliminated, there are two forms of DDD, as follows.
+
+Sorting-based DDD
+The ﬁrst algorithms for external-memory graph search used
+sorting-based DDD [Stern and Dill, 1998; Munagala and
+Ranade, 1999; Korf, 2004; Edelkamp et al., 2004]. Sorting-
+based DDD takes a ﬁle of nodes on the search frontier, (e.g.,
+the nodes in the frontier layer of a breadth-ﬁrst search graph),
+generates their successors and writes them to another ﬁle
+without checking for duplicates, sorts the ﬁle of generated
+nodes by the state representation so that all duplicate nodes
+are adjacent to each other, and scans the ﬁle to remove du-
+plicates. The I/O complexity of this approach is dominated
+by the I/O complexity of external sorting, and experiments
+conﬁrm that external sorting is its most expensive step.
+
+Hash-based DDD
+Hash-based DDD [Korf and Schultze, 2005] is a more efﬁ-
+cient form of DDD. To avoid the I/O complexity of exter-
+nal sorting in DDD, it uses two orthogonal hash functions.
+During node expansion, successor nodes are written to differ-
+ent ﬁles based on the value of the ﬁrst hash function, which
+means all duplicates are mapped to the same ﬁle. Once a
+ﬁle of successor nodes has been fully generated, duplicates
+can be removed from it. To avoid the overhead of external
+sorting in removing duplicates, a second hash function maps
+all duplicates to the same location of a hash table, which ac-
+complishes by hashing what otherwise would require sorting.
+Since the hash table corresponding to the second hash func-
+tion must ﬁt in internal memory, hash-based DDD has a min-
+imum internal-memory requirement that corresponds to the
+largest set of unique nodes in any ﬁle. Thus, this approach re-
+quires some care in designing the ﬁrst hash function to make
+sure it does not map too many unique nodes to a single ﬁle.
+
+Although hash-based DDD in its original form does not
+depend on, or leverage, the structure of a graph, an impor-
+tant improvement, called “interleaving expansion and merg-
+ing” [Korf and Schultze, 2005], does. It works as follows.
+The nodes on the search frontier are stored in multiple ﬁles,
+called “parent ﬁles,” depending on the ﬁrst hash function,
+and the successor nodes that are generated when the nodes in
+the parent ﬁles are expanded are also stored in multiple ﬁles,
+
+called “child ﬁles.” Instead of waiting until all parent ﬁles at
+a given depth are expanded before merging any child ﬁles at
+the next depth to remove duplicates, a child ﬁle is merged
+as soon as all parent ﬁles that could possibly add successor
+nodes to it have been expanded. In other words, interleav-
+ing expansion and merging makes it possible to remove du-
+plicates early. Because DDD generates duplicates and stores
+them on disk before eventually removing them, the technique
+of “interleaving expansion and merging” reduces the amount
+of extra disk storage needed by DDD. In fact, in the best case,
+it can reduce the amount of extra disk storage need by DDD
+by a factor of b, where b is the average branching factor, al-
+though the actual reduction may be less.
+
+To allow “interleaving expansion and merging,” the ﬁrst
+hash function must be designed in such a way that it cap-
+tures local structure in the search graph.
+In particular, a
+child ﬁle must only contain successor nodes generated from a
+small number of parent ﬁles. A generic hash function cannot
+be used for this since it will typically hash nodes uniformly
+across all ﬁles. Instead, a problem-speciﬁc hash function that
+captures local structure must be designed. In the following,
+we explain how this enhancement of hash-based DDD ex-
+ploits and, thus, depends on the local structure of a graph,
+and how it can further exploit edge partitioning.
+
+6.2 Edge partitioning in DDD
+To see how edge partitioning can be used to improve the per-
+formance of hash-based DDD, we ﬁrst consider how the kind
+of local structure exploited by “interleaving expansion and
+merging” is related to the kind of local structure exploited by
+SDD. As previously pointed out, hash-based DDD requires a
+problem-speciﬁc hash function, and the “interleaving expan-
+sion and merging” technique is only effective when this hash
+function maps nodes to ﬁles in such a way that the nodes in
+one ﬁle (the child ﬁle) are generated from nodes in only a
+small number of other ﬁles (its parent ﬁles). In fact, these
+relationships can be represented by an abstract state-space
+graph in which abstract nodes correspond to ﬁles, and an ab-
+stract edge is present when nodes in one ﬁle have successor
+nodes in the other ﬁle. This should make it clear that the ﬁrst
+hash function used by hash-based DDD is actually a state-
+space projection function, and, for “interleaving expansion
+and merging” to be effective, this hash function should cap-
+ture the same kind of local structure that is exploited by SDD.
+The following concept will help make this more precise.
+
+Deﬁnition 2 The predecessor-expansion scope of a child ﬁle
+for an abstract node y(cid:2) under a state-space projection func-
+tion Π corresponds to the union of nodes in the parent ﬁles
+for abstract nodes y ∈ predecessors(y(cid:2)), that is,
+
+(cid:2)
+
+Π−1(y),
+
+y∈ predecessors(y (cid:2))
+
+where predecessors(y(cid:2)) is the set of predecessors of y(cid:2) in the
+abstract graph, and Π−1(y) is the set of nodes in the parent
+ﬁle for an abstract node y.
+
+An important property of the predecessor-expansion scope
+is that it is guaranteed to contain all stored predecessors of
+nodes in a child ﬁle, which leads to the following theorem.
+
+IJCAI-07
+
+2415
+
+Theorem 2 Merging duplicate nodes after expanding all
+nodes in the predecessor-expansion scope of a child ﬁle is
+guaranteed to eliminate all duplicates that could be gener-
+ated for the child ﬁle.
+
+The concept of predecessor-expansion scope lets us iden-
+tify the local graph structure needed by “interleaving expan-
+sion and merging” in a principled way, and relate it to the kind
+of local structure exploited by SDD. For undirected graphs,
+they are exactly the same, since the set of predecessors of an
+abstract node always coincides with the set of its successors.
+For directed graphs, they may or may not be the same.
+
+This analysis also lets us specify a condition under which
+“interleaving expansion and merging” will not be effective,
+at least by itself. When the abstract graph is fully connected,
+the predecessor-expansion scope of any child ﬁle is the entire
+set of parent ﬁles. This means the earliest time a child ﬁle
+can be merged is when all nodes at the current depth have
+been expanded, which prevents the application of interleaving
+expansion and merging. We are now ready to show how edge
+partitioning allows “interleaving of expansion and merging”
+to be effective even in this case.
+
+The idea is to force nodes within the predecessor-
+expansion scope of a child ﬁle to generate successors only
+for that child ﬁle alone, without generating successor nodes
+for other child ﬁles at the same time. This can be achieved
+as follows. Let y(cid:2) be the abstract node that corresponds to
+the child ﬁle that is the target of merging. To merge duplicate
+nodes in this ﬁle as early as possible, edge partitioning only
+uses operators o ∈ Oy,y (cid:2) to generate the successors of nodes
+in the parent ﬁles for abstract nodes y ∈ predecessors(y(cid:2)).
+Once all nodes in the parent ﬁles have generated their suc-
+cessors for this child ﬁle, merging can take place as usual.
+The advantage of edge partitioning is that it saves external
+memory by not generating (possibly duplicate) successors
+for any other child ﬁles before merging is performed. Af-
+ter merging duplicates in a child ﬁle, edge partitioning picks
+another child ﬁle as the next merging target, until all the child
+ﬁles have been merged. It can be shown that by the time the
+last child ﬁle is merged, edge partitioning must have used all
+the operators to generate all the successor nodes for the cur-
+rent depth. By doing so in an incremental way, it ensures that
+the local structure needed by the “interleaving expansion and
+merging” technique is always present.
+
+Although we do not present empirical results for edge par-
+titioning in DDD, our analysis helps to clarify the relationship
+between SDD and hash-based DDD with interleaving of ex-
+pansion and merging. Both exploit the same local structure
+of a graph, and thus the performance of both can be enhanced
+by using edge partitioning in a similar way.
+
+7 Conclusion
+
+We have introduced a technique, called edge partitioning, that
+improves the scalability of structured approaches to external-
+memory graph search by using a strategy of incremental node
+expansion to localize memory references in duplicate detec-
+tion. Results show that it signiﬁcantly reduces the inter-
+nal memory requirements of structured duplicate detection
+(SDD). Moreover, it is guaranteed to be effective regardless
+
+of the structure of the graph, and this guarantees that SDD
+can be applied to any search problem. Finally, we have shown
+that it can also be used to reduce the amount of disk storage
+needed by delayed duplicate detection.
+
+There are a number of directions for future work. One pos-
+sibility is to vary the degree of incremental expansion. For
+example, instead of using one operator group at a time, edge
+partitioning can use multiple (but not all) operator groups to
+generate successor nodes at a time. If enough internal mem-
+ory is available, this can reduce the overall number of (incre-
+mental) expansions. With edge partitioning, we now have two
+options to reduce the internal-memory requirements of SDD.
+We can either increase the granularity of the state-space pro-
+jection function, or we can use edge partitioning. Which op-
+tion is better under what circumstances is an interesting ques-
+tion, and the answer is likely to help us understand how to
+best trade off internal-memory requirements with the number
+of disk I/O operations needed by SDD.
+
+References
+[Edelkamp et al., 2004] S. Edelkamp,
+
+S.
+
+S. Schr¨odl. External A*.
+Conf. on Artiﬁcial Intelligence, pages 226–240, 2004.
+
+and
+In Proc. of the 27th German
+
+Jabbar,
+
+[Haslum and Geffner, 2000] P. Haslum and H. Geffner. Ad-
+missible heuristics for optimal planning. In Proc. of the 5th
+International Conference on AI Planning and Scheduling,
+pages 140–149, 2000.
+
+[Korf and Schultze, 2005] R. Korf and P. Schultze. Large-
+In Proc. of the 20th
+scale parallel breadth-ﬁrst search.
+National Conference on Artiﬁcial Intelligence (AAAI-05),
+pages 1380–1385, 2005.
+
+[Korf, 2004] R. Korf. Best-ﬁrst frontier search with delayed
+duplicate detection. In Proc. of the 19th National Conf. on
+Artiﬁcial Intelligence (AAAI-04), pages 650–657, 2004.
+
+[Munagala and Ranade, 1999] K. Munagala and A. Ranade.
+I/O-complexity of graph algorithms. In Proc. of the 10th
+Symposium on discrete algorithms, pages 687–694, 1999.
+[Stern and Dill, 1998] U. Stern and D. Dill. Using magnetic
+disk instead of main memory in the mur(phi) veriﬁer. In
+Proc. of the 10th International Conference on Computer-
+Aided Veriﬁcation, pages 172–183, 1998.
+
+[Zhou and Hansen, 2004] R. Zhou and E. Hansen. Struc-
+tured duplicate detection in external-memory graph
+search. In Proc. of the 19th National Conference on Ar-
+tiﬁcial Intelligence (AAAI-04), pages 683–688, 2004.
+
+[Zhou and Hansen, 2005] R. Zhou and E. Hansen. External-
+memory pattern databases using structured duplicate de-
+tection. In Proc. of the 20th National Conference on Arti-
+ﬁcial Intelligence (AAAI-05), pages 1398–1405, 2005.
+
+[Zhou and Hansen, 2006a] R. Zhou and E. Hansen. Breadth-
+ﬁrst heuristic search. Artiﬁcial Intelligence, 170(4-5):385–
+408, 2006.
+
+[Zhou and Hansen, 2006b] R. Zhou and E. Hansen. Domain-
+independent structured duplicate detection. In Proc. of the
+21st National Conference on Artiﬁcial Intelligence (AAAI-
+06), pages 1082–1087, 2006.
+
+IJCAI-07
+
+2416
+
+

@@ -1,0 +1,1333 @@
+Efﬁcient and Robust Independence-Based
+
+Markov Network Structure Discovery
+
+Facundo Bromberg and Dimitris Margaritis
+
+Department of Computer Science
+
+Iowa State University
+
+Ames, IA 50011
+
+Abstract
+
+In this paper we introduce a novel algorithm for
+the induction of the Markov network structure of
+a domain from the outcome of conditional inde-
+pendence tests on data. Such algorithms work by
+successively restricting the set of possible struc-
+tures until there is only a single structure consistent
+with the conditional independence tests executed.
+Existing independence-based algorithms have well-
+known shortcomings, such as rigidly ordering the
+sequence of tests they perform, resulting in poten-
+tial inefﬁciencies in the number of tests required,
+and committing fully to the test outcomes, result-
+ing in lack of robustness in case of unreliable tests.
+We address both problems through a Bayesian par-
+ticle ﬁltering approach, which uses a population of
+Markov network structures to maintain the poste-
+rior probability distribution over them, given the
+outcomes of the tests performed. Instead of a ﬁxed
+ordering, our approach greedily selects, at each
+step, the optimally informative from a pool of can-
+didate tests according to information gain. In ad-
+dition, it maintains multiple candidate structures
+weighed by posterior probability, which makes it
+more robust to errors in the test outcomes. The re-
+sult is an approximate algorithm (due to the use of
+particle ﬁltering) that is useful in domains where
+independence tests are uncertain (such as applica-
+tions where little data is available) or expensive
+(such as cases of very large data sets and/or dis-
+tributed data).
+
+1 Introduction
+In this paper we focus on the task of learning the structure
+of Markov networks (MNs), a subclass of graphical mod-
+els, from data in discrete domains. (Other graphical models
+include Bayesian networks, represented by directed graphs.)
+MNs consist of two parts: an undirected graph (the model
+structure), and a set of parameters. An example Markov net-
+work is shown in Fig. 1. Learning such models from data
+consists of two interdependent problems: learning the struc-
+ture of the network, and, given the learned structure, learning
+the parameters. In this work we focus on structure learning of
+
+0
+
+6
+
+3
+
+2
+
+5
+
+1
+
+4
+
+7
+
+Figure 1: Example Markov network. The nodes represent variables
+in the domain V = {0, 1, 2, 3, 4, 5, 6, 7}.
+
+the MN from data, which is frequently the most challenging
+of the two tasks.
+
+The structure of a MN encodes graphically a set of con-
+ditional independencies among the variables in the domain.
+These independencies are a valuable source of information in
+a number of ﬁelds that rely more on qualitative than quanti-
+tative models (e.g., social sciences). Markov networks have
+also been used in the physics and computer vision commu-
+nities [Geman and Geman, 1984; Besag et al., 1991], where
+they have been historically called Markov random ﬁelds. Re-
+cently there has been interest in their use for spatial data min-
+ing, which has applications in geography, agriculture, clima-
+tology, ecology and others [Shekhar et al., 2004].
+
+2 Motivation and Related Work
+
+There exist two broad classes of algorithms for learning
+the structure of graphical models: score-based [Heckerman,
+1995] and independence-based or constraint-based [Spirtes
+et al., 2000]. Score-based approaches conduct a search in
+the space of legal structures (of size super-exponential in the
+number of variables in the domain) in an attempt to discover a
+model structure of maximum score. Independence-based al-
+gorithms rely on the fact that a graphical model implies that a
+set of independencies exist in the distribution of the domain,
+and therefore in the data set provided as input to the algorithm
+(under assumptions, see below); they work by conducting a
+set of statistical conditional independence tests on data, suc-
+cessively restricting the number of possible structures consis-
+tent with the results of those tests to a singleton (if possible),
+and inferring that structure as the only possible one.
+
+In this work we present an algorithm that belongs to the
+latter category, that presents advantages in domains where
+independence tests are (a) uncertain or (b) expensive. The
+ﬁrst case may occur in applications where data sets are small
+relative to the number of variables in the domain. Case (b)
+occurs in applications involving very large data sets (number
+
+IJCAI-07
+
+2431
+
+of data points) and/or domains where the data are heteroge-
+neously distributed i.e., where columns of the data set (at-
+tributes) may be located in geographically distinct locations
+(e.g., sensor networks, weather modeling and prediction, traf-
+ﬁc monitoring etc). In such settings conducting a conditional
+independence test may be expensive, involving transfers of
+large amounts of data over a possibly slow network, so it is
+important to minimize the number of tests done.
+
+Interesting work in the area of structure learning of undi-
+rected graphical models includes learning decomposable
+(also called chordal) MNs [Srebro and Karger, 2001] or more
+general (non-decomposable) MNs [Hofmann and Tresp,
+1998], which is a score-based approach. An independence-
+based approach to MN structure learning is the GSIMN al-
+gorithm [Bromberg et al., 2006], which uses Pearl’s infer-
+ence axioms [Pearl, 1988] to infer the result of certain inde-
+pendence tests without actually performing them. However,
+GSIMN has two disadvantages: (i) potential inefﬁciencies
+with regard to the number of tests required to learn the struc-
+ture due to the relatively rigid (predeﬁned) order in which
+tests are performed, and (ii) potential instability due to cas-
+cading effects of errors in the test results. Instead, the present
+paper takes a Bayesian approach that maintains the posterior
+probability distribution over the space of structures given the
+tests performed so far. We avoid the inefﬁciencies of previous
+approaches by greedily selecting, at each step, the optimally
+informative tests according to information gain (decrease in
+entropy of the posterior distribution). As such the approach
+can be seen as an instance of active learning [Tong and Koller,
+2001]. In addition, our approach is more robust to errors in
+the test outcomes by making use of the probability of inde-
+pendence instead of making deﬁnite decisions (corresponding
+to probability 0 or 1). In this way an error in an independence
+test does not permanently cause the correct structure to be
+excluded but only lowers its posterior probability.
+
+The rest of the paper is organized as follows: In the next
+section we present our notation, followed by a description of
+our approach in detail. Following that, we present experimen-
+tal results and conclude with a summary of our approach.
+
+3 Notation and Preliminaries
+A Markov network of a domain V is an undirected model
+that can be used to represent the set of conditional indepen-
+dencies in the domain. The application domain is a set of
+random variables of size n = |V|. In this work we use cap-
+ital letters A, B, . . . to denote domain random variables and
+bold letters for sets of variables (e.g., S). The space of all
+structures (given V) is denoted by X and the space of all con-
+ditional independence (CI) tests by Y. Conditional indepen-
+dence of A and B given S is denoted by (A⊥⊥B | S). The
+set of conditional independencies implied by the structure of
+a MN are at least the ones that are implied by vertex sepa-
+ration i.e., (A⊥⊥B | S) if A and B are separated in the MN
+graph after removing all nodes in S (and all edges adjacent
+to them). For example, in Fig. 1, (0⊥⊥4 | {2, 7}). If exactly
+those independencies hold in the actual probability distribu-
+tion of the domain, we say that the domain and the graph are
+faithful to one another. Faithfulness excludes certain distri-
+butions that are unlikely to happen in practice, and is needed
+
+X
+
+X
+
+Y1
+
+Y2
+
+Yt
+
+Y1
+
+Y2
+
+D
+
+D1
+
+D2
+
+Yt
+
+Dt
+
+Figure 2: Generative model of domain. Left: Correct. Right:
+Assumed.
+
+for proofs of correctness. It is therefore a common assump-
+tion of independence-based algorithms for graphical model
+discovery. We assume faithfulness in the present work.
+
+As described later in our main algorithm, we maintain pop-
+ulations of structures at each time step t; slightly abusing our
+notation we denote these populations by Xt. We denote a se-
+quence of t tests Y1, . . . , Yt by Y1:t and a sequence of value
+assignments to these tests (independence or dependence, cor-
+responding to true and false respectively) by y1:t.
+
+3.1 Generative Model over Structures and Tests
+For an input data set D, our approach uses the posterior prob-
+ability over structures Pr(X | D), X ∈ X to learn the struc-
+ture of the underlying model as explained in more detail in the
+next section. For that probability to be calculated in a princi-
+pled way, we need a generative model that involves variables
+X, Y1, Y2, . . . , Yt and D that reﬂects any independence con-
+straints among these variables. Our only constraint here is
+the assumption that the tests are the sufﬁcient statistics for the
+structure i.e., there is no information in the data set D beyond
+the value of the tests as far as structure is concerned. This
+stems from the fact that the structure X faithfully encodes
+the independencies in the domain. Note that this assump-
+tion is not particular to our approach, but is implicit in any
+independence-based approach. Our generative model only
+formalizes it and makes it explicit.
+
+(cid:2)
+
+The generative model that encodes this constraint is shown
+in Fig. 2 (left), where X and D are d-separated by the tests
+Y1, . . . , Yt. However, the posterior over structures Pr(X |
+D) cannot be computed from this model because, accord-
+y1:t Pr(X | Y1:t =
+ing to the model, Pr(X | D) =
+y1:t, D) Pr(Y1:t = y1:t | D), which requires the computa-
+tion of Pr(Y1:t = y1:t | D), currently an unsolved problem.
+We therefore assume the model shown in Fig. 2 (right), which
+contains multiple data sets D1, . . . , Dt (abbreviated D1:t). In
+this model, it can be shown that the tests Y1 through Yt are
+independent given data sets D1:t. This allows the model to be
+solved because now Pr(Y1:t = y1:t | D) =
+i=1 Pr(Yi =
+yi | Di), where the factors Pr(Yi = yi | Di) can be com-
+puted by known procedures such as the discrete version of
+the Bayesian test of [Margaritis, 2005]. In practice we do not
+have more than one data set, and therefore we use the same
+data set for all tests i.e., Di = Dj, i (cid:4)= j. Thus, the model
+depicted on Fig. 2 (right) is used only as an approximation to
+overcome the lack of an exact solution described above. As
+we will show in the experiments section, this approximation
+works well in both artiﬁcial and real world data sets.
+
+(cid:3)t
+
+Under this modiﬁed model, the posterior probability over
+structures must now be computed given data sets D1:t, i.e.,
+Pr(X | D1:t), which we abbreviate as Prt(X). In our cal-
+
+IJCAI-07
+
+2432
+
+culations below we also use the conditional entropy H(X |
+Y1:t, D1:t) of X given the set of tests Y1:t and the data sets
+D1:t, similarly abbreviated as Ht(X | Y1:t).
+
+Finally, the other parameters of the model are as follows:
+the prior Pr(X) is assumed uniform, and each test Yi is com-
+pletely determined given X = x i.e., Pr(Yi = true | X =
+x) ∈ {0, 1} (this is a direct consequence of the Faithfulness
+assumption).
+
+4 Approach
+To learn the MN structure of a domain from data, we em-
+ploy a Bayesian approach, calculating the posterior proba-
+bility Prt(x) of a structure x ∈ X given data sets D1:t. The
+problem of learning a structure in this framework can be sum-
+marized in the following two steps: (i) ﬁnding a sequence of
+tests Y1:t of minimum cost such that H(X | Y1:t, D1:t) = 0,
+such that Pr(X =
+and (ii) ﬁnding the (unique) structure x(cid:2)
+x(cid:2) | D1:t) = 1. (This is always possible due to our assump-
+tion of Faithfulness, which guarantees the existence of a sin-
+gle structure consistent with the results of all possible tests in
+the domain.)
+
+In practice, the above procedure presents considerable dif-
+
+ﬁculties because:
+
+• The space of structures X is super-exponential: |X | =
+2). Thus, the exact computation of the entropy Ht(X |
+
+2(n
+Y1:t), a sum over all x ∈ X , is intractable.
+
+(cid:5)
+
+(cid:4)
+
+(cid:5)(cid:4)
+
+• The space of candidate tests Y is also at least exponential
+tests (A⊥⊥B | S) with |S| =
+in size: there are
+m, and m ranges from 0 to n − 2. Moreover, for a given
+number of tests t, there exist
+possible candidate
+test sequences Y1:t to consider.
+
+n−2
+
+|Y|
+
+n
+2
+
+(cid:4)
+
+(cid:5)
+
+m
+
+t
+
+We address the ﬁrst issue using a particle ﬁltering approach
+(discussed in section 4.2). At each step t, we maintain a pop-
+ulation of candidate MN structures Xt for the purpose of rep-
+resenting the posterior probability distribution over structures
+given the outcomes of tests performed so far. In this way, all
+required quantities, such as posterior probability Prt(x) or
+conditional entropy Ht(X | Y1:t), can be estimated by sim-
+ple averaging over the particle population Xt. The second
+issue (choosing the next test to perform) is addressed using a
+greedy approach. At each step of our algorithm, we choose
+as the next test to perform the member of Y that minimizes
+the expected entropy, penalized by a factor proportional to
+its cost. Since Y is exponential in size, the minimization is
+performed through a heuristic search approach.
+
+The next section explains our algorithm in detail.
+
+4.1 The PFMN Algorithm
+
+Our algorithm is called PFMN (Particle Filter Markov Net-
+work structure learner), and is shown in Algorithm 1. At each
+time step t, the algorithm maintains a set Xt containing N
+structure particles.
+
+(cid:5)
+Initially, each structure in X0 is generated by randomly and
+uniformly selecting a number m of edges from 0 to
+, and
+then randomly and uniformly selecting the m edges by pick-
+ing the ﬁrst m pairs in a random permutation of all possible
+pairs. This ensures that all edge-set sizes have equal proba-
+bility of being represented in X0.
+
+n
+2
+
+(cid:4)
+
+Algorithm 1 Particle Filter Markov Network (PFMN) algo-
+rithm. x = PFMN (N, M, q(X (cid:2) | X)).
+1: X0 ←− sample N independent structure particles uniformly
+
+distributed among all edge-set sizes (see text).
+
+2: t ←− 0
+3: loop
+4:
+5:
+6:
+7:
+8:
+9:
+10:
+11:
+12:
+
+scoret(A, B | S)
+
+Yt+1 ←− arg max(A,B) arg maxS
+Y1:t+1 ←− Y1:t ∪ {Yt+1}
+pT ←− Pr(Dt+1 | Yt+1 = t) /* Perform test on data. */
+pF ←− Pr(Dt+1 | Yt+1 = f) /* Perform test on data. */
+Update Prt+1(X) from pT and pF using Eq. (5).
+Xt+1 ←− PF (Xt, M, Prt+1(X), q(X (cid:2) | X))
+if Ht+1(X | Y1:t+1) = 0 then
+
+return unique structure x such that Prt(x) = 1
+
+t ←− t + 1
+
+At each time t during the main loop of the algorithm (lines
+3–12), the test Yt+1 = (A(cid:2), B(cid:2) | S(cid:2)) ∈ Y that optimizes
+a score function is selected (the score function is described
+below). Since for each pair of variables (A, B) ∈ V × V the
+space of possible conditioning sets is exponential (equaling
+the power set of V − {A, B}), this optimization is performed
+by heuristic search; in particular, ﬁrst-choice hill-climbing is
+used. During this procedure, the neighbors of a current point
+S are all possible additions to S of a non-member, all possible
+removals from S of a member, and all possible replacements
+of a member of S by a non-member. The score of test Yt+1 is
+deﬁned as follows:
+
+scoret(Yt+1) = −
+
+Ht(X | Y1:t, Yt+1)
+
+W (Yt+1)
+
+(1)
+
+where the factor W (Y ) denotes the cost of Y , which we take
+to be proportional to the number of variables involved in the
+test. This factor is used to discourage expensive tests. Ht(X |
+Y1:t, Yt+1) is the entropy given the (not yet performed) test
+Yt+1, and is equal to:
+
+Ht(X | Y1:t, Yt+1) = Ht(X | Y1:t) − IG t(Yt+1).
+
+(2)
+The derivation of Eq. (2) makes use of our generative model
+(Fig. 2) and is simple and omitted due to lack of space. The
+term IG t(Yt+1) denotes the information gain of candidate
+test Yt+1 given all information at time t, i.e., data sets D1:t,
+and is equal to:
+
+IG t(Yt+1) = −
+
+Prt(x) log Prt(yx
+
+t+1 | yx
+
+1:t)
+
+(3)
+
+(cid:6)
+
+x∈X
+
+where by yx
+1:t we denote the value of tests Y1:t in structure x
+(each test is either true or false). The above expression
+follows from Bayes’ rule and our generative model which im-
+plies that given a MN structure x, any test Y is completely
+determined using vertex separation (assuming Faithfulness).
+This implies that Prt(Y1:t = y1:t | x) = δ(y1:t, yx
+1:t), where
+δ(a, b) is the Kronecker delta function that equals 1 iff a is
+equal to b. We say that structure x is consistent with assign-
+ment y1:t iff yx
+1:t) of
+Eq. (3) can be calculated as
+
+1:t = y1:t. The quantity Prt(yx
+
+t+1 | yx
+
+(cid:2)
+
+Prt(yx
+
+t+1 | yx
+
+1:t) =
+
+x(cid:2)∈{yx
+
+t+1,yx
+
+(cid:2)
+
+1:t} Prt(x(cid:3))
+
+x(cid:2)∈{yx
+
+1:t} Prt(x(cid:3))
+
+(4)
+
+where by {y1:t} we denote the equivalence class of structures
+x(cid:3) ∈ X that are consistent with assignment y1:t. Using this
+
+IJCAI-07
+
+2433
+
+notation, {yx
+1:t} represents the set of all structures that imply
+the same values for the CI tests Y1:t as structure x does. If x
+and x(cid:3)
+are in the same class {y1:t}, we say they are equivalent
+w.r.t. tests Y1:t and we denote this by x ∼t x(cid:3)
+
+.
+
+Eq. (4) has an interesting and intuitive interpretation: at
+each time t, the posterior probability of a test Y being true
+(false), given some assignment y1:t of tests Y1:t, equals the
+total posterior probability mass of the structures in the equiv-
+alence class {y1:t} that are consistent with Y = true
+(Y = false), normalized by the posterior probability mass
+of the class {y1:t}.
+
+To compute the information gain in Eq. (2) we also need
+the posterior Prt(x) = Pr(x | D1:t) of a structure x ∈ X for
+Eq. (3). As explained in section 3.1, we use the Bayesian
+test described in [Margaritis, 2005]). This test calculates
+and compares the likelihoods of two competing multino-
+mial models (with different numbers of parameters), namely
+Pr(Dt | Yt = yt), yt ∈ {true, false}. Since according
+to our generative model Pr(Di | y1:t, x) = Pr(Di | yi) and
+Pr(y1:t | x) = δ(yx
+Pr(x | D1:t) ∝ Pr(x) Pr(D1:t | x) = Pr(x)
+
+1:t, y1:t), by Bayes’ law we have:
+
+Pr(Di | yx
+
+t(cid:7)
+
+i ).
+
+i=1
+
+(5)
+The constant of proportionality is independent of x and thus
+can be calculated by a sum over all structures in X . As ex-
+plained above, this, like all equations in this section that in-
+volve summations over the space of structures X , is approx-
+imated by a summation over Xt, the population of particles
+from the previous iteration of the algorithm.
+
+This completes the description of test score function of
+Eq. (1). Returning to our description of Alg. 1, lines 6 and 7
+calculate the data likelihoods of the optimal test Yt+1, which
+are used to update the posterior over structures and obtain
+Prt+1(X) using Eq. (5). With this updated distribution, the
+new set of particles Xt+1 is computed in line 9 using the par-
+ticle ﬁlter algorithm, described in the next section.
+
+The PFMN algorithm terminates when the entropy Ht(X |
+Y1:t) (estimated over the population Xt) becomes 0, return-
+ing the unique structure particle whose posterior probability
+equals 1.
+
+4.2 Particle ﬁlter for structures
+A particle ﬁlter [Andrieu et al., 2003] is a sequential Markov-
+Chain Monte-Carlo (MCMC) method that uses a set of sam-
+ples, called particles, to represent a probability distribution
+that may change after each observation in a sequence of ob-
+servations. At each step, an observation is performed and a
+new set of particles is obtained from the set of particles at the
+previous step. The new set represent the new (posterior) dis-
+tribution given the sequence of observations so far. One of
+the advantages of this sequential approach is the often drastic
+reduction of the cost of sampling from the new distribution,
+relative to alternative (non-sequential) sampling approaches.
+In our case, the domain is X and particles represent struc-
+tures. Observations correspond to the evaluation of a single
+CI test on data.
+
+The particle ﬁlter algorithm, shown in Algorithm 2, is
+used in line 9 of PFMN to transform population Xt to Xt+1.
+The change in the probability distribution from Prt(X) to
+
+X (cid:3)(cid:3)
+
+=
+
+algorithm.
+
+Algorithm 2 Particle ﬁlter
+PF (X , M, f, q).
+1: Prt(X) ←− f (X)
+2: for all particles x ∈ X do
+3:
+4: for all particles x ∈ X do
+5:
+6: /* Resample particles in X using ew as the sampling probabili-
+7: X (cid:2) ←− resample(X , ew)
+8: /* Move each particle in X (cid:2) M times using Metropolis-Hastings
+
+w(x) ←− Prt(x)
+Prt−1(x)
+ew(x) ←−
+
+/* Normalize weights. */
+
+/* Compute weights. */
+
+ties. */
+
+w(x(cid:2))
+
+w(x)
+
+x(cid:2)∈X
+
+P
+
+and distribution Prt(X). */
+
+9: X (cid:2)(cid:2) ←− ∅
+10: for all x ∈ X (cid:2)
+11:
+12: return X (cid:2)(cid:2)
+
+do
+
+X (cid:2)(cid:2) ←− X (cid:2)(cid:2) ∪ M-H(x, M, Prt, q).
+
+Algorithm 3 Metropolis-Hastings algorithm.
+M − H (x, M, p, q).
+1: x(0) ←− x
+2: for i = 0 to M − 1 do
+3:
+4:
+
+u ∼ U[0,1].
+x(cid:2) ∼ q(x(cid:2) | x(i)
+if u < A(x(i), x(cid:2)) = min
+
+1, p(x(cid:2))q(x(i)|x(cid:2))
+
+˘
+
+5:
+
+).
+
+p(xi)q(x(cid:2)|x(i))
+
+¯
+
+x(cid:3) =
+
+then
+
+x(i+1) ←− x(cid:2)
+
+x(i+1) ←− x(i)
+
+else
+
+6:
+7:
+8:
+9: x(cid:2) ←− x(M )
+10: return x(cid:2)
+
+Prt+1(X) is reﬂected in a “weight.” This weight is used as
+a probability in the resampling step (line 7) to bias selection
+(with replacement) among the particles in Xt.
+In the ﬁnal
+step, all particles are “moved” (lines 9–11) through M pairs
+of proposal/acceptance steps within the Metropolis-Hastings
+(M-H) algorithm, shown in Alg. 3 [Andrieu et al., 2003]
+(in our experiments we use M = 16). This algorithm re-
+quires that Prt(X) and a proposal distribution q(X (cid:2) | X) be
+provided as parameters. Prt(X) has already been addressed
+above in Eq. (5). As in many particle ﬁltering applications,
+the proposal distribution is a key factor for the success of
+PFMN, and is discussed in detail in the next section.
+
+4.3 Proposal distribution for structures
+As discussed previously, to use the Metropolis-Hastings al-
+gorithm one must provide a proposal distribution. Here, we
+use a mixture proposal q = paqa + (1 − pa)qb, consisting of
+a global component qa and a local component qb. (We used
+pa = 0.05 in our experiments). The components qa and qb
+are as follows:
+
+• Global proposal qa (Random walk): qa(x(cid:2) | x) gen-
+from x by iteratively inverting each
+erates a sample x(cid:2)
+edge of x with probability α. (In our experiments, we
+use α = 0.05). Thus, if h denotes the Hamming dis-
+, and m = n(n−1)/2,
+tance between structures x and x(cid:2)
+where n is the number of nodes (same for both struc-
+tures), we have that qa(x(cid:2) | x) = αm(1 − α)m−h
+
+.
+
+• Local proposal qb (Equivalence-class moves): qb(x(cid:2) |
+x) chooses to either (a) remove an edge from set A−(x)
+
+IJCAI-07
+
+2434
+
+)
+
+S
+G
+
+(
+t
+s
+o
+c
+_
+w
+
+ 
+/
+ 
+)
+F
+P
+
+(
+t
+s
+o
+c
+_
+w
+
+ 1.2
+ 1
+ 0.8
+ 0.6
+ 0.4
+ 0.2
+
+ 1.2
+ 1
+ 0.8
+ 0.6
+ 0.4
+ 0.2
+ 0
+
+Weighted cost of PFMN vs GSIMN
+Connectivity
+
+16 variables
+
+0.1
+0.3
+0.5
+0.7
+0.9
+
+20 variables
+
+ 80
+
+ 40
+
+ 200
+Number of structure particles (N)
+
+ 120
+
+ 160
+
+ 240
+
+y
+c
+a
+r
+u
+c
+c
+A
+
+ 1.2
+ 1
+ 0.8
+ 0.6
+ 0.4
+ 0.2
+
+ 1.2
+ 1
+ 0.8
+ 0.6
+ 0.4
+ 0.2
+ 0
+
+Accuracy of PFMN
+
+16 variables
+
+20 variables
+
+ 80
+
+ 40
+
+ 200
+Number of structure particles (N)
+
+ 120
+
+ 160
+
+Number of tests of GSIMN and PFMN
+
+N=100, Connectivity = 0.5
+
+n.(n-1)/2
+Number of tests of GSIMN
+Number of tests for PFMN
+
+Connectivity
+
+0.1
+0.3
+0.5
+0.7
+0.9
+
+ 600
+
+ 500
+
+ 400
+
+ 300
+
+ 200
+
+ 100
+
+)
+t
+(
+ 
+s
+t
+s
+e
+
+t
+ 
+f
+
+o
+ 
+r
+e
+b
+m
+u
+N
+
+ 240
+
+ 0
+
+ 8
+
+ 12
+
+ 16
+
+ 20
+
+ 24
+
+   Number of variables in the domain (n)
+
+Figure 3: Performance comparison of PFMN vs. GSIMN for artiﬁcial domains. Left: Ratio of weighted cost for n = 16, 20 and τ =
+0.1, 0.3, 0.5, 0.7, 0.9. Middle: Accuracy for n = 16, 20 and τ = 0.1, 0.3, 0.5, 0.7, 0.9. Right: Number of tests of conducted by PFMN and
+GSIMN compared to
+
+`
+
+´
+
+.
+
+n
+2
+
+(described below), (b) add an edge from set A+(x), or
+(c) remove an edge e and add e(cid:3)
+where (e, e(cid:3)) ∈ A±(x).
+Each of (a), (b), or (c) is chosen with probability 1/3.
+Sets A+(x), A−(x) , and A±(x) are deﬁned as:
+A−
+(x) = {e ∈ E(x) | x(cid:3)
+A+(x) = {e ∈ ¯E(x) | x(cid:3)
+A±
+
+= (V, E(x) − {e}), x(cid:3) ∼t x}
+= (V, E(x) ∪ {e}), x(cid:3) ∼t x}
+
+) | e ∈ E(x), e(cid:3) ∈ E(x) ∪ {e},
+
+(x) = {(e, e(cid:3)
+
+x(cid:3)
+
+= (V, (E(x) − {e}) ∪ {e(cid:3)}), x(cid:3) ∼t x}
+
+where E(x) is the set of edges of structure x and ¯E(x)
+is its complement. The set A+(x) (A−(x)) is the set of
+all edges that are missing (existing) in x that if added
+to (removed from) x, produce a structure that will be
+1:t}. The set A±(x) is the
+equivalent to x i.e., in class {yx
+set of edge pairs (e, e(cid:3)) such that if e is removed and e(cid:3)
+added to x the resulting structure will also be equivalent.
+Therefore the result of any move under this proposal is
+a structure that is guaranteed to be equivalent to x, with
+Hamming distance from x of at most 1.
+
+The local proposal was designed to maximize accep-
+tance of proposed moves (i.e., line 5 of the M-H algorithm
+evaluating to true) by proposing moves to independence-
+equivalent structures, which have provably the same posterior
+probability. A well-designed proposal q(X (cid:2) | X) i.e., one
+that ensures convergence to the posterior distribution Prt(X),
+must also satisfy the requirements of aperiodicity and irre-
+ducibility [Andrieu et al., 2003]. The above proposal q satis-
+ﬁes both requirements: it is aperiodic since it always allows
+for rejection, and irreducible since its support is the entire set
+of structures X .
+
+5 Experiments
+
+We experimentally compare PFMN with the GSIMN al-
+gorithm of [Bromberg et al., 2006] on both artiﬁcial and
+real-world data sets. GSIMN is a state-of-the-art exact
+independence-based algorithm that uses Pearl’s axioms of CI
+tests to infer certain tests without actually conducting them.
+We report: (a) weighted number of tests, and (b) accuracy.
+The weight of each test is used to account for the execu-
+tion times of tests with different conditioning set sizes, and
+is taken to be the number of variables involved in each test—
+see [Bromberg et al., 2006] for details. To obtain the quality
+
+of the recovered network, we measure accuracy as the frac-
+tion of unseen CI tests that are correct i.e., we compare the
+result of each test on the resulting structure (using vertex sep-
+aration) with the true value of the test (calculated using vertex
+separation in the true model for artiﬁcial domains or statisti-
+cal tests on the data for real-world domains). The purpose
+of this procedure is to measure how well the output network
+generalizes to unseen tests.
+
+5.1 Artiﬁcial Experiments
+We ﬁrst evaluated our algorithm in artiﬁcial domains in which
+the structure of the underlying model, called true network, is
+known. This allowed (i) a systematic study of its behavior
+under varying conditions of domain sizes n and amount of
+dependencies (reﬂect in the number of edges m in the true
+network), and, (ii) a better evaluation of quality of the output
+(cid:5)
+networks because the true model is known. True networks
+n
+were generated randomly by selecting the ﬁrst m = τ
+2
+pairs in a random permutation of all possible edges, τ being
+a connectivity parameter.
+
+(cid:4)
+
+Fig. 3 shows the results of experiments for which CI tests
+were conducted directly on the true network through vertex-
+separation, i.e., outcomes of tests are always correct. Fig. 3
+(left) shows the ratio of the weighted cost of CI tests con-
+ducted by PFMN compared to GSIMN for two domain sizes
+n = 16 (above) and n = 20 (below), a number of connectiv-
+ities (τ = 0.1, 0.3, 0.5, 0.7, and 0.9), and an increasing num-
+ber of structure particles N . We can see that weighted cost of
+PFMN is lower than that of GSIMN for small (τ = 0.1, 0.3)
+and large (τ = 0.7, 0.9) connectivities, reaching savings of
+up to 78% for n = 20 and τ = 0.1. The case of τ = 0.5 is
+inconclusive—PFMN does better in some, but not all cases.
+This can be explained by the fact that the number of structures
+with connectivity τ grows exponentially as τ approaches 0.5
+(from either side), which clearly makes the search task in
+PFMN more difﬁcult. Fig. 3 (middle) shows that even though
+PFMN is an approximate algorithm, its accuracy for large
+enough number of particles N is exactly 1 in all but a few
+cases (e.g., N = 160, n = 16, τ = 0.5). GSIMN is an exact
+algorithm, i.e., its accuracy is always 1 when independence
+tests are correct, which is the case for the above experiments.
+Its accuracy is thus omitted from the ﬁgures. Fig. 3 (right)
+shows that PFMN does much fewer (non-weighted) test than
+GSIMN, and very close to the optimal number of tests which
+
+IJCAI-07
+
+2435
+
+Accuracy vs dataset size, N=200,    = 0.5
+ 1
+
+τ
+
+n=16, PFMN
+n=16, GSIMN
+n=20, PFMN
+n=20, GSIMN
+
+Cost and Accuracy for real data sets
+
+accuracy(PFMN)-accuracy(GSIMN)
+cost(PFMN)/cost(GSIMN)
+
+Table 1: Comparison of PFMN vs.
+GSIMN for real-world data.
+
+Data set
+
+w cost
+
+Accuracy
+
+name
+
+adult
+
+haberman
+
+hayes-roth
+
+n |D| GSIMN PFMN GSIMN PFMN
+#
+0.971 0.971
+5 305
+1
+20
+0.785 0.679
+10 32561 138
+2
+0.831 0.831
+30
+3
+6 132
+0.871 0.743
+20
+4 balance-scale 5 625
+9 12960
+nursery
+5
+72
+0.878 0.858
+7 556
+0.912 0.912
+42
+6 monks-1
+7 1728
+0.826 0.845
+42
+7
+5
+20
+0.857 0.857
+20
+8
+16 653
+0.898 0.914
+240
+9
+0.876 0.889
+380
+20 80
+10
+0.893 0.750
+126
+11
+10 1473
+0.836 0.758
+12 tic-tac-toe 10 958
+102
+13
+12 70
+132
+0.844 0.827
+0.797 0.926
+37 20001 1335
+14
+0.688 0.688
+633
+15 imports-85 25 193
+0.878 0.878
+839
+16
+29 194
+17 dermatology 35 358
+1211
+0.813 0.754
+
+22
+144
+26
+17
+60
+35
+35
+14
+161
+235
+75
+54
+68
+614
+259
+320
+408
+
+bridges
+alarm
+
+car
+
+crx
+
+baloons
+
+hepatitis
+
+cmc
+
+ﬂag
+
+y
+c
+a
+r
+u
+c
+c
+A
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 0
+
+ 1.2
+
+ 1
+
+ 0.8
+
+ 0.6
+
+ 0.4
+
+ 0.2
+
+ 0
+
+-0.2
+
+10K
+
+20K
+
+30K
+
+40K
+
+50K
+
+60K
+
+70K
+
+80K
+
+ 1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17
+
+         Number of data points in dataset (|D|)
+
+Dataset
+
+Figure 4: Performance comparison of PFMN and GSIMN on data. Left: Accuracy of
+PFMN and GSIMN vs. data set size for sampled data. Right: Ratio of weighted cost of
+PFMN vs. GSIMN and difference between accuracy of PFMN and GSIMN on real data
+sets. The numbers on the x-axis correspond to data set indices in Table 1.
+
+(cid:4)
+
+(cid:5)
+
+n
+2
+
+2) =
+
+is log 2(n
+assuming a uniform distribution over struc-
+tures, since the size of the space of structures is 2(n
+2). The
+ﬁgure shows that PFMN is very close to this optimal for a
+range of domain sizes n.
+
+We also compared the robustness of PFMN and GSIMN to
+uncertainty in the outcome of tests. This uncertainty is ex-
+pected to occur in small data sets. Data sets of different sizes
+were sampled from true networks of n = 20 and n = 16 vari-
+ables both of connectivity τ = 0.5. Fig. 4 (left) shows the ac-
+curacy of PFMN and GSIMN vs. the size of the data set (|D|).
+Accuracy of PFMN clearly outperforms that of GSIMN, with
+the gap between their accuracies growing steadily with the
+data set size for both n = 16 and n = 20.
+
+5.2 Real-World Experiments
+We also conducted experiments on a substantial number of
+data sets obtained from the UCI ML archive [D.J. Newman
+and Merz, 1998]. As above, we compare the weighted cost
+and accuracy of PFMN vs. GSIMN. Fig. 4 (right) shows the
+ratio of the weighted cost of PFMN vs. GSIMN (i.e., a num-
+ber smaller than 1 shows improvement of PFMN vs. GSIMN)
+and the difference in accuracies of PFMN and GSIMN (i.e.,
+a positive histogram bar shows an improvement of PFMN vs.
+GSIMN). In these experiments, PFMN used N = 200. The
+numbers in the x-axis are indices to the data sets shown in
+table 1. For 15 out of 17 data sets, PFMN required lower
+weighted cost, reaching ratios as low as 0.38. Moreover, for
+11 out 17 data sets PFMN achieves this reduction in cost with
+little or no reduction in accuracy compared to GSIMN, the
+rest exhibit only a modest reduction (less than 15%).
+
+6 Summary and Conclusion
+In this paper we presented PFMN, an independence-based al-
+gorithm for learning the structure of a Markov network from
+data. We presented an analysis of the domain of structures
+and independencies and a number of interesting relations us-
+ing an explicit generative model. We also showed experi-
+mentally that, compared to existing independence-based al-
+gorithms, PFMN is more resistant to errors in the test con-
+ducted and executes fewer tests in many cases. This helps in
+domains where data are scarce and tests uncertain or data are
+abundant and/or distributed over a potentially slow network.
+
+References
+[Andrieu et al., 2003] C. Andrieu, N. de Freitas, A. Doucet, and
+M. Jordan. An introduction to MCMC for machine learning. Ma-
+chine Learning, 50:5–43, 2003.
+
+[Besag et al., 1991] J. Besag, J. York, and A. Mollie. Bayesian im-
+age restoration with two applications in spatial statistics. Annals
+of the Institute of Statistical Mathematics, 43:1–59, 1991.
+
+[Bromberg et al., 2006] F. Bromberg, D. Margaritis,
+
+and
+V. Honavar.
+Efﬁcient Markov network structure discovery
+using independence tests. In SIAM International Conference on
+Data Mining, 2006.
+
+[D.J. Newman and Merz, 1998] C.L. Blake D.J. Newman, S. Het-
+UCI repository of machine learning
+
+tich and C.J. Merz.
+databases. 1998.
+
+[Geman and Geman, 1984] S. Geman and D. Geman. Stochastic
+relaxation, Gibbs distributions, and the Bayesian relation of im-
+ages. PAMI, 6:721–741, 1984.
+
+[Heckerman, 1995] D. Heckerman. A tutorial on learning Bayesian
+Technical Report MSR-TR-95-06, Microsoft Re-
+
+networks.
+search, 1995.
+
+[Hofmann and Tresp, 1998] R. Hofmann and V. Tresp. Nonlinear
+In NIPS ’98, vol-
+
+Markov networks for continuous variables.
+ume 10, pages 521–529, 1998.
+
+[Margaritis, 2005] D. Margaritis. Distribution-free learning of
+In AAAI.
+
+Bayesian network structure in continuous domains.
+AAAI Press, 2005.
+
+[Pearl, 1988] J. Pearl. Probabilistic Reasoning in Intelligent Sys-
+tems: Networks of Plausible Inference. Morgan Kaufmann Pub-
+lishers., 1988.
+
+[Shekhar et al., 2004] S. Shekhar, P. Zhang, Y. Huang, and R. Vat-
+savai. Trends in spatial data mining. chapter 19, pages 357–379.
+AAAI Press / MIT Press, 2004.
+
+[Spirtes et al., 2000] P. Spirtes, C. Glymour, and R. Scheines. Cau-
+sation, Prediction, and Search. Adaptive Computation and Ma-
+chine Learning Series. MIT Press, 2nd edition, 2000.
+
+[Srebro and Karger, 2001] N. Srebro and D. Karger.
+
+Markov networks: Maximum bounded tree-width graphs.
+ACM-SIAM Symposium on Discrete Algorithms, 2001.
+
+Learning
+In
+
+[Tong and Koller, 2001] S. Tong and D. Koller. Active learning for
+
+structure in Bayesian networks. In IJCAI, 2001.
+
+IJCAI-07
+
+2436
+
+

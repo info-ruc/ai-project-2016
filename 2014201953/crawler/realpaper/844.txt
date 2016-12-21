@@ -1,0 +1,1044 @@
+Utile Distinctions for Relational Reinforcement Learning
+
+William Dabney and Amy McGovern
+
+amarack@ou.edu and amcgovern@ou.edu
+
+University of Oklahoma
+
+School of Computer Science
+
+Abstract
+
+We introduce an approach to autonomously cre-
+ating state space abstractions for an online rein-
+forcement learning agent using a relational repre-
+sentation. Our approach uses a tree-based function
+approximation derived from McCallum’s [1995]
+UTree algorithm. We have extended this approach
+to use a relational representation where relational
+observations are represented by attributed graphs
+[McGovern et al., 2003]. We address the chal-
+lenges introduced by a relational representation by
+using stochastic sampling to manage the search
+space [Srinivasan, 1999] and temporal sampling to
+manage autocorrelation [Jensen and Neville, 2002].
+Relational UTree incorporates Iterative Tree Induc-
+tion [Utgoff et al., 1997] to allow it to adapt to
+changing environments. We empirically demon-
+strate that Relational UTree performs better than
+similar relational learning methods [Finney et al.,
+2002; Driessens et al., 2001] in a blocks world do-
+main. We also demonstrate that Relational UTree
+can learn to play a sub-task of the game of Go
+called Tsume-Go [Ramon et al., 2001].
+
+Introduction
+
+1
+This paper introduces a method that combines the expressive
+power of a relational representation with the learning power
+of reinforcement learning (RL). The goal is to autonomously
+learn a relational state space approximation while simultane-
+ously learning to act optimally. A relational representation
+enables an agent to reason at a higher level, which can allow
+an agent to learn in more difﬁcult problems [Kaelbling et al.,
+2001]. RL is an ideal technique for real-world control be-
+cause it can learn to achieve a goal without being told how
+to accomplish it. There has been considerable recent inter-
+est in combining these techniques [Tadepalli et al., 2004; van
+Otterlo, 2005].
+
+The primary contribution of this paper is the introduc-
+tion of an online RL method, Relational UTree, that can au-
+tonomously construct its own tree-based function approxi-
+mation using a relational representation. UTree [McCallum,
+1995] develops its own tree-based state space, allowing it to
+focus on the most important aspects of observations and to
+
+ignore irrelevant ones. Traditionally, a state representation is
+either designed by the user or learned from the policy.
+
+Learning in a relational representation introduces two key
+challenges. The ﬁrst is the exponential growth in search space
+and the second is that relational environments tend to have a
+high degree of autocorrelation. This has been shown to cause
+a selection bias that makes distinctions to appear useful when
+they are not [Jensen and Neville, 2002]. Relational UTree
+compensates for the size of the search space by using stochas-
+tic sampling [Srinivasan, 1999]. Autocorrelation violates the
+independent and identically distributed assumption made by
+many statistical techniques. We compensate for the effects of
+temporal autocorrelation by temporally sampling.
+
+We separately address the need to adapt to changes in the
+environment by incorporating efﬁcient tree restructuring [Ut-
+goff et al., 1997]. This allows Relational UTree to create
+more compact trees with the same representational power and
+helps to prevent overﬁtting in stochastic environments.
+
+The most similar works are the G [Finney et al.,
+2002; Chapman and Kaelbling, 1991] and TG algorithms
+[Driessens, 2004; Driessens et al., 2006]. There are several
+major differences between TG, which is based in part on G-
+Algorithm, and Relational UTree. The primary difference is
+that Relational UTree can dynamically restructure its trees
+while TG must build a new tree from scratch. This allows
+Relational UTree to adapt to changes in the environment and
+to correct early mistakes made in the tree. While Relational
+UTree uses graphs to represent observations, TG uses ﬁrst or-
+der logic predicates. In addition, TG creates a separate policy
+tree (called a P-tree) while Relational UTree derives its policy
+from the Q-value tree. Finney et al.’s [2002] approach is also
+based on G algorithm but uses a deictic representation, while
+Relational UTree makes use of a full relational representation
+and incorporates tree restructuring. We empirically compare
+the performance of Relational UTree to these approaches on
+blocks world environments.
+2 Algorithm Description
+The Relational UTree algorithm follows the UTree algorithm
+closely. We use the standard RL and partially observable
+Markov decision process (POMDP) notation where, at each
+time step t, the agent executes an action at ∈ A, and receives
+an observation ot+1 ∈ O, and a reward rt+1 ∈ ℜ [Sutton and
+Barto, 1998; Kaebling et al., 1998].
+
+IJCAI-07
+
+738
+
+R
+
+G
+
+T
+
+(a)
+
+Mark
+
+B
+
+T
+
+(c)
+
+(b)
+
+Focus
+
+Block
+
+Color = Green
+hasFocus = true
+
+Left Relationship
+
+T
+
+Mark
+
+Block
+
+Color = Red
+
+On Top Of
+
+Block
+
+Left/Right
+
+Block
+
+Color = Blue
+
+Color = Green
+
+Block
+
+Block
+
+Block
+
+Color = Table
+
+Color = Table
+
+Color = Table
+
+Figure 1: a) Example blocks world conﬁguration. b) Partially
+observable blocksworld1 [Finney et al., 2002] observation. c)
+Fully observable blocksworld2 [Driessens et al., 2001] obser-
+vation.
+An observation takes the form of an attributed graph G =
+(cid:3)V,E,A(V ),A(E),T (V ),T (E)(cid:4). V is the set of all objects in
+the environment, represented by vertices in the graph and E
+is the set of all relationships, represented by edges [McGov-
+ern et al., 2003]. A(V ) and A(E) are the set of attributes for
+the vertices and edges respectively, the elements of which are
+discrete or real valued attributes. A(V ) and A(E) may contain
+zero or more elements. T (V ) and T (E) are required discrete
+valued types for vertices and edges. Example observations
+for blocks world are shown in Figure 1. Some attributes and
+relationships are omitted for readability. The graphical repre-
+sentation used does not place individual identiﬁers on objects,
+but instead objects are identiﬁed by their type, attributes, and
+relationships to other objects. This property of graphical rep-
+resentations is advantageous for generalizing concepts.
+
+Our Relational UTree description uses McCallum’s [1995]
+notations. We refer to the set of distinctions that lead to a tree
+node and the state represented by a leaf node as s. A transition
+instance, Tt = (cid:3)Tt−1,at−1,ot ,rt(cid:4), represents one step of the
+agent’s experience. The set of instances contained in a leaf
+node s is denoted T (s), and the set of instances contained in
+a leaf node s where the next action is a is T (s,a). The time
+ordered set of all transition instances is H = {T0,T1, ...,T|H|}.
+The leaf node to which a speciﬁc transition instance belongs
+is denoted by L(Tt).
+2.1 Relational Utile Distinctions
+We refer to a distinction as being utile if and only if
+the distinction statistically separates the set of transition
+instances so that
+is better able to predict re-
+ward. The sets of possible distinctions are: Object ex-
+
+the agent
+
+Variable Memories
+
+Empty List
+
+Block Exists
+
+[List of all blocks]
+
+(0).Color = Green
+
+Yes
+
+No
+
+[List of all blocks]
+[One Green block]
+
+Figure 2: Example variable memory creation as the instance
+from Figure 1c is dropped down the tree.
+istence {(x,h) | x ∈ T (V ),h ∈ N}, relationship existence
+{(x,o1,o2,h) | x ∈ T (E),o1 (cid:5)= o2∀o1,o2 ∈ M(V ),h ∈ N}, and
+attribute value {(a, valuea,o1,h) | (a,valuea) ∈ A(o1),o1 ∈
+{M(V )∪ M(E)},h ∈ N}, where h is the history index, M is
+the memory, x is a parameter limiting the number of previ-
+ous observations that can be considered, and N is the set of
+natural numbers.
+
+The variables o1 and o2 are pointers to variable memories.
+Variable memories reference previous distinctions in s, al-
+lowing simple distinctions to be used to construct complex
+queries. For each type of distinction, the set of variable mem-
+ories created when an instance is dropped down a node with
+that distinction is given by: {v ∈ Vi | T (v) = X} for object
+distinctions, {(e,v1,v2) ∈ Ei | T (e) = X,v1 (cid:5)= v2,v1,v2 ∈ Vi}
+for relationship distinctions, and {p ∈ Vi ∪ Ei | (a,valuea) ∈
+A(v),a = X,valuea = Y} for attribute value distinctions.
+Figure 2 shows an example of how Relational UTree uses
+variable memories. As the observation shown in Figure 1(c)
+falls down the root node, blocks are added to the variable
+memory. The second node selects blocks from this list with
+“Color = Green” and saves the matches.
+
+Relational UTree allows static objects to be referenced so
+that their non-static attributes may be accessed. The set of
+H Vi. A focal object, f ∈ V ,
+static objects is deﬁned as S = T
+can be incorporated to allow an agent to reason deictically.
+Let M(V,N) be the set of object variable memories for the
+node N. At the root node, Nr, M(V,Nr) = S∪{ f}. The set of
+object variable memories created by the distinction at a given
+node, N, is denoted m(V,N). If we let Np be the parent node
+to N, then the set of object variable memories at any node, N,
+is deﬁned as M(V,N) = M(V,Np)∪ m(V,Np). We similarly
+deﬁne M(E,N), given M(E,Nr) = /0.
+2.2 The Relational UTree Algorithm
+The Relational UTree algorithm works as follows:
+1. Create a tree with no distinctions. Initialize T (s) = /0
+
+and H = /0.
+
+2. Take one step of experience in the environment. Choose
+the action at−1 to be the policy action of L(Tt−1), with
+ε probability of choosing a random action. Record the
+experience as Tt = (cid:3)Tt−1,at−1,ot ,rt(cid:4) and H = H ∪{Tt}.
+Using standard decision tree methods, drop Tt down the
+tree. Save Tt to the leaf node, L(Tt) = s, setting T (s) =
+T (s)∪{Tt}. Mark all tree node N ∈ s as stale, where a
+
+IJCAI-07
+
+739
+
+stale node indicates that the distinction at that node may
+need to be changed during restructuring.
+In some environments, observations ot and ot+1 are au-
+tocorrelated. For example, in the blocksworld2 environ-
+ment shown in Figure 1 (c), the objects and relationships
+will remain largely the same regardless of the next action
+performed. This is an example of temporal autocorrela-
+tion, and can cause a feature selection bias [Jensen and
+Neville, 2002]. In these situations, we remove autocor-
+relation through temporal sampling. Every c steps, Tt is
+forgotten, where c is a user deﬁned value.
+
+3. With the leaves of the tree representing the states, per-
+form one step of value iteration using Equations 1 - 4.
+The equations for estimated immediate reward and esti-
+mated probability of arriving in state s(cid:8) after executing
+action a in state s are given in Equation 3 and 4 and di-
+rectly follow McCallum’s equations.
+
+Q(s,a) ← R(s,a) + γ∑
+s(cid:8)
+U(s) = max
+
+Pr(s
+
+(cid:8)|s,a)U(s
+
+(cid:8))
+
+a∈A Q(s,a)
+∑Ti∈T (s,a) ri
+|T (s,a)|
+
+R(s,a) =
+
+Pr(s
+
+(cid:8)|s,a) =
+
+|∀Ti ∈ T (s,a) s.t. L(Ti+1) = s(cid:8)|
+
+|T (s,a)|
+
+(1)
+
+(2)
+
+(3)
+
+(4)
+
+4. Update the tree every k steps by ﬁrst ensuring the quality
+of current distinctions, followed by expanding the tree
+by adding new distinctions at the leaves. All stale tree
+nodes N are updated as follows.
+(a) First, stochastically generate a set of distinction trees
+Φ. Include the existing distinction tree, φN, in the set Φ,
+with Φ = Φ∪{φN}. A distinction tree is made up of one
+or more distinctions on a set of instances, organized into
+a tree structure. We consider distinction trees with depth
+up to some constant k, and consider larger depths only if
+no utile distinction trees are found. Each distinction tree
+φ ∈ Φ deﬁnes a set of fringe leaf nodes L.
+For each fringe leaf node s ∈ L, the set of expected fu-
+ture discounted rewards for s makes up a distribution
+δ(s) given by Equation 5 [McCallum, 1995].
++ γU(L(ti+1)) | ti ∈ T (s)}
+
+(5)
+Calculate the Kolmogorov-Smirnov distance between
+each pair of distributions, denoted KS(δ0,δ1). Let Pφ
+be the set of these p-values, given by Equation 6.
+
+δ(s) = {rti
+
+Pφ = {KS(δ(si),δ(s j)) | ∀si,s j ∈ L}
+
+(6)
+Choose the best distinction tree from among Φ and the
+current distinction tree, φN, using Equation 7.
+
+φ(cid:8) = minφ∈Φ
+
+∑p∈Pφ log(p)
+
+|Pφ|
+
+(7)
+
+Transposition (a)
+
+
+
+N
+
+'
+
+'
+
+'
+
+
+
+N
+
+
+
+N
+
+B
+
+A
+
+C
+Deletion (b)
+
+
+
+N
+
+D
+
+'
+
+B
+
+C
+
+A
+Replacement (c)
+
+D
+
+'
+
+Leaf
+
+A'
+
+B'
+
+A
+
+B
+
+
+
+N
+
+'
+
+Leaf
+
+Leaf
+
+Leaf
+
+Leaf
+
+N
+
+Figure 3: Let N be the current node, and C(N) = {N1,N2}
+= φ(cid:8). Perform tree
+= φN2
+denote the children of N. a) φN1
+transposition by setting φ(cid:8)
+= φ(cid:8). b)
+= φ(cid:8)
+= φN and φ(cid:8)
+N2
+N1
+= φ(cid:8) and C(N2) = /0. Set φN = φ(cid:8) and C(N) = C(N1).
+φN1
+Reclassify the instances T (N2) using the N0 subtree.
+c)
+C(N1) = C(N2) = /0. Set φN = φ(cid:8), and use φ(cid:8) to reclassify
+the instances T (N1)∪ T (N2)
+If there is no p ∈ Pφ(cid:8) below the user speciﬁed value, then
+N is pruned from the tree. We used p = 0.001 for this
+paper. Otherwise, φN is replaced by φ(cid:8) through a series of
+tree transpositions. For distinction trees of depth greater
+than one, the distinctions are ’pulled-up’ one at a time,
+beginning with the root distinction.
+(b) Once the best distinction tree at a given node is de-
+termined, the tree is restructured following Utgoff et al.
+[1997]. If the current distinction at N is already the best,
+φN = φ(cid:8), then we are done. Otherwise, a recursive depth
+ﬁrst traversal of the tree is applied until one of the base
+cases, shown in Figure 3, is reached. At this point, the
+utile distinction, φ(cid:8), is ”pulled-up” by recursively per-
+forming the tree transposition steps shown in the ﬁgure.
+After a single ”pull-up” has been performed, the next
+base case in the tree is addressed until the best distinc-
+tion tree, φ(cid:8), is at the target node, N.
+When the tree restructuring operation has completed for
+N, mark it as not stale. If the node has changed through
+tree restructuring, then mark all nodes in its subtree as
+stale. Continue to apply step 4 to each stale child node
+of N. This process continues until no branches are stale,
+and the quality of the distinctions in the tree are ensured.
+Finally, perform value iteration until convergence.
+
+5. Every k steps, expand the tree at the leaves. For each leaf
+node of the tree, s, determine the best distinction tree for
+the instances at that node using the process outlined in
+step 4 (a). If the new distinction tree is utile, then expand
+the tree by adding a subtree at the leaf s and dropping the
+instances T (s) down the new distinction tree. This re-
+moves s from the list of leaves and adds the set of leaves
+L to that list. Continue expanding the tree until it is no
+longer utile to do so. Perform value iteration until con-
+vergence after expansion is done.
+
+6. Repeat at step 2 until stopped.
+
+IJCAI-07
+
+740
+
+2.3 Stochastic Sampling
+We use stochastic sampling [Srinivasan, 1999] to address the
+large space of possible distinctions introduced with a rela-
+tional representation. Srinivasan shows that if we can sample
+tests stochastically that we can look at only a small fraction
+of the total and still be highly conﬁdent in ﬁnding one that
+is among the best possible. The number of tests that must be
+sampled is given by n ≥ ln(1−α)
+ln(1−k) , where α is the probability of
+ﬁnding a test in the top (100× k)% [Srinivasan, 1999]. The
+key to this equation is that the sample size does not depend
+on the number of possible distinctions.
+For this paper, we have used k = 0.01 and α = 0.99 to be
+99% conﬁdent in ﬁnding a distinction in the top 1%. In this
+situation we only need to sample 458 distinctions. By grad-
+ually reducing k, we can move the search for distinctions to-
+ward an exhaustive search. With our values, it took under
+a second to expand a leaf node containing 5000 instances.
+When we reduce k to 0.001, it takes two minutes to do the
+same expansion. Similarly, with k = 0.0001 the expansion
+time for the leaf node is almost 13 minutes. This demon-
+strates that an exhaustive search of the distinction space is
+not feasible. To compensate, we use stochastic sampling.
+2.4 Tree Restructuring
+In the early stages of learning, an agent will have only seen
+a fraction of the environment and may create a state repre-
+sentation that is not well suited to the true nature of the en-
+vironment. To prevent the tree from over-ﬁtting and to allow
+it to adapt to changing environments, Relational UTree im-
+plements online tree restructuring based on the Iterative Tree
+Induction algorithm [Utgoff et al., 1997]. Iterative Tree In-
+duction ensures that the best split for the instances is used at
+each node of the tree, beginning with the root and working its
+way to the leaves.
+
+The original ITI algorithm kept track of a list of statistics
+for each possible test at every tree node. Because Relational
+UTree is instance based, this would be redundant. While ITI
+looked at the list of statistics for a node to decide the current
+best test at that node, Relational UTree regenerates tests for
+the node and decides which is best directly. Keeping track
+of all possible tests is not a practical solution in this situa-
+tion because of the large search space for distinctions in rela-
+tional environments. This large search space is a well known
+problem for inductive logic programming [Dzeroski et al.,
+2001]. Although it is more computationally expensive to re-
+compute the tests, restructuring leads to signiﬁcantly smaller
+trees which reduces overall computation time.
+
+3 Experimental Results
+3.1 Blocks World Results
+We apply Relational UTree to two versions of the blocks
+world domain. The ﬁrst, blocksworld1, is a partially observ-
+able blocksworld task with low-level actions and two blocks,
+as in Finney et al. [2002]. The second, blocksworld2, is a
+fully observable domain with high-level relational actions and
+three blocks, as in Driessens et al. [2001]. Both domains con-
+tain moveable colored blocks and unmovable table blocks.
+
+Example observations for both domains are shown in Fig-
+ure 1.
+
+In the blocksworld1 domain, the agent has a focus marker
+and a deictic marker. The agent perceives all attribute in-
+formation for the focused object but none for the marked
+object. The marker is only observable if it is adjacent to
+the focus marker. For example, if the marker is below the
+focus block, then the agent will observe a block object, a
+marker object, and a relationship indicating the block ob-
+ject is on the marker object. The small difference from
+Finney’s domain arise from the translation from a deictic rep-
+resentation to a truly relational one. The goal is to pick up
+the green block, which requires ﬁrst removing any blocks
+covering it. The actions available to the agent are identi-
+cal to that of Finney: move-focus(direction), focus-on(color),
+pick-up(), put-down(), marker-to-focus(marker), and focus-
+to-marker(marker). The agent is given a reward of +10 for
+reaching the goal, a penalty of -0.2 for invalid moves and -0.1
+per time step.
+
+The second domain, blocksworld2, is fully observable and
+the task is to stack the green block on the red block. The
+actions are move(x,y) for unique blocks x and y. As with
+Driessens, the agent received a reward of 1 for reaching the
+goal in the minimal number of steps and a 0 otherwise.
+
+The performance of Relational UTree with and without tree
+restructuring for both domains is shown in Figure 4 (left pan-
+els). Empirical performance is ε-optimal, with ε = 0.10, for
+both domains. These results are averages across 30 runs. Be-
+cause this is online performance, large changes to the tree’s
+structure are reﬂected as temporary drops in performance.
+This happens less frequently as the tree converges.
+
+In the more difﬁcult blocksworld1 domain, Relational
+UTree converges faster than Finney’s approach with more ac-
+curate results. After 100,000 training instances Finney’s per-
+formance was approximately 68% with ﬁnal convergence to
+80%. Our method converges to 90% of optimal, due to the
+use of ε-greedy exploration methods, and does so within the
+ﬁrst 100,000 steps.
+
+Comparatively, the actions in the blocksworld2 domain are
+higher level which allows the agent to discover the goal much
+faster than in blocksworld1. The performance of Driessens’
+TG algorithm on the same domain was comparable. TG does
+not explore the environment, and does not use an ε-greedy
+exploration method like we do. This allows their algorithm to
+converge to an average reward of 1, while we converge to an
+average reward per trial of 0.9.
+
+Figure 4 (right panels) compares the tree sizes with and
+without tree restructuring for the two domains. In both do-
+mains, performance is comparable but the average tree size
+is considerably smaller when tree restructuring is used. The
+agent is able to construct a smaller tree to capture the same
+amount of information because it can remove irrelevant in-
+formation gained early in learning. The use of restructuring
+introduces an increased variance due to the temporary loss
+in performance directly following a large tree restructuring.
+However, smaller trees result in a signiﬁcant improvement in
+running time.
+
+IJCAI-07
+
+741
+
+)
+d
+e
+l
+a
+c
+S
+
+(
+ 
+l
+a
+i
+r
+T
+ 
+r
+e
+P
+d
+r
+a
+w
+e
+R
+
+ 
+
+ 
+l
+a
+t
+o
+T
+
+1
+
+0.9
+
+0.8
+
+0.7
+
+0.6
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+0
+
+Without Restructuring
+With Restructuring
+
+103
+
+102
+
+101
+
+e
+e
+r
+t
+ 
+n
+
+i
+ 
+
+s
+e
+v
+a
+e
+
+l
+ 
+f
+o
+ 
+r
+e
+b
+m
+u
+N
+
+BW 1 NO Restructuring
+BW 1 With Restructuring
+BW 2 NO Restructuring
+BW 2 With Restructuring
+
+2
+
+4
+
+6
+
+8
+
+Number of Training Instances in blocksworld 1 Domain
+
+10
+x 104
+
+100
+0
+
+2
+
+4
+
+6
+
+Number of Training Instances
+
+8
+
+10
+x 104
+
+Figure 4: Learning curves for Relational UTree in the blocksworld1 and blocksworld2 domains. Tree sizes, with and without
+tree restructuring, are shown for both domains on the right.
+3.2 Autocorrelation
+To detect potential temporal autocorrelation, we used ran-
+domization on sets of observations. We perform 10000
+randomizations on this data, each time performing a
+Kolmogorov-Smirnov test. The test statistics form a distri-
+bution which can be analyzed to ﬁnd the effective sample
+size, similar to what was done with χ2 by Jensen and Neville
+[2002].
+If there is no autocorrelation, the effective sample
+size should match the actual sample size used in the tests.
+
+The effective sample size is dramatically lower without sam-
+pling and small amounts of sampling dramatically increase
+the sample size. Tests on actions have no temporal autocorre-
+lation because there is no direct correlation between what ac-
+tion will be performed and what the most recent action was.
+Since autocorrelation causes a feature selection bias [Jensen
+and Neville, 2002], Relational UTree used sampling to re-
+move the autocorrelation.
+3.3 Tsume Go Results
+The Tsume Go domain is a sub-task of the game of Go
+where stones have already been placed in different conﬁgu-
+rations. The task is to identify the best move for protecting
+the player’s stones or capturing the opponent’s stones. Rela-
+tional UTree learns to play the best ﬁrst move of a Tsume Go
+game. Relational UTree is trained on a set of 30000 randomly
+sampled problems from the GoTools database [Wolf, 1996],
+and then tested on a set of 10000 randomly sampled indepen-
+dent problems from the same database. The agent receives a
+reward between 0 and 1 for correct answers depending on the
+quality of the move and is penalized −0.5 for incorrect at-
+tempts. It is also penalized with −1.0 for invalid moves such
+as placing a stone on top of another stone or trying to move
+off the board.
+
+Similar to Ramon et al.’s [2001] approach, we test Rela-
+tional UTree’s approximation by ranking moves using the Q-
+values. Across 7 runs, Relational UTree averaged 65% ac-
+curacy on the test set after one move. Ramon et al.’s [2001]
+approach obtained 35% accuracy on a test set of 1000 prob-
+lems generated by GoTools, after training on 2600 problems.
+We are encouraged by our results and are exploring this do-
+main in greater detail as future work.
+4 Discussion
+Due to the signiﬁcant performance difference between Finney
+and the large degree of similarities between our algorithm
+and Finney’s, it is useful to discuss why Relational UTree
+was able to overcome some of the problems previously re-
+ported. Relying on observation history to disambiguate states
+and using state values to determine a policy before the states
+are disambiguated is a difﬁcult problem that can be overcome
+through the use of tree restructuring. As the agent contin-
+ues to learn, it carries older instances whose histories reﬂect
+outdated policies. As the agent’s performance increases, the
+
+The Kolmogorov-Smirnov test compares two distributions,
+of sizes N1 and N2. The total size of the data, N1 + N2, re-
+mains constant throughout, while the proportion of data split
+into either distribution can change from one distinction to the
+next. In our experiment, the actual number of instances var-
+ied but the proportions that a speciﬁc distinction created was
+held constant. We use p = max(N1,N2)
+to represent the rela-
+(N1+N2)
+tive sizes of the two distributions. By substituting p into the
+original equation for KS, given by [Sachs, 1982], we obtain
+R = (2×(Kα)2)
+(4×(p−p2)) for the effective sam-
+ple size NE. Kα and Dα are the critical values for the KS test.
+
+and NE = 2×
+
+Dα
+
+R
+
+No Sampling
+
+Drop Every 15th
+
+Drop Every 10th
+
+Object Block 
+
+Exists
+
+%
+
+Relationship
+Holding Exists
+
+Action Move 
+
+Up
+
+1%
+
+1%
+
+<1%
+
+100%
+
+65%
+
+76%
+6
+
+100%
+
+96%
+
+100%
+
+100%
+
+Figure 5: Effective sample size relative to actual sample size
+with variable amounts of sampling.
+
+Figure 5 shows the results of our detection and removal
+of the temporal autocorrelation in the blocks world domain.
+The top pie chart for each group is the effective sample size
+without sampling. The lower two pie charts are for removing
+every 15th or every 10th instance. Effective sample sizes for
+an object existence, relationship, and action test are shown.
+
+IJCAI-07
+
+742
+
+vast majority of new observations will conform to an increas-
+ingly consistent policy. Given sufﬁcient experience with the
+new policy, old observations will be in such a minority that
+splitting on them will no longer be statistically signiﬁcant.
+Another method would be to remove the oldest memories of
+the agent when they are likely to no longer be relevant but this
+approach requires another parameter.
+
+Finney’s approach uses a combination of the G-Algorithm
+and UTree to learn with a deictic representation. In their ap-
+proach, once the tree has been expanded at a node, all the
+instance information that caused that split is dropped. This is
+in contrast to the approach taken by Relational UTree, which
+saves instances and continues to use all observations to de-
+cide if a split is utile. We hypothesize that this difference is
+the cause of their convergence issues. Each split relies only
+on the most recent observations to see how the environment
+behaves. This could lead to incorrect assumptions if the cur-
+rent set of data is not representative of the entire environment.
+Another problem encountered comes from the nature of
+POMDPs. If the agent in blocksworld1 performed the action
+focus on color(red), its history of observations would not tell
+it what state it was in. Finney suggests that history based
+decision tree algorithms will never be able to fully disam-
+biguate the state space. While it is true that the agent’s his-
+tory would not help it to know the current state of the world,
+this information is not required for optimal behavior. Instead,
+the optimal behavior for this agent is to explore. Balancing
+the need to explore to discover information about the environ-
+ment, and seeking out potential rewards, is a primary property
+of POMDPs [Kaebling et al., 1998]. As such, the optimal pol-
+icy would explore the environment, thus providing the agent
+with the useful historical observations that it needs.
+
+5 Conclusions and Future Work
+
+We have introduced Relational UTree, a signiﬁcant modiﬁca-
+tion to the UTree algorithm that automatically creates a tree-
+based function approximation in a relational representation.
+Relational UTree allows us to apply the advantages of the
+UTree algorithm to inherently relational environments with-
+out the need to convert into propositional logic. We demon-
+strated that Relational UTree is able to learn in a blocks world
+domain and on the task of Tsume Go. Relational UTree ad-
+dresses the exponential growth in search space of a relational
+representation using stochastic sampling. We also demon-
+strated that temporal sampling was necessary to address the
+issues of autocorrelation that arise in a relational representa-
+tion. We separately show that incorporating tree restructuring
+into Relational UTree gives it the critical ability to learn com-
+pact representations and to adapt to changing environments.
+Current and future work focuses on applying Relational
+UTree to more complex relational domains, including the full
+game of Go. We are also exploring ways to improve the ef-
+ﬁciency of storing and handling large numbers of observa-
+tions. We are studying knowledge transfer and background
+knowledge using Relational UTree. The ability to approxi-
+mate a state space independently of a human designer allows
+for many interesting future applications.
+
+Acknowledgements
+We would like to thank the anonymous reviewers for their insight-
+ful comments. This material is based upon work supported by
+the National Science Foundation under Grant No. NSF/CISE/REU
+0453545.
+References
+D. Chapman and L. P. Kaelbling.
+
+Input generalization in delayed
+reinforcement learning: An algorithm and performance compar-
+isons. In Proceedings of IJCAI-91, 1991.
+
+K. Driessens, J. Ramon, and H. Blockeel. Speeding up relational
+reinfocement learning through the use of an incremental ﬁrst or-
+der decision tree learner.
+In Proceedings of ECML - European
+Conference on Machine Learning, pages 97–108, 2001.
+
+K. Driessens, J. Ramon, and T. Croonenborghs. Transfer learning for
+reinforcement learning through goal and policy parameterization.
+Presented at the ICML-06 Workshop on Structural Knowledge
+Transfer for Machine Learning, 2006.
+
+K. Driessens. Relational Reinforcement Learning. PhD thesis, De-
+
+partment of Computer Science, K.U. Leuven, 2004.
+
+S. Dzeroski, L. De Raedt, and K. Driessens. Relational reinforce-
+
+ment learning. Machine Learning, 43(1/2):5–52, April 2001.
+
+S. Finney, N. Gardiol, L. Kaelbling, and T. Oates. The thing that we
+tried didn’t work very well : Deictic representation in reinforce-
+ment learning. In Proceedings of the 18th Annual Conference on
+Uncertainty in Artiﬁcial Intelligence, pages 154–161, 2002.
+
+D. Jensen and J. Neville. Linkage and autocorrelation cause feature
+selection bias in relational learning. In Proceedings of the 19th
+International Conference on Machine Learning, pages 259–266,
+2002.
+
+L.P. Kaebling, M. L. Littman, and A. R. Cassandra. Planning and
+acting in partially observable stochastic domains. Artiﬁcial Intel-
+ligence, 101(1–2):99–134, 1998.
+
+L. P. Kaelbling, T. Oates, N. Hernandez, and S. Finney. Learning in
+
+worlds with objects. In The AAAI Spring Symposium, 2001.
+
+A. K. McCallum. Reinforcement Learning with Selective Perception
+
+and Hidden State. PhD thesis, University of Rochester, 1995.
+
+A. McGovern, L. Friedland, M. Hay, B. Gallagher, A. Fast,
+J. Neville, and D. Jensen. Exploiting relational structure to un-
+derstand publication patterns in high-energy physics. SIGKDD
+Explorations, 5(2):165–172, December 2003.
+
+J. Ramon, T. Francis, and H. Blockeel. Learning a tsume-go heuris-
+In Proceedings of CG2000, the Second Inter-
+tic with TILDE.
+national Conference on Computers and Games, volume 2063 of
+Lecture Notes in Computer Science, pages 151–169. Springer-
+Verlag, 2001.
+
+L. Sachs. Applied Statistics, A handbook of techniques. Springer,
+
+1982.
+
+A Srinivasan. A study of two probabilistic methods for searching
+large spaces with ILP. Data Mining and Knowledge Discovery,
+3(1):95–123, 1999.
+
+R. S. Sutton and A. G. Barto. Reinforcement Learning: An Intro-
+
+duction. MIT Press, 1998.
+
+P. Tadepalli, R. Givan, and K. Driessens. Relational reinforcement
+learning: An overview. In Proceedings of the ICML workshop on
+Relational Reinforcement Learning, 2004.
+
+P. E. Utgoff, N.C. Berkman, and J. A. Clouse. Decision tree in-
+duction based on efﬁcient tree restructuring. Machine Learning,
+29:5–44, 1997.
+
+M. van Otterlo. A survey of reinforcement learning in relational do-
+mains. Technical Report TR-CTIT-05-31, CTIT Technical Report
+Series, ISSN 1381-3625, 2005.
+
+T. Wolf. The program gotools and its computer-generated tsume
+go database. Technical report, School of Mathematical Science,
+1996.
+
+IJCAI-07
+
+743
+
+

@@ -1,0 +1,799 @@
+Visually Tracking Football Games Based on TV Broadcasts
+
+Michael Beetz, Suat Gedikli, Jan Bandouch,
+
+Bernhard Kirchlechner, Nico v. Hoyningen-Huene, Alexander Perzylo
+
+Intelligent Autonomous Systems Group
+
+Technische Universit¨at M¨unchen, Munich, Germany
+
+aspogamo@in.tum.de
+
+Abstract
+
+This paper describes ASPOGAMO, a visual track-
+ing system that determines the coordinates and tra-
+jectories of football players in camera view based
+on TV broadcasts. To do so, ASPOGAMO solves a
+complex probabilistic estimation problem that con-
+sists of three subproblems that interact in subtle
+ways: the estimation of the camera direction and
+zoom factor, the tracking and smoothing of player
+routes, and the disambiguation of tracked players
+after occlusions. The paper concentrates on system
+aspects that make it suitable for operating under
+unconstrained conditions and in (almost) realtime.
+We report on results obtained in a public demon-
+stration at RoboCup 2006 where we conducted ex-
+tensive experiments with real data from live cover-
+age of World Cup 2006 games in Germany.
+
+1 Introduction
+As more and more computer systems are equipped with sens-
+ing devices and are installed in environments where people
+act, there is a steadily increasing interest in application sys-
+tems that can automatically interpret and analyze intentional
+activities. Examples of such application domains are human
+living environments where computer systems are supposed
+to support the people’s everyday life, or factories where ma-
+chines and human workers are supposed to perform the pro-
+duction processes in joint action. Another class of example
+domains that starts to receive increasing attention is the auto-
+mated analysis of sport games.
+
+In all these cases the perception of intentional activity has
+to be solved reliably, accurately, and under unmodiﬁed condi-
+tions. Indeed scaling reliability and accuracy of such percep-
+tion towards real life situations still poses challenging prob-
+lems for most perception and AI systems.
+
+In this paper we consider a particular subclass of these
+problems, namely the accurate and reliable tracking of play-
+ers based on broadcasts of football games. To address the
+problem, we have realized ASPOGAMO (Automated SPOrt
+Game Analysis MOdel), a computer system estimating mo-
+tion trajectories in world coordinates for the players in the
+camera view.
+
+ASPOGAMO can track the players based on views pro-
+vided by the overview cameras used in game broadcasts. It
+
+has a high player detection rate of more than 90%, an average
+inaccuracy of less than 50 cm, handles many cases of occlu-
+sions, and works in almost realtime.1 ASPOGAMO deals
+with substantial variations in lighting conditions and compli-
+cated team dresses. The system has been demonstrated at
+the RoboCup 2006 in Bremen, tracking players based on live
+broadcasts of FIFA World Cup 2006.
+
+The purpose of this paper is to brieﬂy describe the basic
+system and algorithms and then to discuss in detail the exten-
+sions that are made to scale towards a real-world application.
+The main contributions are threefold:
+
+1. an accurate and reliable model-based estimation system
+for the camera parameters based on the video sequence,
+2. a color-based segmentation system for robust and pre-
+cise detection of players in camera view even under chal-
+lenging conditions (difﬁcult lighting and colors, partial
+occlusions, camera motion blur), and
+
+3. a probabilistic (multi-camera enabled) player tracking
+system that handles a wide range of game typical oc-
+clusion scenarios.
+
+The remainder of this paper is organized as follows. The
+next section introduces the software architecture and the ba-
+sic solution idea to solve the tracking problem. Then the un-
+derlying components provided for obtaining the necessary re-
+liability and accuracy are detailed in the sections 3 (estimat-
+ing camera parameters), 4 (detecting players), and 5 (tracking
+players). We will then describe experimental results, discuss
+related work and ﬁnish with our conclusions.
+
+2 System Overview
+
+Before we discuss the technical details of our approach we
+will ﬁrst explain the computational problem that we are solv-
+ing, the structuring of the problem into subproblems, and the
+basic mechanisms for solving the subproblems.
+
+2.1
+
+Input and output
+
+The broadcasted video stream mainly consists of stretches
+recorded by the main camera, which is placed 8-22m high in
+the stands near the center line of the ﬁeld. The main camera
+records the game activities and provides a good overview of
+the game action. The stream, however, is interrupted through
+
+1A more speciﬁc description of the performance aspects and ex-
+
+perimental results is given in section 6.
+
+IJCAI-07
+
+2066
+
+displays of close-ups and replays from other cameras, usually
+when the game is paused or the activity is not interesting.
+
+Figure 1: Player detection (left) and created tracks (right)
+
+ASPOGAMO is given image sequences of the game taken
+by the main camera. The camera’s position in the stadium
+is ﬁxed, but it is constantly pointing towards the main area
+of activity and changing its zoom factor. Therefore, the pan
+and tilt angles as well as the focus of the camera are contin-
+ually changing. ASPOGAMO computes trajectories on the
+ﬁeld plane, representing the positions over time of individual
+players captured on camera (see Figure 1).
+
+2.2 Software Architecture
+ASPOGAMO consists of four components: Vision, State Es-
+timation, Track Editor and Motion Model Generator (Fig-
+ure 3).
+
+The two main components that will be described in this
+paper are the Vision (responsible for image processing tasks)
+and the State Estimation (used to estimate camera parameters
+and player positions as well as forming player tracks). They
+interact strongly to simplify each subtask.
+
+Vision
+
+Correspondence
+
+Finder
+
+Player blobs
+
+Player
+
+Detection
+
+Track
+Editor
+
+Motion
+Model
+
+Generator
+
+Predicted
+Parameters
+
+Optical Flow /
+Line Correspond-
+ences
+
+Predicted
+Para m eters
+
+Player
+Position
+Measurement
+
+P
+
+l
+
+H
+
+a
+
+y
+
+y
+
+p
+
+e
+
+o
+
+r
+
+t
+
+h
+
+e
+
+s
+
+e
+
+s
+
+Player
+Tracks
+
+State Estimation
+
+Camera
+Parameter
+Estimation
+
+Camera
+
+Parameters
+
+Player
+Position
+Estimation
+
+Player
+
+Positions
+
+Tracker (MHT)
+
+Hypotheses
+
+Figure 2: Software architecture of the ASPOGAMO system.
+
+ASPOGAMO processes a video-stream by performing the
+following steps for each image. First, the Camera Parameter
+Estimation predicts camera parameters for the current frame
+using optical ﬂow from the Correspondence Finder. Based
+on these predictions, the system uses context information and
+model assumption in order to simplify the player detection
+and the search for line correspondences. The Player Detec-
+tion determines player blobs taking into account the hypothe-
+ses generated by the Tracker. Then, the Correspondence
+Finder uses predicted parameters and the player blobs to ﬁnd
+line correspondences considering occlusions. These are used
+
+in conjunction with the given prediction based on optical ﬂow
+to determine the a posteriori camera parameters and their un-
+certainties in terms of covariances in the Camera Parameter
+Estimation. Knowing the camera parameters, player positions
+and their uncertainties are calculated in the Player Position
+Estimation from the observations made by the Player Detec-
+tion. They are forwarded to the Tracker, where individual po-
+sitions are combined and associated over time, and hypothe-
+ses for the next time step are generated. Once the Tracker
+completes the tracks, they are send to the Track Editor, where
+they are associated with other tracks and receive player IDs
+in a semi-automatic process. Afterwards, completed tracks
+are smoothed and stored as a compacted representation in the
+Motion Model Generator.
+
+3 Camera Parameter Estimation
+
+In order to transform image coordinates into real-world coor-
+dinates, we need the position and direction of the camera as
+well as its intrinsic parameters including zoom factor, pixel
+sizes, principal point and radial distortion coefﬁcient. Be-
+cause the position of the main camera is ﬁxed during the
+game, only the direction (pan and tilt) and the zoom factor
+have to be estimated continuously, as they constantly change
+while the camera tracks the game activity. All other parame-
+ters are determined beforehand in a semi-automatic process.
+
+3.1 Basic Algorithm
+
+ASPOGAMO uses modelbased localization for estimating
+camera parameters: an image of the game (Figure 3 up-
+per left) and a model of the football ﬁeld (upper right) are
+matched together (lower left), and the camera parameters are
+estimated from this match (lower right).
+
+t
+l
+i
+t
+
+zoom
+
+pan
+
+y
+
+z
+
+x
+
+Figure 3: Modelbased localization
+
+The estimation is formulated as an iterative optimization
+problem. First, the model is projected onto the image us-
+ing predicted parameter values. The optimizer then searches
+for image points that correspond to given model points (Fig-
+ure 4), e.g. on ﬁeld lines. Finally, the best match between
+model and image is found by minimizing the distance errors
+obtained from the correspondences. This is done using the It-
+erative Extended Kalman Filter (IEKF). IEKF also gives the
+
+IJCAI-07
+
+2067
+
+uncertainty of the estimation as a covariance matrix, which
+is used amongst others to determine the search window for
+correspondences in the next iteration.
+
+Figure 4: Projected ﬁeldmodel using predicted parameters
+(left), ﬁnding correspondences along the searchlines (right).
+
+3.2
+
+Improvements
+
+Figure 5 shows why the basic algorithm for matching the ﬁeld
+model to the image lines is unreliable. Non homogeneous
+lighting conditions, cast shadows and high color variations
+cause the color classes to be diffuse and to overlap. Segmen-
+tation becomes inaccurate or ambiguous, and eventually fails.
+Low resolution and the inclined camera position causes dis-
+tant lines to almost disappear in the images. Field lines do
+not appear as white, but as a slightly lighter green, making
+them hard to be found by uninformed line detectors. Further-
+more, zoomed in camera views often lack visible lines that
+allow for unambiguous parameter estimation. Motion blur
+caused by fast camera movements is another problem. Also,
+the varying focal length of a camera when zooming changes
+the radial distortion coefﬁcient. Finally, TV broadcasting and
+video compression produces noisy images with pallid colors.
+
+Figure 5: Some hard scenes: different colors in background
+(upper left), cast shadow (upper right), motion blur (lower
+left), not enough ﬁeld features (lower right)
+
+• camera motion must be tracked without the help of
+
+model information if not enough ﬁeld lines are visible,
+
+• the system should be able to recover from failure.
+
+Let us consider some extensions that address these require-
+ments in more detail and result in reliable longterm tracking
+of the camera.
+
+Reliable line detection: To deal with blurry lines and
+edges we apply probabilistic methods for line detection.
+Rather than making a hard color classiﬁcation we assess the
+probability that pixels contain ﬁeld lines. As stated above,
+distant white lines often appear as lighter green. We model
+color classes as a mixture of Gaussians in RGB colorspace
+(see 4.1). ASPOGAMO detects lines by searching points
+where color distributions on both sides apply to the color
+green with a higher intensity in between. Matches are thresh-
+olded depending on the expected linewidth in pixels. The
+quality of a correspondence and its variance is estimated de-
+pending on the match and its uniqueness. A similar method
+is used for edge detection.
+
+To reduce the inﬂuence of outliers (from a quadratic to
+a linear one), we’re using weights for each correspondence
+according to the weight function from Huber [Huber, 1981]
+from the M-Estimators [Zhang, 1997]. Assuming distances
+(errors/costs) of outliers are large, the M-Estimators suppress
+such correspondences.
+
+Tracking without ﬁeld lines: For prediction we use the
+optical ﬂow from two subsequent images. Only 100 randomly
+spread pixels from around the image border are used. Dur-
+ing fast camera movement the rate of outliers increases, and
+without the outlier suppression the camera would be lost in
+a few steps. As the outlier suppression proposed in the up-
+per section has no context information and considers only
+the distance for each correspondence, it might suppress cor-
+rect correspondences having large distances while keeping
+erroneous correspondences having small distances. To ad-
+dress this problem we estimate the most likely homography
+to transform points between the two image planes, which is
+used for estimating correspondence variances and ﬁltering
+outliers. This homography can be calculated using only 4
+point-correspondences in the image plane. The RANSAC al-
+gorithm [Fischler und Bolles, 1981] is a robust method to ﬁnd
+out the most likely homography.
+
+Failure recovery: When the inaccuracies in the parame-
+ter estimation increase, the quality of the correspondences de-
+creases as the projected ﬁeld model starts drifting away from
+its real position. We detect these cases where we lose the
+tracking of the camera. A semi-automatic process is used to
+reinitialize the camera parameters. We currently integrate a
+fully automated ﬁeld matching process into ASPOGAMO.
+
+4 Player Detection
+ASPOGAMO detects players by segmenting blobs on the
+ﬁeld that are not ﬁeld green. Candidate blobs are analyzed
+using size constraints and color models. Players are localized
+using their estimated center of gravity.
+
+These difﬁcult context conditions require that
+• lines contained in the image must be found reliably,
+which implies that outliers and false correspondences
+must be suppressed,
+
+4.1 Used Color Model
+Since football is a spectator sport, the playing ﬁeld, the lines
+and the dresses of the players are designed to be visually dis-
+tinctive. The most informative visual feature herein is color:
+
+IJCAI-07
+
+2068
+
+the ﬁeld is green, the lines are white, and the teams should
+dress so that they can be distinguished easily. We exploit the
+situation by designing algorithms that use color as their pri-
+mary visual feature.
+
+We model color classes as mixture of Gaussians in RGB
+space. This gives us the option to use statistics and probabil-
+ities in both learning and using color models. Having multi-
+modal distributions is important e.g. when trying to segment
+a ﬁeld with cast shadows from a stadium roof (Figure 6). It
+also helps coping with lighting changes and keeping resem-
+bling color classes disjunct. For efﬁciency reasons we scale
+the RGB space down to the 16bit R5G6B5 space and use pre-
+computed lookup tables for distances and densities. Color
+models are learned semi-automatically using k-means clus-
+tering on manually marked regions. The ability to reﬁne the
+learned colors as time progresses is inherent. Fully automated
+color learning will be available in the near future.
+
+Figure 6: Color segmentation on ﬁeld with cast shadow
+
+4.2 Recognizing and Localizing Players
+
+As illustrated in Figure 7, simple color-based segmentation
+of players is doomed to fail. Depending on the camera’s po-
+sition and focus, typical player sizes in the image are around
+30 pixels, but can easily be as small as 10 pixels. Input im-
+ages tend to be very noisy as they are taken directly from TV
+broadcast. Player’s are often occluded by other ones, espe-
+cially in situations like corners or free kicks. Furthermore,
+fast camera movement causes additional motion blur. As a
+result, shapes and colors mix with their neighborhood.
+
+To solve the player recognition task despite these compli-
+cations, we combine simple but powerful perceptual cues in
+a probabilistic manner, in order to achieve robustness, speed
+
+Figure 7: Enlarged players. Pixels are washed-out due to
+the small resolution and motion blur. Players in front of
+advertising-banners are even harder to detect (right image).
+
+Figure 8: Player recognition.
+
+as well as the required precision. In a ﬁrst step, all poten-
+tial player regions unlikely to belong to either the ﬁeld or the
+surroundings are segmented (Figure 8b). We then estimate
+the mass centers of the players, more precisely the center be-
+tween shirt and shorts, as this point prove to be the most ro-
+bust to detect. This is done by calculating a likelihood map
+for the player whereabouts using multiple evidences based
+on color template matching, size constraints and predictions
+(Figure 8c). Player positions are extracted from the map by
+ﬁnding strong modes (Figure 8d) and projecting their coordi-
+nates to a point half a player’s height over the ﬁeld plane.
+
+Let us now consider the computation of the likelihood map
+in more detail (see Figure 9). Potential player regions are
+found by segmenting the ﬁeld and intersecting the inverted
+ﬁeld region with the ﬁeld’s convex hull. The ﬁeld region itself
+is segmented using a hysteresis threshold based on the Maha-
+lanobis distances to the learned ﬁeld and line colors. Sparse
+morphology is used to remove noise and to combine ﬁeld re-
+gions still separated by e.g. ﬁeld lines. The resulting player
+blobs (Figure 9a) may contain more than one person, none,
+or only part of a person, when e.g. a leg got cut off because
+of bad color contrast.
+
+To localize the exact number and positions of players in-
+side the blobs, we use color template matching (Figure 9b),
+where a template (Figure 8a) for every player type is moved
+across every pixel in a blob to calculate a similarity measure.
+The template is scaled to the expected size of a player at the
+respective image position, which can be calculated from the
+estimated camera parameters (see Section 3). The player’s
+appearance is approximated by subdividing the template into
+a shirt, a shorts and a socks region, and associating each of
+them with the respective color classes learned in chapter 4.1.
+We use only distinctive color classes, as hair or skin colors
+do not qualify for separating different player types. The tem-
+plate is centered between shirt and shorts, which coincides
+well with a human’s mass center. To account for inclined
+players, the shirt region of the template is shifted to ﬁve dif-
+ferent conﬁgurations, and the best one is selected. The simi-
+larity measure is calculated from all pixels inside the template
+mask taking into account their probabilities regarding the af-
+
+IJCAI-07
+
+2069
+
+ﬁliation to the template’s associated color classes.
+
+Figure 9: Calculating the likelihood map from Figure 8c.
+First, player blobs are segmented (a). Then, three likelihood
+maps based on color template matching (b), compactness (c)
+and height constraints (d) are calculated. In the last fusion
+step these are multiplied, and likelihoods at predicted player
+positions (e) are increased to form the ﬁnal map (f).
+
+Additional constraints are applied to increase accuracy in
+situations where players are completely dressed in one color,
+or players from different teams share similar colors on differ-
+ent parts of their dresses. In such cases, high likelihoods can
+be observed at positions that do not match the player’s loca-
+tions well. The compactness constraint (Figure 9c) produces
+low likelihoods wherever the overlap between the player
+blobs and the template mask is small, reducing high probabil-
+ities near the blob contours. The size constraint (Figure 9d)
+produces high likelihoods at locations where either the dis-
+tance to the upper blob contour or to the lower blob contour
+is near the optimum for the expected player size. This is justi-
+ﬁed by the fact that the heads of the players should be located
+below the upper contour, and the feet above the lower con-
+tour. In case of bad segmentation, e.g. with feet cut off, there
+is still a good chance that at least the opposing contour has
+been segmented properly.
+
+Finally, the three likelihood maps are fused by multiplica-
+tion, and probabilities near the regions where a hypothesis has
+been returned from our tracker (Figure 9e) are increased. This
+way, bad observations due to partial occlusion or fast motion
+can be enhanced. The resulting likelihood map (Figure 9f)
+is then searched for modes, and if they exceed a predeﬁned
+threshold, a player observation is forwarded to the tracker.
+If the regional overlap between two observations is too high,
+only the stronger observation is selected. The location of the
+player on the ﬁeld plane is then calculated using the estimated
+camera parameters.
+
+There are several issues that deserve discussion: By us-
+ing color template matching with the additional constraints,
+players are recognized quite reliably even in the case of slight
+occlusions. Probabilities and covariances for the observa-
+
+tions can be easily extracted from the likelihood map and
+forwarded to the tracker. False positives and missed detec-
+tions are rare, and can be dealt with by the tracker. Due to the
+simplicity of the detection without extensive exception han-
+dling, the system generalizes well to different situations, e.g.
+wide angle or zoomed in camera views. Even cast shadows
+on the ﬁeld, motion blur or noisy input data can be dealt with,
+provided that the colors have been learned accurately.
+
+Although we use template matching on full resolution PAL
+images (due to the small player sizes), the player detection
+runs at realtime. The template matching is speed up using in-
+tegral images thanks to the square template masks. Another
+contributing performance factor is the use of runlength en-
+coded region masks.
+
+5 Player Tracking
+
+As seen in the previous section, player positions can have big
+measurement errors, player types can be interchanged, false
+positive measurements or undetected players can disturb the
+tracking as well as player clusters. So the tracking of the
+players is not a straightforward task.
+
+In our system we use a Multiple Hypothesis Tracker
+(MHT) [Reid, 1979] to account for missing measurements
+and improve the robustness of the tracking. The input for the
+MHT are the positions and covariance matrices of the mea-
+surements. The output are tags that deﬁne the track afﬁliation
+for the individual measurements. The smoothing capability
+of the internal Kalman/particle ﬁlter is not propagated be-
+cause we always generate a motion model afterwards which
+can produce better approximations to the real path.
+
+The implementation we use is the one described in [Cox
+und Hingorani, 1996] with some improvements to account
+for the non-Gaussian distribution in blobs and the ability to
+assign more than one track to a blob measurement.
+
+6 Empirical Results
+
+We have presented ASPOGAMO at RoboCup 2006, where
+we gathered large amounts of input data from live coverage of
+World Cup 2006 games in Germany and conducted extensive
+experiments under public display.
+
+Camera parameter estimation: The system has been
+able to track the camera without getting lost in almost all
+tested scenes from World Cup 2006 (about 30 scenes, each 10
+to 40 sec long). Using original TV broadcast camera streams
+without scene disruptions, the system is able to track the cam-
+era parameters up to 20 minutes without getting lost. The ac-
+curacy of back-projections on the model-ﬁeld is about 5 cm
+to 1.0 m, depending on the camera movement, the visibility
+of ﬁeld features and the distance to the camera.
+
+Player detection: Table 1 shows the player detection rates
+for some games from the World Cup, that have been deter-
+mined manually by examining 344 randomly selected frames.
+Both the opening game Germany vs. Costa Rica and the game
+Argentina vs. Serbia Montenegro had detection rates over
+90%, despite very noisy input data. The game Portugal vs.
+Iran was challenging because of a strong cast shadow on the
+ﬁeld, making white dressed players in the sunlight hard to de-
+tect even for the human observer. Finally we examined a cor-
+ner situation from the opening game. The missed detections
+
+IJCAI-07
+
+2070
+
+are almost entirely associated to occlusions and clustering of
+players. Our experiments with other games conﬁrm that de-
+tection rates of over 90% are generally achievable.
+
+game
+
+GER - CRC
+ARG - SCG
+POR - IRN
+Corner
+
+player missed
+players
+count
+2353
+4.78%
+5.51%
+1605
+21.96%
+592
+462
+17.53%
+
+mis-
+
+classiﬁed
+0.38%
+1.88%
+3.72%
+3.68%
+
+false
+
+positives
+2.37%
+1.23%
+0.34%
+6.06%
+
+Table 1: detection rates for players
+
+The presented detection rates are based on observations
+that do not exploit the temporal information given in our
+tracker. When incorporating the tracker, most of the errors
+resulting from temporarily missed detections, false positives
+or misclassiﬁcations are resolved. Figure 1 shows both the
+detected players and the created tracks for a short scene. In
+our experiments most of the tracks are complete for as long as
+a player is in camera view, usually until the scene gets inter-
+rupted. Exceptions are players in front of advertising banners
+or extremely clustered scenes like corners.
+
+The inaccuracy of the player detection is typically lower
+than 0.5 m. The precision has been estimated by projecting
+detected image positions and manually determined image po-
+sitions on the virtual ﬁeld plane. Another conclusion obtained
+from the experiments is that if both shirt and short colors are
+similar, pose estimation in vertical image direction is harder,
+and the detected positions tend to oscillate more. But the ef-
+fect is reduced by smoothing and averaging the ﬁnal tracks in
+the Motion Model Generator.
+
+ASPOGAMO is capable of fusing observations from mul-
+tiple cameras viewing the same scene from different posi-
+tions. Experiments have shown that the accuracy of the player
+detection is further improved, as the uncertainties of the mea-
+surements become smaller. ASPOGAMO has also been used
+to gather all player trajectories over a full game of 90 minutes.
+
+7 Related Work
+
+Several approaches in tracking soccer players exist that are
+constrained to static cameras [Figueroa et al., 2004; Xu, Or-
+well, und Jones, 2004; Kang, Cohen, und Medioni, 2003].
+Unfortunately, such systems are complex and expensive in
+their hardware setup. Farin et al. [Farin, Han, und With,
+2005] propose a method for camera calibration in realtime,
+but without player detection. Bebie and Bieri [Bebie und
+Bieri, 1998] and Yamada et al. [Yamada, Shirai, und Miura,
+2002] describe similar systems also tracking players from TV
+broadcast, but both lack experimental results. No other sys-
+tems comparable to ASPOGAMO in terms of reliability, ro-
+bustness and performance are known to us as yet.
+
+8 Conclusions
+
+In this paper we have described ASPOGAMO, a probabilis-
+tic vision-based tracking system for estimating the positions
+of players based on broadcasted football games. The main
+contributions are a set of techniques that make the system
+
+so robust that it reliably functions for broadcasts. The em-
+pirical studies show that the system can cope with difﬁcult
+and changing lighting conditions, fast camera motions, and
+distant players. ASPOGAMO enables computer systems to
+semi-automatically infer abstract activity models of football
+games. These models can be used for supporting coaches,
+football reporters, and interactive television.
+
+References
+[Bebie und Bieri, 1998] Bebie, Thomas und Hanspeter Bieri
+(1998). Soccerman - reconstructing soccer games from
+video sequences. In ICIP (1), pp. 898–902.
+
+(1996).
+
+[Cox und Hingorani, 1996] Cox, Ingemar J. und Sunita L.
+Hingorani
+implementation of
+reid’s multiple hypothesis tracking algorithm and its
+evaluation for the purpose of visual tracking.
+IEEE
+Transactions on Pattern Analysis and Machine Intelli-
+gence 18(2): 138–150.
+
+An efﬁcient
+
+[Farin, Han, und With, 2005] Farin, D., J. Han, und P. With
+(2005). Fast camera calibration for the analysis of sport
+sequences. In Proceedings IEEE International Conference
+on Multimedia and Expo (ICME), pp. 482–485.
+
+[Figueroa et al., 2004] Figueroa, P., N. Leite, RML Barros,
+I. Cohen, und G. Medioni (2004). Tracking soccer players
+using the graph representation. In Proceedings of the 17th
+International Conference on Pattern Recognition (ICPR),
+pp. 787–790.
+
+[Fischler und Bolles, 1981] Fischler, Martin A.
+
+und
+Robert C. Bolles (1981). Random sample consensus: a
+paradigm for model ﬁtting with applications to image
+analysis and automated cartography. Communications of
+the ACM 24(6): 381–395.
+
+[Huber, 1981] Huber, P. J. (1981). Robust Statistics. John
+
+Wiley & Sons, N.Y.
+
+[Kang, Cohen, und Medioni, 2003] Kang, J., I. Cohen, und
+G. Medioni (2003). Soccer player tracking across uncali-
+brated camera streams. In Proceedings of IEEE CVPR.
+
+[Reid, 1979] Reid, D. B. (1979). An algorithm for tracking
+IEEE Transactions on Automatic Con-
+
+multiple targets.
+trol 24(6): 843–854.
+
+[Xu, Orwell, und Jones, 2004] Xu, Ming, James Orwell, und
+Graeme Jones (2004). Tracking football players with mul-
+tiple cameras.
+International Conference on Image Pro-
+cessing, ICIP 04 .
+
+[Yamada, Shirai, und Miura, 2002] Yamada, A., Y. Shirai,
+und J. Miura (2002). Tracking players and a ball in
+video image sequence and estimating camera parameters
+for 3d interpretation of soccer games. In Proceedings of
+the 16 th International Conference on Pattern Recognition
+(ICPR’02), Vol. 1, pp. 10303–10306.
+
+[Zhang, 1997] Zhang, Z. (1997). Parameter estimation tech-
+niques: a tutorial with respect to conic ﬁtting. Image and
+Vision Computing 15(1): 59–76.
+
+IJCAI-07
+
+2071
+
+

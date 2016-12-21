@@ -1,0 +1,969 @@
+Factored Planning Using Decomposition Trees
+
+Elena Kelareva
+
+Olivier Buffet,∗ Jinbo Huang, Sylvie Thi´ebaux
+
+University of Melbourne
+
+National ICT Australia and Australian National University
+
+Melbourne, Victoria 3010 Australia
+e.kelareva@ugrad.unimelb.edu.au
+
+Canberra, ACT 0200 Australia
+
+{ﬁrstname.lastname}@nicta.com.au
+
+Abstract
+
+Improving AI planning algorithms relies on the
+ability to exploit the structure of the problem at
+hand. A promising direction is that of factored
+planning, where the domain is partitioned into sub-
+domains with as little interaction as possible. Re-
+cent work in this ﬁeld has led to an detailed theoret-
+ical analysis of such approaches and to a couple of
+high-level planning algorithms, but with no prac-
+tical implementations or with limited experimen-
+tations. This paper presents dTreePlan, a new
+generic factored planning algorithm which uses a
+decomposition tree to efﬁciently partition the do-
+main. We discuss some of its aspects, progres-
+sively describing a speciﬁc implementation before
+presenting experimental results. This prototype al-
+gorithm is a promising contribution—with major
+possible improvements—and helps enrich the pic-
+ture of factored planning approaches.
+
+1 Introduction
+
+Improving AI planning algorithms relies on the ability to ex-
+ploit the structure of the problem at hand. Being particularly
+interested in composite systems, i.e., in planning in a network
+of components, we investigate a promising direction known
+as factored planning, where the domain is partitioned into
+subdomains with as little interaction as possible.
+
+Factored planning is related to abstract planning, as both
+involve planning on abstracted versions of the original prob-
+lem. Abstract planning usually involves progressively reﬁn-
+ing a plan while going down a sequence of decreasingly ab-
+stract domains, backtracking if the current plan cannot be re-
+ﬁned further [Knoblock et al., 1991]. Factored planning may
+take a different path: two recent approaches amount to simul-
+taneously ﬁnding all plans (up to a given length) in different
+subdomains, then trying to merge them into a global solution
+[Amir and Engelhardt, 2003; Brafman and Domshlak, 2006].
+They avoid backtracking at the cost of computing all possi-
+ble plans for the subdomains, which may be potentially very
+expensive.
+
+∗Olivier Buffet is now at LAAS-CNRS, France.
+
+Our approach is different in that our algorithm is a form
+of abstract planning which makes use of the factorisation of
+the problem. In this respect, it is more related to localised
+planning [Lansky and Getoor, 1995], having the same advan-
+tage of not being limited to domains with explicit hierarchi-
+cal structure. A characteristic of our algorithm is that it uses
+a decomposition tree (dtree) [Darwiche, 2001], rather than a
+junction tree, for domain factorisation. The resulting algo-
+rithm, dTreePlan, is rather generic, and is a ﬁrst attempt to
+design a new algorithm for factored planning with backtrack-
+ing. It can beneﬁt from different improvements and different
+choices for the underlying planner are possible.
+
+We also present a particular implementation based on
+planning as satisﬁability [Kautz and Selman, 1992], using
+zChaff as the low-level planner [Moskewicz et al., 2001].
+We explore several implementation details, mostly aiming at
+reducing backtracking, such as different forms of abstrac-
+tion and the use of caching techniques. This results in au-
+tomated algorithms both for factorisation and for planning.
+The experiments show encouraging results, and the analysis
+of dTreePlan leads to various directions where improve-
+ments are possible, making it a very promising algorithm.
+
+Our setting and background knowledge on factored plan-
+ning are presented in Section 2. The generic dTreePlan
+algorithm is introduced in Section 3. Details of the imple-
+mentation and improvements are described in Section 4. Sec-
+tion 5 presents experimental results, followed by a discussion
+and conclusion.
+
+2 Background
+
+2.1 Planning Problem
+
+Our planning problem formulation uses STRIPS operators
+with conditional effects and goals as conjunctions of literals.
+Yet, a large part of our algorithm extends to more complex
+settings (negative preconditions, multi-valued variables...).
+Only the restricted form of objective is a rigid assumption in
+this paper. The optimality criterion we consider is the length
+of the complete plan.
+
+A running example we will use in the remainder of this
+paper is the window problem, described in Figure 1, where
+someone wants to throw a ball into a room without breaking
+the window.
+
+IJCAI-07
+
+1942
+
+Variables:
+
+open ? {true, false}
+broken ? {true, false}
+ball ? {inside, outside}
+
+Actions:
+
+Open:
+
+(open=false)
+
+Close:
+
+-> Set(open=true)
+
+(open=true & broken=false) -> Set(open=false)
+
+Throw:
+
+(open=true & ball=outside) -> Set(ball=inside)
+(open=false & ball=outside) -> Set(ball=inside
+
+& broken=true & open=true)
+
+Init state: ball=outside & open=false & broken=false
+Goal state: ball=inside & open=false & broken=false
+
+Figure 1: The window problem.
+
+2.2 Factored Planning
+
+Factored planning raises two questions: how to factor a given
+problem and how to plan using this factorisation. Factoring
+is the process of partitioning a domain into possibly overlap-
+ping subdomains. Then, planning starts by solving simple
+abstracted problems, and tries to merge their solutions or im-
+prove them to get solutions to more complex problems, up to
+solving the original problem.
+
+To create subdomains, we need to cluster actions from the
+
+original domain. A subdomain di is then deﬁned by:
+
+1. the variables appearing in its cluster of actions ci and
+2. its actions, made of real actions (actions within the clus-
+ter) plus possibly abstract actions (abstracted versions
+of actions from some other clusters).
+
+A sequence of consecutive abstract actions is a hole in a plan.
+In the window problem we consider one cluster per action.
+Abstract actions make it possible for the Open cluster to
+close the window.
+
+We are mainly interested in composite systems, where a
+set of controllable components are interacting through shared
+variables (representing communications and possibly indirect
+interactions) and organised under a network topology. This
+leads us to a ﬁrst suggestion for factoring: using components
+c ∈ C as building blocks, seen as clusters of actions in the
+causal graph of the problem. This is an intuitively appealing
+choice as actions within a component are prone to act and
+depend on the same internal variables. Yet this does not tell
+us how this set of blocks should be organised. Indeed, we will
+not apply the same tree decomposition of the components’
+network as most other approaches.
+
+Existing Factored Planners
+Two recent factored planners are PartPlan [Amir and
+Engelhardt, 2003] and LID-GF [Brafman and Domshlak,
+2006]. Both use a tree decomposition with actions distributed
+among all nodes, and plan recursively by computing all pos-
+sible plans (with holes for other actions) in all subtrees of a
+node before planning in the current node by merging subplans
+and inserting actions local to the node. Among the incomplete
+plans produced in a node, many will turn out to be infeasible,
+if there is no possibility to complete them (ﬁll their holes).
+
+This gives a dynamic programming algorithm since planning
+starts at the leaves and goes up to the root, where the plan
+to be executed is selected. The only form of backtracking is
+when restarting the algorithms with plans of length l + 1 if no
+plan of length at most l was found.
+
+Even though actions in lower levels of the tree are ab-
+stracted out in higher levels and many subplans disappear be-
+cause they cannot be merged in some way, the approach has
+potentially huge memory requirements and its practicability
+has not been established yet. Moreover, the local planners
+(inside a given node) do not know anything about actions in
+non-descendant nodes, whereas some knowledge could help
+prune some infeasible plans: plans with holes that cannot be
+ﬁlled. Finally, these two planners extend the length of plans in
+all subdomains at the same time, leading to local optimality,
+but not guaranteeing minimum length of the complete plan
+[Brafman and Domshlak, 2006].
+
+3 Algorithm
+3.1 An Abstract Planner
+We ﬁrst
+introduce a particular abstract planning proce-
+dure, using an arbitrary ordering over the action clusters
+c1, . . . , c|C| (supposed to be already selected). The planning
+process consists in planning in these clusters in order (c1 be-
+ing the root). In cluster ci, a planning problem is deﬁned by:
+
+Actions = ci’s real actions, plus abstract actions replacing
+
+actions from ci+1, . . . c|C| when in ci.
+
+Variables = Variables appearing in ci’s real actions only.
+This is not necessarily a subset or a superset of variables
+in other clusters.
+
+Goal = For c1, the goal is deﬁned by the original problem.
+For any other cluster ci, the goal is to ﬁll a set of holes
+Λ = {λ1, · · · , λ|Λ|} passed on by ci−1 and projected on
+ci’s variables.
+
+Actions and variables deﬁne the subdomain at level i,
+
+which depends on ci and on the clusters down the tree.
+
+The complete plan can be seen as a tree in which a node is
+a plan whose holes are completed by children subplans. De-
+pending on whether ci−1 passes on its holes to ci one at a time
+or all at once, the process is either a depth-ﬁrst or a breadth-
+ﬁrst traversal. If no plan is found that can be completed by
+child ci, a failure is signiﬁed to its parent ci−1. The window
+problem (Figure 2a) is easy to solve if the Throw cluster is
+c1, as it quickly produces a ﬁrst plan with Throw preceded
+by some abstract action making open true and followed by
+another one making open false.
+
+The depth-ﬁrst version is detailed in Algorithm 1, omit-
+ting projections on subdomains. Taking a hole λi−1 given
+by ci−1 (except when i = 1), ci tries each plan πi made of
+ci’s real and abstract actions and satisfying λi−1 until πi’s
+holes can be ﬁlled by FillHoles(). Each call of PlanForHole()
+returns a new plan, up to exhaustion. Subplans returned by
+FillHoles() are attached to πi’s holes (as children in a tree).
+AbstractReplan() and ReFillHoles() are used when Fill-
+Holes() has to backtrack. They make it possible to look for
+the next plan (and subplans) ﬁlling a given hole. The loop
+stops when ci returns a valid plan with subplans, or when
+there is no more plan to try.
+
+IJCAI-07
+
+1943
+
+Algorithm 1: Abstract Planner (Depth-First)
+
+ABSTRACTPLAN(λi−1: hole passed on by ci−1)
+if isLeaf(this) then return PlanForHole(λi−1)
+repeat
+
+πi ← PlanForHole(λi−1)
+if failure(πi) then return failure
+Π(cid:2) ← FillHoles(πi.holes())
+
+)
+
+until ¬ failure(Π(cid:2)
+)
+return πi.attach(Π(cid:2)
+FILLHOLES(Λi−1: list of holes)
+if isEmpty(Λi−1) then return ∅
+π ← child.AbstractPlan(Λi−1.head())
+if failure(π) then return failure
+Π(cid:2) ←FillHoles(Λi−1.tail())
+while failure(Π(cid:2)
+
+) do
+
+π ← child.AbstractReplan(Λi−1.head())
+if failure(π) then return failure
+Π(cid:2) ←FillHoles(Λi−1.tail())
+
+(cid:2)
+
+Π(cid:2)
+
+return {π}
+ABSTRACTREPLAN(λi−1: hole passed on by ci−1)
+if isLeaf(this) then return PlanForHole(λi−1)
+Π(cid:2) ← ReFillHoles(πi.holes())
+while failure(Π(cid:2)
+
+) do
+
+πi ← PlanForHole(λi−1)
+if failure(πi) then return failure
+Π(cid:2) ← FillHoles(πi.holes())
+
+)
+
+return πi.attach(Π(cid:2)
+REFILLHOLES(Λi−1: list of holes)
+if isEmpty(Λi−1) then return failure
+Π(cid:2) ←ReFillHoles(Λi−1.tail())
+while failure(Π(cid:2)
+
+) do
+
+π ← child.AbstractReplan(Λi−1.head())
+if isEmpty(π) then return failure
+Π(cid:2) ←FillHoles(Λi−1.tail())
+
+(cid:2)
+
+return {π}
+
+Π(cid:2)
+
+From now on, the clusters visited after (before) cluster ci
+
+are called future (past) clusters for ci.
+
+3.2 Ordering the Action Clusters
+To make Algorithm 1 more efﬁcient, it is very important to
+choose the visiting order of clusters (which speciﬁes the sub-
+domains). The ordering could be dynamic: which cluster to
+visit next could depend on which variables appear in the holes
+to ﬁll. But we will focus on ﬁxed ordering in this work.
+
+Choosing an ordering requires analysing the actions and
+the variables they depend on. We have already mentioned
+that subdomains should regroup real actions whose precon-
+ditions and effects are linked to the same group of variables
+(here using actions within a cluster). But if two partitions of
+a domain should share as few variables as possible, the or-
+dering of the resulting subdomains should be such that two
+consecutive subdomains share as many variables as possible,
+with a view to early backtracking by quickly identifying un-
+satisﬁable constraints.
+
+To sort the clusters we propose using a decomposition tree
+(dtree) [Darwiche, 2001], which recursively splits the orig-
+
+inal domain into subdomains up to leaves corresponding to
+individual clusters of actions. A dtree’s subtrees can be seen
+as neighbourhoods, which are a good basis for ﬁnding an or-
+dering on its leaves. Dtrees correspond to branch decom-
+positions known in graph theory [Robertson and Seymour,
+1991], and were used in [Darwiche, 2001] to specify recur-
+sive decompositions of a Bayesian network down to its fam-
+ilies. In [Huang and Darwiche, 2003], dtrees were used to
+specify recursive decompositions of a CNF formula down to
+its clauses. For our purposes here, a dtree is a full binary tree
+whose leaves correspond to clusters of actions of the planning
+problems; see Figure 2b, where all clusters (leaves) contain a
+single action and each node is annotated with the variables
+shared between its subtrees. We assume that the children of a
+dtree node will be visited from left to right.
+
+Throw
+
+Close
+
+Open
+
+{open,
+broken,
+ball}
+
+{open}
+
+{open}
+
+Open
+
+{open,
+broken}
+
+{open,
+broken,
+ball}
+
+a) Top-Down View
+
+b) Dtree View
+
+Throw
+
+Close
+
+Figure 2: Two views of our running example
+
+To generate a dtree, we use the tool described in [Darwiche
+and Hopkins, 2001], which employs the technique of hyper-
+graph partitioning. Our hypergraph is constructed by hav-
+ing a node for each action and a hyperedge for each vari-
+able, connecting all nodes (actions) in which this variable ap-
+pears. The hypergraph is then recursively partitioned into two
+(balanced) parts while attempting to minimise the number of
+edges across. The resulting dtree is expected to have rela-
+tively small cutsets, i.e., few variables shared between sub-
+trees.
+
+Such a dtree speciﬁes a recursive decomposition of the do-
+main down to actions. However, one will generally wish for
+a subdomain to contain more than just a single action. This
+can be accomplished simply by regarding an internal node
+of the dtree as a subdomain (containing all the actions rep-
+resented by the leaves under that node). Speciﬁcally, we im-
+plemented a clustering process where, given a dtree of depth
+d and a clustering level cl ∈ [0, 1], all dtree nodes at depth
+(1 − cl) × d are treated as subdomains in which no further
+decomposition takes place. In Section 5 we also experiment
+with an alternative scheme where action clusters correspond
+to components in the original planning problem, and a dtree
+is built with these pre-formed clusters as leaves.
+
+Reordering Subtrees
+As explained above, a dtree only speciﬁes neighbourhood re-
+lationships between leaves. Since we assume that children of
+a dtree node are visited from left to right, ﬂipping the children
+of any node produces a different ordering of subdomains. To
+decide on the order of children we employ a simple heuris-
+
+IJCAI-07
+
+1944
+
+tic inspired from goal-regression. It takes the list of variables
+appearing in the goal deﬁnition and rearranges the dtree to
+put the cluster able to modify most of them in the ﬁrst vis-
+ited (leftmost) leaf. Then the process is repeated with the
+list of variables appearing as (pre)conditions in this ﬁrst clus-
+ter, so as to place the next “best” cluster on the second leaf.
+This means that, assuming the Close node on Figure 2 was
+a complex subtree and leaf Throw had just been placed at the
+leftmost position, variables appearing in Throw’s precondi-
+tions would be used in Open’s subtree to position its best leaf.
+This is a simple recursive process happening while traversing
+the tree (and rearranging it on the way); see Algorithm 2.
+
+Algorithm 2: reOrder
+
+REORDER()
+goalV ars ← variables in the goal deﬁnition
+reOrderRec(goalV ars)
+REORDERREC(vars: list of variables)
+if isLeaf(this) then return this.preCondVars()
+#l ←nSharedVars(vars, lef tChild.modiﬁedVars())
+#r ←nSharedVars(vars, rightChild.modiﬁedVars())
+if #l < #r then swap(lef tChild, rightChild)
+(cid:2) ←reOrderRec(lef tChild, vars)
+vars
+(cid:2)
+vars” ←reOrderRec(rightChild, vars
+return vars”
+
+)
+
+3.3 dTreePlan
+Visiting the leaves in order can be achieved by a simple dtree
+traversal. The result is shown in Algorithm 3, where we omit
+ReDTreePlan() and ReFillHoles(). dTreePlan returns a plan-
+tree whose leaves may have unﬁlled holes. π.holes() returns
+these holes in an ordered list. Note that the traversal of the
+plan—seen as a tree—is neither a depth-ﬁrst nor a breadth-
+ﬁrst traversal: holes are reﬁned one at a time within each
+“neighbourhood” (sub-dtree).
+
+4 Implementation Details, Improvements
+
+section presents a particular
+
+This
+implementation of
+dTreePlan used for experimentation and including several
+improvements.
+
+4.1 Abstract Actions
+
+Abstract actions can be more or less informative regarding fu-
+ture clusters’ abilities. We have deﬁned two types of abstract
+actions with a view to evaluating their relative efﬁciency. Def-
+initions below take the point of view of one cluster (one level
+of abstraction):
+
+• H(ole) actions:1 Actions changing any variable shared
+with future clusters. One way of implementing them is
+to create one action violating the frame axiom in that any
+shared variable can get any value after this action. This
+action should not have any preconditions and should not
+modify any other variable.
+
+1Hole actions are quite similar to ﬂuent-setting actions in [Amir
+
+and Engelhardt, 2003].
+
+Algorithm 3: dTreePlan (Depth-First)
+
+DTREEPLAN(λ: hole passed on by parent)
+if isLeaf(this) then return PlanForHole(λ)
+πl ← lef tChild.dTreePlan(λ)
+if failure(πl) then return failure
+Πr ← FillHoles(πl.holes())
+while failure(Πr) do
+
+πl ← lef tChild.ReDTreePlan(λ)
+if failure(πl) then return failure
+Πr ← FillHoles(πl.holes())
+
+: list of holes)
+) then return ∅
+
+return πl.attach(Πr)
+FILLHOLES(Λ(cid:2)
+if isEmpty(Λ(cid:2)
+πl ← rightChild.dTreePlan(Λ(cid:2)
+if failure(πl) then return failure
+Π(cid:2) ←FillHoles(Λi−1.tail())
+while failure(Π(cid:2)
+
+) do
+
+.head())
+
+π ← rightChild.ReDTreePlan(Λi−1.head())
+if failure(π) then return failure
+Π(cid:2) ←FillHoles(Λi−1.tail())
+
+(cid:2)
+
+return {π}
+
+Π(cid:2)
+
+• V(irtual) actions: Abstracted versions of the actions
+in future clusters (with non-shared variables removed).
+This is a many-to-one mapping from real actions in fu-
+ture clusters to abstract actions in the current cluster.
+
+Note: “hole” = “sequence of abstract actions” ((cid:5)= “H action”).
+Other types of abstract actions could be proposed. H ac-
+tions have the advantage of not requiring any knowledge of
+future clusters apart from the variables they share with the
+current cluster. This could help design a planning process
+going through independent components who want to keep
+their capabilities private. V actions are much more informa-
+tive, which should help avoid infeasible holes, but which also
+brings us closer to central planning.
+
+4.2 Tree Traversal
+We use the depth-ﬁrst algorithm because it makes use of the
+domain factorisation: it turns out to be a compromise between
+reﬁning one hole at a time and working preferably within
+neighbourhoods. Note that the breadth-ﬁrst version is strictly
+equivalent to a classical breadth-ﬁrst abstract planner.
+
+The tree traversal also depends on π.holes(). This func-
+tion can return one hole for each sequence of consecutive ab-
+stract actions, or for each abstract action. Although the for-
+mer seems more promising to reduce backtracking, our ex-
+periments use the latter.
+
+4.3 Caching
+When backtracking, it will be quite common for a given node
+to be asked several times to solve the same subproblem. A
+good way to avoid such replanning is to cache solutions to
+such subproblems, or to keep track of subproblems which
+cannot be solved. The strategy we adopted is mixing both
+ideas:
+
+• in each leaf node are stored all already computed plans
+
+for each already encountered subproblem, and
+
+IJCAI-07
+
+1945
+
+• in each internal node are stored all encountered subprob-
+
+lems known to be unsolvable.
+
+The latter is less informative and thus produces smaller
+savings, but helps reduce space complexity. Note that caching
+all plans and using H actions would lead to an algorithm shar-
+ing similarities with PartPlan or LID-GF as it would com-
+pute subplans only once and store them in memory.
+
+4.4 Planning as Satisﬁability
+SAT planners, as introduced in [Kautz and Selman, 1992],
+encode a planning problem into a propositional formula to
+be solved by a SAT solver. We adopt this approach in the
+implementation of dTreePlan, using the publicly available
+zChaff SAT solver [Moskewicz et al., 2001].
+
+The choice of a SAT planner as the low-level planner
+has several advantages. First, it makes it possible to give
+an incomplete plan as a problem for some subdomain: this
+amounts to specifying values for some variables at appropri-
+ate time steps. Second, H actions are easily encoded by SAT
+by locally removing the frame axiom for variables shared
+with future clusters: it sufﬁces to specify that their values at
+time t are not related to their values at time t + 1. Third, one
+can use abstract actions placed by past clusters as constraints,
+requiring that the action replacing it matches its deﬁnition.
+
+Controlling the plan length
+As is typical with SAT planners, we search for increasingly
+longer plans while no solution is found. This guarantees op-
+timality while PartPlan and LID-GF only guarantee local
+optimality.
+
+Moreover, as the need for backtracking partially depends
+on the number of holes generated in each plan, dTreePlan
+also iterates over an increasing number of abstract actions in
+each subplan. This increase is not linear, as it would lead to
+adding a huge number of clauses. Instead, the algorithm plans
+with (1) no abstract action, (2) one abstract action, and then
+(3) any number of abstract actions.
+
+Improvements
+
+5 Experiments
+5.1
+A ﬁrst set of experiments has aimed at evaluating the effect of
+the different improvements added to our basic dTreePlan
+algorithm (with H actions). It uses the Robot-Charger prob-
+lem described in [Amir and Engelhardt, 2003], where a robot
+wants to upgrade its battery charger but needs to charge
+its batteries while achieving this goal. We designed vari-
+ants by changing the number of batteries and lines (named
+xbatyline).
+
+Table 1 reports computation times (in seconds averaged
+over 100 runs) on 1bat1line with a clustering level of 0.5 and
+the following versions of dTreePlan:
+Basic basic dTreePlan, with no improvement from Section 3.
+IncrNAct Basic, with incremental number of actions.
+IncrMaxH IncrNAct with incremental number of H actions.
+Caching IncrMaxH with plan caching.
+
+The reOrder() function was not used, so that four differ-
+ent tree shapes were possible, denoted by the order of visited
+clusters: Switch (S), Connect+AddLine (CA), Charge (C).
+
+Table 1: Effect of various improvements
+
+Algorithm
+
+Basic
+IncrNAct
+IncrMaxH
+Caching
+
+Dtree Shape
+S(CA)C CS(CA)
+4.463
+2.698
+2.645
+1.159
+
+1.950
+1.036
+1.169
+0.898
+
+(CA)CS C(CA)S
+107.186
+6.731
+6.447
+1.263
+
+8.993
+25.655
+24.613
+2.332
+
+As can be observed, each improvement clearly speeds up
+the planning process, except the increase in the number of
+holes, where the gain is limited. The main exception is with
+dtree shape (CA)CS, where the vanilla dTreePlan is made
+slower by IncrNAct and IncrMaxH. Finally, it is important to
+be aware that the reOrder() procedure would produce dtree
+shape S(CA)C, which proves to be the most efﬁcient.
+
+5.2 Various Planning Parameters
+
+Having decided to use the improvements mentioned in pre-
+vious section, we conducted a second set of experiments to
+evaluate dTreePlan with different parameters. In Table 2,
+each column presents planning time (in seconds) for a given
+clustering level (2 = component clustering) and a given type
+of abstract action (H = H action, V = V action). The last col-
+umn shows results with central planning (C): zChaff used
+with no factorisation. The ﬁrst column indicates the number
+of batteries and segments in the Robot-Charger problem con-
+sidered.
+
+Table 2: Effect of clustering level and type of abstract action
+
+#batt
+x#seg
+1x1
+1x2
+2x1
+2x2
+1x3
+2x3
+3x1
+3x2
+3x3
+3x4
+4x3
+4x4
+4x5
+
+Planning Parameters
+
+0 H 0.5 H
+0.71
+0.38
+0.51
+-
+0.49
+2.55
+0.65
+-
+0.85
+-
+-
+1.24
+4.09
+99.42
+5.28
+-
+13.48
+-
+-
+20.04
+-
+-
+-
+-
+-
+-
+
+0 V 0.5 V
+0.43
+0.51
+0.92
+0.61
+0.43
+0.43
+0.49
+0.49
+3.19
+1.71
+0.85
+0.85
+0.92
+0.97
+1.03
+1.09
+1.52
+1.63
+4.20
+4.03
+12.38
+13.33
+15.60
+16.50
+30.71
+30.03
+
+2 V
+0.36
+0.40
+0.63
+1.90
+0.37
+26.48
+2.41
+15.26
+-
+-
+-
+-
+-
+
+C
+0.37
+0.47
+0.49
+0.81
+0.73
+1.94
+1.95
+3.32
+6.08
+13.15
+-
+-
+-
+
+On small domain instances, most parameter settings ap-
+pear more or less equivalent. Only clustering level 0 with
+H actions has bad performance from the beginning. Cluster-
+ing level 0 or 0.5 with V actions appears to scale better than
+the centralised algorithm, even though their planning time ap-
+pears unimpressive on some instances (as 1x3). This conﬁrms
+that V actions are a good means to prune out infeasible plans.
+This experiment also shows that components may not be an
+effective basis for decomposition. Finally, unknown values
+(-) correspond to durations over 2 minutes or failures due to
+memory exhaustion (probably linked to our caching strategy).
+
+IJCAI-07
+
+1946
+
+6 Discussion, Future Work
+
+Acknowledgments
+
+dTreePlan is a ﬁrst attempt to design a new algorithm for
+factored planning with backtracking. This paper has pre-
+sented a speciﬁc implementation based on SAT planning to-
+gether with several improvements. The experiments pre-
+sented in previous section show that there is an advantage
+over direct central planning if action clusters are visited in an
+appropriate order.
+
+A ﬁrst direction for improvements is that of rearranging the
+dtree. As discussed in Section 3, a dtree does not deﬁne the
+ordering of subtrees: it speciﬁes neighbourhood constraints
+for the leaves rather than a precise ordering. It has been found
+particularly useful to choose the ordering with a very crude
+heuristic; hence an interesting avenue is to make use of more
+knowledge of the planning problem to rearrange the dtree. As
+in [Helmert, 2004; Brafman and Domshlak, 2006], the causal
+graph of a planning problem seems to be a good starting point
+for that. The order could also be changed on the ﬂy, since
+the current plan could suggest following the right child of a
+node ﬁrst, rather than the left one. But this would require
+recomputing abstract actions for each cluster as they mainly
+depend on future clusters.
+
+In the dTreePlan framework, both the caching strat-
+egy and the SAT planner used could be replaced by alter-
+native solutions. For example, it may not be necessary to
+store complete feasible plans: one may just store the holes
+they generate—the only thing required when searching for a
+solution—and replan when the details of a stored plan are re-
+quired. It is also possible to replace zChaff—which is a
+generic SAT solver— by a SAT planner such as SATplan or
+MAXplan.
+
+A ﬁnal possible improvement we mention is to compute a
+lower bound on the plan duration. Given a node of the dtree
+and its two children, a lower bound on the node’s plan length
+can be computed by planning in both children on problem re-
+stricted to their internal (non-shared) variables, or more pre-
+cisely to variables no one else can modify. Adding the re-
+sulting plan lengths gives a lower bound for the node. This
+process can even be applied recursively from the leaves to the
+root. A possible heuristic is also to estimate the overall plan
+length by blindly adding the length of plans computed within
+leaves using the overall goal and V actions in each case.
+
+7 Conclusion
+
+We have presented dTreePlan, a generic factored planning
+algorithm aiming at avoiding the space complexity of dy-
+namic programming approaches and using a dtree for factori-
+sation. Preliminary results show that a SAT-based implemen-
+tation scales better than raw SAT planning. The algorithm is
+complete, and could still beneﬁt from major improvements.
+
+This work also illustrates the connection between abstract
+and factored planning. Apart from direct improvements, re-
+search directions include the management of more complex
+goals (objectives speciﬁed with temporal logic), the use of
+non-deterministic/stochastic actions, and the problem of dis-
+tributing a plan over several components for execution.
+
+This work has been supported in part via the SuperCom
+project at NICTA. NICTA is funded through the Australian
+government’s Backing Australia’s Capabilities initiative, in
+part through the Australian research council.
+
+References
+[Amir and Engelhardt, 2003] E. Amir and B. Engelhardt.
+Factored planning. In Eighteenth International Joint Con-
+ference on Artiﬁcial Intelligence (IJCAI’03), 2003.
+
+[Brafman and Domshlak, 2006] R. Brafman and C. Domsh-
+lak. Factored planning: How, when and when not.
+In
+Proceedings of the Twenty-First National Conference on
+Artiﬁcial Intelligence (AAAI’06), 2006.
+
+[Darwiche and Hopkins, 2001] A. Darwiche and M. Hop-
+kins. Using recursive decomposition to construct elimi-
+nation orders, join trees, and dtrees.
+In Proceedings of
+the Sixth European Conference for Symbolic and Quanti-
+tative Approaches to Reasoning under Uncertainty (EC-
+SQARU’01), 2001.
+
+[Darwiche, 2001] A. Darwiche. Recursive conditioning. Ar-
+
+tiﬁcial Intelligence Journal, 125(1–2):5–41, 2001.
+
+[Helmert, 2004] M. Helmert. Planning heuristic based on
+causal graph analysis.
+In Proceedings of the Fourteenth
+International Conference on Automated Planning and
+Scheduling (ICAPS’04), pages 161–170, 2004.
+
+[Huang and Darwiche, 2003] J. Huang and A. Darwiche. A
+structure-based variable ordering heuristic for SAT.
+In
+Proceedings of the Eighteenth International Joint Confer-
+ence on Artiﬁcial Intelligence (IJCAI’03), 2003.
+
+[Kautz and Selman, 1992] H. A. Kautz and B. Selman. Plan-
+ning as satisﬁability. In Proceedings of the Tenth European
+Conference on Artiﬁcial Intelligence (ECAI’92), 1992.
+
+[Knoblock et al., 1991] C.A. Knoblock, J.D. Tenenberg, and
+Q. Yang. Characterizing abstraction hierarchies for plan-
+ning. In Proceedings of the Ninth National Conference on
+Artiﬁcial Intelligence (AAAI’91), 1991.
+
+[Lansky and Getoor, 1995] A.L. Lansky and L.C. Getoor.
+Scope and abstraction: Two criteria for localized planning.
+In Proceedings of the Fourteenth International Joint Con-
+ference on Artiﬁcial Intelligence (IJCAI’95), pages 1924–
+1930, 1995.
+
+[Moskewicz et al., 2001] M. W. Moskewicz, C. F. Madigan,
+Y. Zhao, L. Zhang, and S. Malik. Chaff: engineering an
+efﬁcient SAT solver. In Proceedings of the Thirty-Eighth
+Conference on Design Automation, pages 530–535, 2001.
+
+[Robertson and Seymour, 1991] N. Robertson and P. D.
+Graph minors X: Obstructions to tree-
+Seymour.
+decomposition. Journal of Combinatorial Theory, Series
+B, 52(2):153–190, 1991.
+
+IJCAI-07
+
+1947
+
+

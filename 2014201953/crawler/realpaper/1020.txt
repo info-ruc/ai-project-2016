@@ -1,0 +1,1273 @@
+Planning for Gene Regulatory Network Intervention
+
+Daniel Bryce & Seungchan Kim
+
+Department of Computer Science and Engineering
+
+Arizona State University, Brickyard Suite 501
+
+699 South Mill Avenue, Tempe, AZ 85281
+
+{dan.bryce, dolchan}@asu.edu
+
+Abstract
+
+Modeling the dynamics of cellular processes has re-
+cently become a important research area of many
+disciplines. One of the most important reasons
+to model a cellular process is to enable high-
+throughput in-silico experiments that attempt to
+predict or intervene in the process. These ex-
+periments can help accelerate the design of thera-
+pies through their cheap replication and alteration.
+While some techniques exist for reasoning with cel-
+lular processes, few take advantage of the ﬂexible
+and scalable algorithms popularized in AI research.
+In this domain, where scalability is crucial for feasi-
+ble application, we apply AI planning based search
+techniques and demonstrate their advantage over
+existing enumerative methods.
+
+1 Introduction
+The cell maintains its functions via various interconnections
+and regulatory controls among genes and proteins. Therefore,
+it is critical, for understanding the living cell, to unravel how
+such cellular components as genes and proteins interact with
+each other. Mathematical modeling and computational simu-
+lation of cellular systems, especially gene regulatory systems,
+has been crux of computational systems biology, or biomed-
+ical science in general. Once a model is constructed, it can
+be used to predict the behavior of a cellular system under un-
+usual conditions, to identify how a disease might develop,
+and/or how to intervene such development to prohibit cells
+from reaching undesirable states. Such models can aid biol-
+ogists by quickly ruling out or conﬁrming simple hypotheses
+before expensive and time-consuming wet lab experiments.
+
+In this paper, we address the problem of planning to in-
+tervene in cellular processes, focusing on gene regulatory
+networks (GRNs). A GRN describes a cellular process by
+a set of genes and their regulatory inﬂuences over each
+other. GRNs focus solely on genes (omitting proteins or
+other molecules) to model the high level behavior of many
+genes versus the low level behavior of a much smaller sys-
+tem. Because practical GRN models are typically learned
+from micro-array data [Kim et al., 2000], they are situated
+at the right level of granularity for automated parametriza-
+tion. Micro-array experiments measure the activity level of
+
+thousands of genes from living tissue in terms of mRNA con-
+centrations (the products of gene transcription used to code
+proteins). Correlations between observed gene activity lev-
+els help describe regulatory inﬂuences. Predictor functions
+characterize the regulatory inﬂuences and provide a dynamic
+model (e.g., when g1 and g2 are highly active, g3 becomes
+inactive). The GRN state models the activity levels of genes
+and the predictor functions describe possible next states. Out-
+side interventions (e.g., using RNA interference to suppress a
+gene’s activity level) alter predictor functions to control the
+dynamics of the GRN, providing a natural planning problem.
+In a plan, each action models either a possible intervention or
+non-intervention that will change the state of the GRN.
+
+There are a number of GRN features that affect our choice
+of AI planning model. First, intervention plans need only fo-
+cus on horizons long enough to ensure the GRN will naturally
+transition to nominal states. Biological knowledge and com-
+putational simulation of GRNs [Kim et al., 2002] tell us that
+cellular processes, left to their own, transition to (or through)
+stable attractor states. These states represent common cellu-
+lar phenomena such as the cell cycle, division, etc. However,
+some states are consistent with disease, such as the metastasis
+of cancer. From abnormal states, planning interventions pro-
+vides a method to push the evolution of the cell toward nomi-
+nal attractor states. Second, the cell has an inherently hidden
+state because full observations are prohibitively costly and we
+have limited accessability [Datta et al., 2004]. Planning with
+partial observability is important because biologists analyz-
+ing cellular processes cannot be expected to understand, nor
+obtain complete state information. Third, cellular processes
+are commonly viewed as stochastic [Rao et al., 2002]. Genes
+are typically regulated many different ways, meaning GRNs
+must allow for the probabilistic selection of predictor func-
+tion for each gene. Because state transitions are stochastic,
+provide only partial observations, and are only relevant over
+a limited planning horizon, we formulate our model of GRN
+intervention as decision theoretic planning in a ﬁnite horizon
+partially observable Markov decision process (POMDP).
+
+This work is not the ﬁrst to address the problem of plan-
+ning interventions for GRNs, but it is the ﬁrst to apply AI
+planning techniques. Existing research [Datta et al., 2004]
+enumerates all possible plans and then uses a dynamic pro-
+gramming algorithm to ﬁnd the optimal ﬁnite horizon plan.
+Our planner is based on the AO* algorithm [Nilsson, 1980],
+
+IJCAI07
+
+1834
+
+which uses upper bounds on plan quality (reward) for prun-
+ing. We evaluate our planner on several formulations of a ran-
+dom GRN with different reward functions to see the beneﬁt
+pruning. We also evaluate on the WNT5A GRN [Weeraratna
+et al., 2002], which [Datta et al., 2004] use for intervention
+planning. WNT5A is a gene that plays a signiﬁcant role in
+the development of melanoma and is known to induce the
+metastasis of melanoma when highly active. On the WNT5A
+problems studied by [Datta et al., 2004], our planner performs
+signiﬁcantly better than the enumeration algorithm of [Datta
+et al., 2004]. Our study formalizes this interesting planning
+domain as a ﬁnite horizon POMDP and shows the gains of
+applying relatively standard AI techniques.
+
+We start by describing a simple example of planning in-
+terventions in a GRN. We then brieﬂy deﬁne the components
+of a ﬁnite horizon POMDP and a GRN intervention prob-
+lem. With these deﬁnitions, we map the intervention prob-
+lem to the POMDP. The solution to the POMDP is a condi-
+tional plan, for which we deﬁne the semantics and provide
+two solution algorithms – AO* and enumeration [Datta et al.,
+2004]. We compare both algorithms on several GRNs, ei-
+ther randomly generated or learned from actual micro-array
+experiments. We end with related work, a conclusion, and
+discussion of future work.
+
+2 Intervention Planning Example
+To clarify intervention planning, consider a small two gene
+network where each gene g is either active (g) or inactive
+(¬g). There are two predictor functions {fg1 , fg2 } that de-
+scribe the GRN dynamics, and an intervention to suppress g2
+(cid:2)
+described by the predictor function f
+g2 . Using the predictor
+functions, we can deﬁne the following two actions:
+
+Action
+Reward
+Effects
+(Predictors)
+Observation
+
+No Intervention
+0
+fg1 : g2 → ¬g1, ¬g2 → g1
+fg2 : ¬g2 → ¬g2, g2 → g2
+g2 / ¬g2
+
+g2 Intervention
+-1
+fg1 : g2 → ¬g1, ¬g2 → g1
+(cid:2)
+g2 : → ¬g2
+f
+g2 / ¬g2
+
+Intervening to suppress g2 incurs a reward of -1 by rewrit-
+(cid:2)
+ing the predictor function fg2 with f
+g2 . We also assume that
+we can observe g2 but not g1. The goal of the intervention
+problem associates a reward of 10 with activating gene g1.
+While the actions are deterministic (for the sake of example
+simplicity), we can describe stochastic actions by allowing a
+probabilistic choice of predictor function for each gene.
+
+Assume that we start with the initial belief state where each
+GRN state is equally likely, as depicted in Figure 1. The ﬁg-
+ure shows a horizon three plan to achieve the goal of activat-
+ing g1. The ﬁrst action in the plan is to not intervene; we will
+let the genes affect each other, and then observe g2. Not inter-
+vening leads to the belief state {0.5{¬g1, g2}, 0.5{g1, ¬g2}}.
+Using the observation of whether g2 or ¬g2 holds, the plan
+branches to belief states consistent with the appropriate ob-
+servation. Since we do not know which value of g2 will occur,
+we plan for both branches. In the ﬁrst branch, we apply our
+g2 intervention action to suppress g2. In the following step,
+we do not intervene and having g2 inactive will activate g1,
+leading to a state satisfying the goal. In the second branch,
+we can apply the non intervention action indeﬁnitely because
+the goal is satisﬁed and will remain satisﬁed.
+
+Horizon 0
+
+Initial Belief
+
+0.25
+
+0.25
+
+0.25
+
+0.25
+
+g1, g2
+
+g1, g2
+
+g1, g2
+
+g1, g2
+
+Horizon 1
+
+Horizon 2
+
+Horizon 3
+
+0.5
+
+0
+
+0.5
+
+1.0
+
+g1, g2
+
+No Intervention
+Observe g2
+
+No Intervention
+Observe g2
+
+1.0
+
+g1, g2
+
+1.0
+
+g1, g2
+
+-1
+g2 Intervention
+Observe g2
+
+No Intervention
+Observe g2
+0
+
+1.0
+
+g1, g2
+
+1.0
+
+g1, g2
+
+0
+No Intervention
+Observe g2
+
+No Intervention
+Observe g2
+0
+
+1.0
+
+g1, g2
+
+10
+
+10
+
+Figure 1: Example Plan.
+
+The quality of the plan is the expected reward of all possi-
+ble plan branches. The ﬁrst branch, taken with 0.5 probability
+has a reward of 9 (because we had to intervene), and the sec-
+ond branch, taken with 0.5 probability has a reward of 10.
+Thus, the total expected reward is 9.5.
+
+3 Decision Theoretic Planning
+
+This section describes the basics of the ﬁnite horizon POMDP
+model, formally deﬁnes intervention planning, and details the
+formulation of intervention planning in the POMDP.
+
+POMDP Model: Unlike most work on POMDPs, that ﬁnd
+a policy over the belief space, we ﬁnd a policy (conditional
+plan) rooted at an initial situation. The ﬁnite horizon POMDP
+problem P is deﬁned as the tuple (cid:3)S, A, T, R, Ω, O, h, bI(cid:4),
+where S is a set of states, A is a set of actions, T : S × A∪
+{⊥} × S ∪ {⊥} → [0, 1] is a transition function, R : S × A ∪
+{⊥} × S ∪ {⊥} → R is the transition reward function, Ω is a
+set of observations, O : S × A × Ω → [0, 1] is the observation
+function, h is the planning horizon, and bI : S → [0, 1] is the
+initial belief state. We overload the symbol ⊥ to denote both
+the terminal action and state signifying the end of the plan.
+
+Intervention Planning Problem: Given our deﬁnition of the
+POMDP model, in the following we show how an interven-
+tion planning problem maps to the POMDP. The intervention
+problem is deﬁned by the tuple (cid:3)G, Dom, F, X, W, Y, O, h(cid:4),
+where G is a set of genes, Dom is the set of activity levels for
+genes, F is a set of predictor functions, X is a set of inter-
+ventions, W is an initial situation, Y is a goal description, O
+is a set of observations, and h is the horizon. The genes and
+their activity levels describe states of the POMDP, the pre-
+dictor functions and interventions describe actions, interven-
+tions and the goal description deﬁne the reward function, and
+the initial situation, observations, and horizon map directly to
+their POMDP counterparts.
+States: Each gene g ∈ G has an activity level from the do-
+main Dom of values, of which we will only illustrate boolean
+domains {g, ¬g}, active or inactive. A state s : G → Dom of
+the gene network maps each gene to a value d ∈ Dom. The
+entire set of GRN states deﬁnes the POMDP states S.
+
+Predictor Functions and Interventions: Given a state of the
+gene network, the predictor functions F describe states reach-
+able after one step. Interventions re-write predictor functions
+in F for speciﬁc genes to ensure the gene network transitions
+to speciﬁc states. Thus, each possible action in the POMDP
+
+IJCAI07
+
+1835
+
+is described by a set of predictor functions. A non interven-
+tion simply uses F to describe the action, but an interven-
+tion action x ∈ X replaces predictor functions in F to get a
+new set Fx. Each intervention x ∈ X is a set of predictors
+{fg1 , fg2 , ...}, allowing us to deﬁne
+
+Fx = F ∪ x\{fg|fg ∈ F, fg(cid:2) ∈ x, g = g
+
+(cid:2)}.
+
+Each predictor function fg is deﬁned as the mapping fg :
+|G (cid:2)| → Dom from activity levels of genes in G(cid:2) ⊆ G
+Dom
+to the activity level of gene g. The interventions described in
+this work contain a single predictor function fg where G(cid:2) = ∅,
+meaning that irrespective of the state g has its activity level set
+deterministically.
+
+Since each gene may be predicted by several predictor
+functions, where each state transition selects one probabilis-
+tically, we assign a weight w(fg) to each. While we assume
+the predictor functions are given, we can learn them from
+micro-array experiments. In the empirical analysis we evalu-
+ate GRNs where the predictor functions and weights are both
+generated randomly and from real micro-array experiments.
+Each action aF deﬁned by the set of predictor functions F
+
+(similarly Fx) describes the transition function probability
+fg ∈F :fg (s)=s(cid:2) (g) w(fg )
+
+(cid:2)
+
+P
+
+P
+
+T (s, aF , s
+
+(cid:2)) = P r(s
+
+(cid:2)|F, s) =
+
+g∈G
+
+fg ∈F w(fg)
+
+Observations: After each step, whether by intervention or
+non intervention, we can observe the state of the gene net-
+work. The set O ⊆ G deﬁnes which genes are observable
+(by genetic markers, physiology, etc.). The set of observa-
+|O|} is deﬁned by all joint activity
+tions Ω = {o|o ∈ Dom
+levels of genes in O. In this work, we assume that observa-
+tions are perfect and the same for each action, meaning that
+if a state s and observation o agree on the activity level of
+each gene, then the probability of the observation is one (i.e.,
+O(s, a, o) = 1), otherwise zero (i.e., O(s, a, o) = 0). Obser-
+vations can be noisy (i.e., 0 ≤ O(s, a, o) ≤ 1) in general.
+
+Rewards: The goal Y is a function describing desirable
+states. We assume that the goal maps states to real values
+|G| → R. The reward function for terminal actions
+Y : Dom
+and goal states is deﬁned by the goal R(s, ⊥, ⊥) = Y (s).
+We assume that the reward associated with actions is -1 for
+(cid:2)) = −1) and 0 for non
+intervention actions (i.e., R(s, aFx , s
+(cid:2)) = 0).
+intervention (i.e., R(s, aF , s
+
+Initial Situation: The initial situation W is a distribution
+|G| → [0, 1]. This mapping to the
+over GRN states W : Dom
+POMDP initial situation is straight-forward, bI (s) = W (s).
+
+Since the formulation has a distinct initial belief state, we
+do not explore more traditional POMDP value or policy itera-
+tion techniques for computing a ﬁnite horizon policy. Rather,
+we use the knowledge of the initial belief state to guide ex-
+pansion of a conditional plan. By searching forward from the
+initial belief state, it is possible to focus plan construction on
+reachable belief states.
+
+4 Search
+This section describes our approach to solving a ﬁnite hori-
+zon POMDP. We start by deﬁning the semantics of condi-
+tional plans and our search space. We follow with two search
+
+IJCAI07
+
+1836
+
+algorithms to ﬁnd plans. The ﬁrst algorithm is AO* [Nils-
+son, 1980], and the second Datta is based on a competing
+approach [Datta et al., 2004] from the GRN literature.
+
+Conditional Plans: A solution to the problem P is a con-
+ditional plan P of horizon h, described by a partial func-
+tion P : V → A ∪ {⊥} over the belief state space graph
+G = (V, E). A subset of the vertices b ∈ V (which are belief
+states) are mapped to a “best” action a, denoted P(b) = a.
+Each edge e ∈ E directed from b to bo
+a is mapped to an
+action a ∈ A and an observation o ∈ Ω, and denoted
+a) = (a, o). If P(b) = a and e(b, bo
+e(b, bo
+a) = (a, o), then
+P(bo
+a) is the action to execute after executing a and receiving
+observation o. Throughout our discussion, we assume that
+the horizon is a feature of every state to ensure that the graph
+G is acyclic. Belief states where the horizon is equal to h
+have a single available action ⊥ to signify the end of the plan,
+leading to a terminal ⊥.
+
+If P(b) = a, and there exists an edge e(b, bo
+
+a) = (a, o) then
+
+the successor belief state bo
+a is deﬁned
+(cid:3)
+
+.
+
+bo
+a(s
+
+ba(s
+
+(cid:2)) =
+(cid:2)) = α ba(s
+
+s∈S
+
+b(s)T (s, a, s
+
+(cid:2))
+
+(cid:2))O(s
+
+(cid:2)
+
+, a, o),
+
+(cid:2) ∈ S,
+(cid:2)) = 0 because no observation is consistent with the be-
+
+where α is a normalization constant.
+bo
+a(s
+lief state ba, then the belief state is not added to the graph.
+
+If for all s
+
+The expected reward q(a, b) of a plan that starts with action
+
+a at belief state b is the sum of current and future rewards:
+
+q(a, b) =
+
+(cid:3)
+
+(cid:3)
+
+s(cid:2)∈S
+ba(s
+
+(cid:3)
+s∈S
+
+o∈Ω
+
+(cid:2))R(s, a, s
+
+(cid:2)) +
+
+b(s)T (s, a, s
+(cid:2))O(s
+
+, a, o)V(bo
+
+(cid:2)
+
+a),
+
+where the expected reward for a belief state is V(b) =
+maxa∈A q(a, b). Terminal vertices are assigned the expected
+goal reward
+
+q(⊥, b) =
+
+b(s)R(s, ⊥, ⊥).
+
+(cid:3)
+
+s∈S
+
+AO* Algorithm: We solve the ﬁnite horizon POMDP prob-
+lem with AO* search [Nilsson, 1980] in the space of belief
+states. The AO* algorithm, listed in Figure 2, takes the plan-
+ning problem as input, and iteratively constructs the belief
+space graph G rooted at bI . The algorithm involves three it-
+erated steps: expand the current plan with the ExpandPlan
+routine (line 3), collect the ancestors Z’ of new vertices Z
+(line 4), and compute the current best partial plan (line 5).
+The algorithm ends when it expands no new vertices. In the
+following we brieﬂy describe the sub-routines used by AO*.
+The ExpandPlan routine recursively walks the current
+plan to ﬁnd unexpanded vertices (lines 2-5). Upon ﬁnding
+a vertex to expand, it generates all successors of the vertex
+(lines 7-18). Generating successors involves assigning the ⊥
+action if the vertex it is at the max horizon (line 10) or con-
+structing the vertices reached by all action and observation
+combinations (lines 12-17). Notice that each vertex has its
+value initialized with an upper bound,
+
+Rmax = max
+
+s,s(cid:2)∈S,a∈A
+
+R(s, a, s
+
+(cid:2))h + max(0, R(s, ⊥, ⊥)),
+
+Z = ExpandPlan(bI, 0)
+Z’ = AddAncestors(Z)
+Update(Z’)
+
+AO*(P )
+1: expanded(bI) = FALSE
+2: repeat
+3:
+4:
+5:
+6: until |Z| = 0
+ExpandPlan(b, hzn)
+1: if expanded(b) then
+2:
+
+for e(b, bo
+
+P(b)) ∈ E do
+
+Z’ = ExpandPlan(bo
+Z = Z ∪ Z’
+
+P(b), hzn+1)
+
+end for
+
+3:
+
+else
+
+4:
+5:
+6: else
+7:
+8:
+9:
+10:
+11:
+12:
+13:
+14:
+15:
+16:
+17:
+18:
+19: end if
+20: return Z
+
+end if
+
+expanded(b) = TRUE
+Z = Z ∪ {b}
+if hzn == h then
+
+E = E ∪ {e(b, ⊥) = (⊥, ⊥)}
+
+}
+
+for a ∈ A, o ∈ Ω do
+
+V = V ∪ {bo
+a
+E = E ∪ {e(b, bo
+expanded(bo
+V(bo
+end for
+
+a) = Rmax
+
+a) = (a, o)}
+
+a) = FALSE
+
+Figure 2: AO* Search Algorithm.
+
+on its expected reward. The upper bound plays a role in prun-
+ing vertices from consideration in the search.
+
+After expanding the current plan, ExpandPlan returns
+the set of expanded vertices Z. In order for Update
+(Figure 3) to ﬁnd the best plan, given the new vertices,
+AddAncestors adds to Z’ every ancestor vertex of a ver-
+tex in Z. The resulting set of vertices consists of every ver-
+tex whose value (and best action) can change after Update.
+The Update routine iteratively removes vertices from Z that
+have no descendent in Z and calls Backup until no vertices
+remain in Z. The Backup routine computes the value of a
+vertex and sets its best action. The reason Update chooses
+vertices with no descendent in Z is to ensure each vertex has
+its value updated with the updated values of its children.
+
+AO* can often avoid computing the entire belief space
+graph G, leading to signiﬁcant savings in problems with large
+horizons. By initializing vertices with an upper bound on
+their value it is possible to ignore vertices that have a consis-
+tently lowest upper bound. For example in Backup, if there
+exists an action whose q-value is always greater than the al-
+ternative actions, then the best action will never be set to one
+of the alternatives. Further, because the alternative actions
+are never considered best, ExpandSolution will never ex-
+pand them. As we will explore in the empirical evaluation,
+the reward function has a signiﬁcant effect on the number of
+vertex expansions. In the worst case, it is possible to expand
+
+P(b)) ∈ E and bo
+
+P(b) ∈ Z do
+
+(cid:2) ∈ Z where e(b, b
+
+(cid:2)) ∈ E
+
+Z’ = Z’ ∪b
+
+AddAncestors(Z)
+1: Z’ = Z
+2: while ∃b s.t. e(b, bo
+3:
+4: end while
+5: return Z’
+Update(Z)
+1: while |Z| > 0 do
+2:
+3:
+4: end while
+Backup(b)
+1: for all a ∈ A ∪ {⊥} do
+2:
+3: end for
+4: V(b) = max
+a∈A∪{⊥}
+5: P(b) = argmax
+a∈A∪{⊥}
+
+Compute q(a, b)
+
+Remove b ∈ Z s.t. ¬∃b
+Backup(b)
+
+q(a, b)
+
+q(a, b)
+
+Figure 3: AO* Subroutines.
+
+E = E ∪ {e(b, ⊥) = (⊥, ⊥)}
+
+Datta(P )
+1: ExpandPlanD(bI, 0)
+2: Update(V)
+ExpandPlanD(b, hzn)
+1: if hzn == h then
+2:
+3: else
+4:
+5:
+6:
+7:
+8:
+9: end if
+
+V = V ∪ {bo
+a
+E = E ∪ {e(b, bo
+ExpandPlanD(bo
+
+for a ∈ A, o ∈ Ω do
+
+end for
+
+}
+
+a) = (a, o)}
+a, hzn+1)
+
+Figure 4: Datta Enumeration Algorithm.
+
+the entire graph G, as would Datta.
+
+Enumeration Algorithm: In order to compare our planner
+to the work of [Datta et al., 2004], we provide a description
+of their algorithm, we call Datta, in Figure 4. Unlike the
+iterative AO*, Datta consists of two steps: expand G with
+ExpandPlanD, and then update each vertex v ∈ V with
+Update. The ExpandPlanD routine recursively expands
+G by either reaching a terminal vertex at the horizon (line 2),
+or generating and recursing on each child of a vertex (lines 4-
+8). Following ExpandPlanD, Update computes the best
+action for each vertex in V .
+
+Unlike AO*, Datta is unable to prune vertices from ex-
+pansion, making it insensitive to the reward function. While
+the result of the two algorithms is identical, the time and
+space required can be very different. We implemented both
+algorithms within our planner and demonstrate their effec-
+
+IJCAI07
+
+1837
+
+1.E+11
+1.E+10
+1.E+09
+1.E+08
+1.E+07
+1.E+06
+1.E+05
+1.E+04
+1.E+03
+1.E+02
+1.E+01
+1.E+00
+
+Expansions
+
+-10
+-1
+1
+10
+Datta
+Max
+
+Expansions
+
+AO*
+Datta
+Max
+
+1.E+08
+1.E+07
+1.E+06
+1.E+05
+1.E+04
+1.E+03
+1.E+02
+1.E+01
+1.E+00
+
+s
+e
+
+t
+
+t
+
+a
+S
+
+ 
+f
+
+e
+
+i
+l
+
+e
+B
+#
+
+ 
+
+1.E+10
+
+1.E+08
+
+1.E+06
+
+1.E+04
+
+1.E+02
+
+1.E+00
+
+t
+
+s
+e
+a
+S
+
+t
+
+ 
+f
+
+e
+
+i
+l
+
+e
+B
+#
+
+ 
+
+2
+
+4
+
+6
+8
+Horizon
+
+10
+
+12
+
+2
+
+4
+
+6
+
+8
+10
+Horizon
+
+12
+
+14
+
+16
+
+Expansions
+
+AO*
+Datta
+Max
+
+2
+
+4
+
+6
+8
+Horizon
+
+10
+
+12
+
+t
+
+s
+e
+a
+S
+
+t
+
+ 
+f
+
+e
+
+i
+l
+
+e
+B
+#
+
+ 
+
+Figure 5: Number of Expanded Vertices for random GRN (left), WNT5A intervention (center), PIRIN intervention (right).
+
+Total Time
+
+AO*
+Datta
+
+Total Time
+
+AO*
+Datta
+
+1.E+03
+
+1.E+02
+
+1.E+01
+
+1.E+00
+
+)
+s
+(
+e
+m
+T
+
+i
+
+2
+
+4
+
+6
+8
+Horizon
+
+10
+
+12
+
+)
+s
+(
+e
+m
+T
+
+i
+
+1.E+04
+
+1.E+03
+
+1.E+02
+
+1.E+01
+
+1.E+00
+
+Total Time
+
+-10
+-1
+1
+10
+Datta
+
+1.E+03
+
+1.E+02
+
+1.E+01
+
+1.E+00
+
+)
+s
+(
+e
+m
+T
+
+i
+
+2
+
+4
+
+6
+8
+Horizon
+
+10
+
+12
+
+2
+
+4
+
+6
+
+8
+10
+Horizon
+
+12
+
+14
+
+16
+
+Figure 6: Total Planning Time(s) for random GRN (left), WNT5A intervention (center), PIRIN intervention (right).
+
+tiveness on the GRN intervention planning problems. We
+also implemented a straight-forward version of the [Datta et
+al., 2004] algorithm that does not make use of several efﬁ-
+ciency improvements within the planner, such as using ADDs
+[Bryant, 1986] for compact action and belief state represen-
+tation, as well as duplicate belief state detection.
+
+5 Empirical Evaluation
+To test the feasibility of using our planner to solve GRN inter-
+vention problems, we experiment with a random GRN and the
+WNT5A GRN [Weeraratna et al., 2002; Datta et al., 2004].
+The following table summarizes the features of the GRNs:
+
+Random
+WNT5A
+
+|G|
+7
+7
+
+|Dom|
+
+2
+2
+
+|F |
+14
+14
+
+|X|
+3
+1
+
+|O|
+1
+1
+
+Both networks use seven genes (each with two activity lev-
+els), two predictor functions per gene, each with two genes
+as predictors. The predictor functions were selected ran-
+domly in the random GRN and learned from micro-array data
+(measurements of mRNA concentrations in a cell that indi-
+cate gene activity levels) in the WNT5A GRN. In order to
+learn predictor functions, we use a coefﬁcient of determina-
+tion (COD) statistic to measure the strength of correlation be-
+tween predictor and target genes from normalized and dis-
+cretized data [Kim et al., 2000]. We use the two predic-
+tor functions with highest COD for each gene, setting their
+weight equal to the COD.
+
+Within both GRNs we study several intervention problems.
+In the random GRN, we vary the goal W to assign differ-
+ent rewards to terminal states, while assigning interventions a
+
+negative reward of one. This illustrates the ability of AO* to
+prune the search space in comparison with enumeration. In
+the WNT5A GRN, we reproduce two intervention problems
+studied by [Datta et al., 2004]. The ﬁrst directly intervenes
+to suppress WNT5A (which happens to be the goal) and ob-
+serves the PIRIN gene. The second attempts to indirectly
+control WNT5A by PIRIN (a predictor gene of WNT5A)
+intervention. Both WNT5A problems use the same reward
+function, assigning interventions a negative reward of one and
+the goal (activating WNT5A) a negative reward of three. We
+use negative reward for the goal to maintain consistency with
+the [Datta et al., 2004] model. Thus plans avoid activating
+WNT5A, which is equivalent to pursuing suppression. Both
+WNT5A networks use the initial belief state where each gene
+is set to an activity level with probability proportional to its
+observed frequency in the data.
+
+Our planner is implemented in C++ and ran on a 2.8GHz
+P4 Linux machine with 1GB of RAM. Each experiment
+was given a twenty minute time limit.
+For our plan-
+ner binary and gene regulatory network encodings, several
+of which we did not have space to describe, please visit:
+http://verde.eas.asu.edu/GRN.
+
+Random GRN: The leftmost plot in Figure 5 depicts the
+number of expanded vertices (including terminal actions) in
+AO*, Datta, and the maximum possible (Max). The results
+for AO* are indexed by a number indicating the reward as-
+sociated with the goal, since Datta is insensitive to reward.
+Max represents the number of vertices expanded in a search
+tree (versus a graph), similar to the original implementation
+of [Datta et al., 2004]. Because we implemented the Datta
+
+IJCAI07
+
+1838
+
+algorithm in our planner, like AO* it ﬁnds duplicate belief
+states. Without duplicate detection, Datta would expand as
+many vertices as Max. The leftmost plot in Figure 6 shows
+the associated total planning time (which is proportional to
+the number of expanded vertices). Missing bars indicate the
+instance was cut off by reaching the 20 minute time limit.
+
+We notice several important points in these results. AO* is
+sensitive to the goal reward function, expanding much fewer
+vertices than Datta in some cases. Despite AO* using dy-
+namic programming over its partial solution many times, it
+never takes more time than Datta. As a result, when it is
+able to prune vertices, AO* scales much better.
+
+WNT5A GRN: The center plots in Figures 5 and 6 show re-
+sults in the WNT5A GRN intervening WNT5A and observ-
+ing PIRIN. Here AO* greatly outperforms Datta. The dif-
+ference is partly due to the fact that AO* quickly recognizes
+that the optimal plan intervenes once at the end of each plan
+branch where WNT5A is not already deactivated. We also
+directly implemented the approach of [Datta et al., 2004],
+which does no duplicate detection, and it was able to solve
+this problem to a horizon of ten, using signiﬁcantly more
+memory and time. While our implementation of Datta is
+limited by time, the direct implementation is limited by space,
+exceeding 1 GB memory past horizon ten. The rightmost
+plots in Figures 5 and 6 show results in the WNT5A GRN
+intervening PIRIN and observing WNT5A. Finding plans in
+this problem requires more search, but AO* can still prune.
+
+Discussion: We have shown that AO* is a viable approach to
+solving GRN intervention problems. Where the Datta algo-
+rithm quickly exceeds our time limit as the horizon increases,
+AO* is sensitive to reward functions and can scale to larger
+horizons. Using both artiﬁcial and existing GRNs of practi-
+cal interest, we have seen that AO* performs well by prun-
+ing vertices based on upper bounds. Perhaps the next step
+is to achieve tighter upper bounds through heuristics. While
+we did not discuss alternative GRN formulations (e.g., with
+more genes, activity levels, and observations), we have stud-
+ied such problems and see similar scalability.
+
+6 Related Work
+
+Planning in cellular processes is a relatively new area of re-
+search, with some initial work on problem formulation as
+well as solution algorithms. There also exists some prelim-
+inary works on representing cellular processes without spe-
+ciﬁc emphasis on planning interventions. The closest body of
+work for planning interventions [Datta et al., 2004] models
+the problem as a ﬁnite horizon control problem.
+
+Some recent works in the AI community have focussed on
+simply representing cellular processes. One approach, dis-
+covers signal transduction pathways with a deterministic clas-
+sical planner [Khan et al., 2003]. Further along this vein,
+[Tran and Baral, 2005] model change in cellular processes as
+exogenous actions, termed triggers.
+
+7 Conclusion & Future Work
+
+We have presented a formulation of GRN intervention as de-
+cision theoretic planning. Our planner relies on several ad-
+
+vances in AI planning to perform efﬁcient reasoning. As a
+result, we have improved the scalability of planning interven-
+tions in GRNs over previous work.
+
+In the future, we would like to decouple the representa-
+tion of cellular process dynamics from our intervention ac-
+tions. We think the right approach is to use exogenous ac-
+tions or processes. While recent work in deterministic plan-
+ning [McDermott, 2003] has discussed models for control-
+ling exogenous processes and triggers [Tran and Baral, 2005],
+less thought has been given to such processes in a probabilis-
+tic setting (with the exception of [Blythe, 1994]). Alterna-
+tively, research in simulating cellular processes [Ramsey et
+al., 2005] has considered probabilistic exogenous processes,
+but not under the control of a planner.
+
+Acknowledgements: This work was supported in part by
+NSF grant IIS-0308139, by ONR grant N000140610058, the
+ARCS foundation, and an IBM faculty award. We thank
+Ashish Choudhary, Edward Dougherty, William Cushing,
+and Subbarao Kambhampati for helpful discussions.
+
+References
+[Blythe, 1994] J. Blythe. Planning with external events.
+
+In Pro-
+
+ceedings of UAI’04, 1994.
+
+[Bryant, 1986] R. Bryant. Graph-based algorithms for Boolean
+IEEE Transactions on Computers, C-
+
+function manipulation.
+35(8):677–691, August 1986.
+
+[Datta et al., 2004] A. Datta, A. Choudhary, M. Bittner, and
+E. Dougherty. External control in markovian genetic regula-
+tory networks: the imperfect information case. Bioinformatics,
+20(6):924–930, 2004.
+
+[Khan et al., 2003] S. Khan, K. Decker, W. Gillis, and C. Schmidt.
+A multi-agent system-driven ai planning approach to biological
+pathway discovery. In Proceedings of ICAPS’03, 2003.
+
+[Kim et al., 2000] S. Kim, E. Dougherty, M. Bittner, Y. Chen,
+K. Sivakumar, P. Meltzer, and J. Trent. General nonlinear frame-
+work for the analysis of gene interaction via multivariate expres-
+sion arrays. Journal of Biomedical Optics, 5(4):411–424, 2000.
+
+[Kim et al., 2002] S. Kim, H. Li, E. Dougherty, N. Cao, Y. Chen,
+M. Bittner, and E. Suh. Can markov chain models mimic biolog-
+ical regulation? J. of Biological Systems, 10(4):337–357, 2002.
+
+[McDermott, 2003] D.V. McDermott. The formal semantics of pro-
+
+cesses in pddl. ICAPS Workshop on PDDL, 2003.
+
+[Nilsson, 1980] N.J. Nilsson. Principles of Artiﬁcial Intelligence.
+
+Morgan Kaufmann, 1980.
+
+[Ramsey et al., 2005] S. Ramsey, D. Orrell, and H. Bolouri. Dizzy:
+Stochastic simulation of large-scale genetic regulatory networks.
+J. Bioinformatics Comput. Biol, 3(2):415–436, 2005.
+
+[Rao et al., 2002] C.V. Rao, D.M. Wolf, and A.P. Arkin. Con-
+trol, exploitation and tolerance of intracellular noise. Nature,
+420:231–237, November 2002.
+
+[Tran and Baral, 2005] N. Tran and C. Baral. Issues in reasoning
+about interaction networks in cells: necessity of event ordering
+knowledge. In Proceedings of AAAI’05, 2005.
+
+[Weeraratna et al., 2002] A. T. Weeraratna, Y. Jiang, G. Hostetter,
+K. Rosenblatt, P. Duray, M. Bittner, and J. M. Trent. Wnt5a
+signaling directly affects cell motility and invasion of metastatic
+melanoma. Cancer Cell, 1(3):279–88, 2002.
+
+IJCAI07
+
+1839
+
+

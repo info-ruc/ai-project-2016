@@ -1,0 +1,951 @@
+Document Summarization using Conditional Random Fields
+
+Dou Shen1, Jian-Tao Sun2, Hua Li2, Qiang Yang1, Zheng Chen2
+
+1Department of Computer Science and Engineering
+
+Hong Kong University of Science and Technology, Hong Kong
+
+{dshen, qyang}@cse.ust.hk
+
+2Microsoft Research Asia, 49 Zhichun Road, China
+
+{jtsun, huli, zhengc}@microsoft.com
+
+Abstract
+
+Many methods, including supervised and unsuper-
+vised algorithms, have been developed for extrac-
+tive document summarization. Most supervised
+methods consider the summarization task as a two-
+class classiﬁcation problem and classify each sen-
+tence individually without leveraging the relation-
+ship among sentences. The unsupervised methods
+use heuristic rules to select the most informative
+sentences into a summary directly, which are hard
+to generalize.
+In this paper, we present a Con-
+ditional Random Fields (CRF) based framework
+to keep the merits of the above two kinds of ap-
+proaches while avoiding their disadvantages. What
+is more, the proposed framework can take the out-
+comes of previous methods as features and seam-
+lessly integrate them. The key idea of our approach
+is to treat the summarization task as a sequence la-
+beling problem. In this view, each document is a
+sequence of sentences and the summarization pro-
+cedure labels the sentences by 1 and 0. The label
+of a sentence depends on the assignment of labels
+of others. We compared our proposed approach
+with eight existing methods on an open benchmark
+data set. The results show that our approach can
+improve the performance by more than 7.1% and
+12.1% over the best supervised baseline and unsu-
+pervised baseline respectively in terms of two pop-
+ular metrics F1 and ROUGE-2. Detailed analysis
+of the improvement is presented as well.
+
+Introduction
+
+1
+Document summarization has attracted much attention since
+the original work by Luhn [Luhn, 1958], which has found
+wide-ranging applications especially with the explosion of
+documents on the Internet. Besides its main role of help-
+ing readers to catch the main points of a long document with
+less effort, it is also helpful as a preprocessing step for some
+text mining tasks such as document classiﬁcation [Shen et al.,
+2004].
+
+Document summarization can be categorized along two
+different dimensions: abstract-based and extract-based. An
+extract-summary consists of sentences extracted from the
+
+document while an abstract-summary may employ words and
+phrases that do not appear in the original document [Mani,
+1999]. The summarization task can also be categorized as ei-
+ther generic or query-oriented. A query-oriented summary
+presents the information that is most relevant to the given
+queries, while a generic summary gives an overall sense of
+the document’s content [Goldstein et al., 1999]. In addition
+to single document summarization, which has been ﬁrst stud-
+ied in this ﬁeld for years, researchers have started to work on
+multi-document summarization whose goal is to generate a
+summary from multiple documents that cover similar infor-
+mation. In this paper, we focus on generic single-document
+sentence extraction which forms the basis for other summa-
+rization tasks and is still a hot research topic [Yeh et al., 2005;
+Mihalcea, 2005].
+
+In the past, extractive summarizers have been mostly based
+on scoring sentences in the source document based on a set
+of predeﬁned features [Mani and Bloedorn, 1998]. These fea-
+tures include linguistic features and statistical features, such
+as location, rhetorical structure [Marcu, 1997], presence or
+absence of certain syntactic features [Pollock and Zamora,
+1975], presence of proper names, statistical measures of term
+prominence [Luhn, 1958], similarity between sentences, and
+measures of prominence of certain semantic concepts and re-
+lationships [Gong and Liu, 2001]. Two kinds of approaches
+have been designed to leverage the above features, supervised
+and unsupervised. In most supervised approaches [Kupiec et
+al., 1995; Yeh et al., 2005], summarization is seen as a two-
+class classiﬁcation problem and the sentences are treated in-
+dividually. However, we observe that the individual treatment
+of the sentences cannot take full advantage of the relationship
+between the sentences. For example, intuitively, two neigh-
+boring sentences with similar contents should not be put into
+a summary together, but when treated individually, this in-
+formation is lost. Sequential learning systems such as Hid-
+den Markov Models have also been applied, but they can-
+not fully exploit the rich linguistic features mentioned above
+since they have to assume independence among the features
+for tractability [Conroy and O’leary, 2001]. On the other
+hand, unsupervised approaches rely on heuristic rules that are
+difﬁcult to generalize. What is ideal for us is to develop a
+machine learning method based on a training corpus of doc-
+uments, which can take full advantage of the inter-sentence
+relationship and rich features which may be dependent.
+
+IJCAI-07
+
+2862
+
+In this paper, we tackle the extractive summarization prob-
+lem in a different manner from the above approaches. We
+take the summarization task as a sequence labeling problem
+instead of a simple classiﬁcation problem on individual sen-
+tences. In our approach, each document is considered as a
+sequence of sentences and the objective of extractive summa-
+rization is to label the sentences in the sequence with 1 and
+0, where a label of 1 indicates that the sentence is a sum-
+mary sentence while 0 denotes a non-summary sentence. The
+label of one sentence is expected to impact on the labels of
+other sentences that are nearby. To accomplish this task, we
+apply conditional random ﬁeld (CRF) [Lafferty et al., 2001]
+in this paper, which is a state-of-the-art sequence labeling
+method. With CRF, we provide a framework for leverag-
+ing all the features even if they may be complex, overlap-
+ping and not independent. Thus we can fully incorporate our
+knowledge and intuition of extractive summarization by in-
+troducing proper features more effectively. Besides that, the
+framework can ensemble the outcomes of other summariza-
+tion methods in a uniﬁed way by designing features for them.
+Our CRF-based approach carries out the summarization task
+in a discriminative manner, by conditioning the whole la-
+bel sequence on the sentence sequence, which can maximize
+the likelihood of the global label sequence as well as max-
+imize the consistency among the different labels in the se-
+quence. As a result, this approach overcomes many of the
+disadvantages of the previous supervised and unsupervised
+approaches. The experimental results on an open benchmark
+data set from DUC01 (http://duc.nist.gov/) show that our pro-
+posed approach can improve the performance compared to
+the state-of-the-art summarization approaches.
+
+2 Related Work
+Supervised extractive summarization approaches treat the
+summarization task as a two-class classiﬁcation problem at
+the sentence level, where the summary sentences are posi-
+tive samples while the non-summary sentences are negative
+samples. After representing each sentence by a vector of fea-
+tures, the classiﬁcation function can be trained in two differ-
+ent manners. One is in a discriminative way with well-known
+algorithms such as Support Vector Machines (SVM) [Yeh et
+al., 2005]. Although such classiﬁers are effective, they as-
+sume that the sentences are independent and classify each
+sentence individually without leveraging the relation among
+the sentences. Hidden Markov Model based methods attempt
+to break this assumption [Conroy and O’leary, 2001].
+In
+Conroy et al’s work, there are two kinds of states, where
+one kind corresponds to the summary states and the other
+corresponds to non-summary states. The observations are
+sentences that are represented by a vector of three features.
+Given the training data, the state-transition probabilities and
+the state-speciﬁc observation probabilities can be estimated
+by the Baum-Welch algorithm or an EM algorithm [Rabiner,
+1990]. Given a new document, the probability that a sentence
+corresponds to a summary state can be calculated. Finally,
+the trained model can be used to select the most likely sum-
+mary sentences. Although such approaches can handle the
+positional dependence and feature dependence when the fea-
+
+ture space is small by taking some special assumptions, they
+present two open problems [McCallum et al., 2000]. Firstly,
+when the feature space is large and the features are not in-
+dependent or are even overlapping in appearance, the train-
+ing process will become intractable. Therefore this approach
+cannot fully exploit the potential useful features that we have
+mentioned above for the summarization task due to the com-
+putational inefﬁciency. Secondly, the above approaches set
+the HMM parameters to maximize the likelihood of the ob-
+servation sequence. By doing so, the approach fails to predict
+the sequence labels given the observation sequences in many
+situations because they inappropriately use a generative joint-
+model in order to solve a discriminative conditional problem
+when observations are given. Our work in this paper is aimed
+at solving such problems by CRF.
+
+Many unsupervised methods have been developed for doc-
+ument summarization by exploiting different features and re-
+lationships of the sentences as we mentioned above, such
+as rhetorical structures [Marcu, 1997], lexical chains [Barzi-
+lay and Elbadad, 1997], the hidden topics in the documents
+[Gong and Liu, 2001] and graphs based on the similarity of
+sentences [Mihalcea, 2005]. The methods based on the last
+two features require less extra resources and efforts while still
+achieve better performances compared to other methods, as
+shown in [Gong and Liu, 2001] and [Mihalcea, 2005]. There-
+fore, we now review these two works in more detail and com-
+pare our approach with them in the experiments.
+
+In [Gong and Liu, 2001], the authors observed that hidden
+topics can be discovered in a document as well as the projec-
+tion of each sentence on each topic through Latent Semantic
+Analysis [Deerwester et al., 1990]. They selected the sen-
+tences which have the large projections on the salient topics
+to form the summary. In Mihalcea’s work [Mihalcea, 2005],
+she constructed a graph in which each node is a sentence
+and the weight of the edge linking two nodes is the simi-
+larity between the corresponding sentences. The direction
+of the edges can be decided by the appearance order of the
+sentences. After constructing the graph, she employed some
+graph-based ranking algorithms like HITS [Kleinberg, 1999]
+and PageRank [Brin and Page, 1998] to decide the importance
+of a vertex (sentence) which can take into account the global
+information recursively computed from the entire graph.
+
+Some previous work has also considered to reduce the re-
+dundancy in summary. A typical method is based on the cri-
+teria of Maximal Marginal Relevance (MMR) [Carbonell et
+al., 1997]. According to MMR, a sentence is chosen for in-
+clusion in summary such that it is maximally similar to the
+document and dissimilar to the already-selected sentences.
+This approach works in an ad hoc manner and tends to se-
+lect long sentences. However, in this paper, the redundancy
+is controlled by a probabilistic model which can be learned
+automatically.
+
+3 A CRF-based Summarization Approach
+3.1 Motivation
+Our intuition comes from our observations on how humans
+summarize a document by posing the problem as a sequence
+labeling problem. A document can be regarded as a sequence
+
+IJCAI-07
+
+2863
+
+of sentences that can be partitioned into several segments
+where each segment is relatively coherent in content. In order
+to generate a summary with good coverage and low redun-
+dancy, we need to select a representative sentence from each
+segment. Therefore, we have to read the document from the
+beginning to the end and judge the informativeness of each
+sentence while reading. If we encounter a sentence which is
+informative enough, we will put it into the summary. After
+reading more sentences and encountering better ones, the de-
+cision on a previous sentence may be changed. Therefore,
+the procedure of summarization is kind of sequence labeling.
+The goal is to produce a label sequence corresponding to the
+sentence sequence with a label of 1 denoting the summary
+sentences and 0 denoting the non-summary sentences.
+
+However, the informativeness cannot be easily measured
+directly by machines. Fortunately, the sentences can be char-
+acterized by some features such as their lengths, positions in
+the article and the terms that they contain. The judgment cri-
+teria can be learned from the ground-truth samples generated
+by people. In other words, given a sequence of sentences rep-
+resented by certain features, our goal is to label the sentences
+so that the likelihood of the label sequence given the whole
+sentence sequence is maximized. In this paper, we use CRF
+as a tool to model this sequence labeling problem.
+
+3.2 Conditional Random Fields
+For a random variable over data sequences to be labeled X,
+and a random variable over corresponding label sequences
+Y , Conditional Random Fields (CRF) provide a probabilistic
+framework for calculating the probability of Y globally con-
+ditioned on X [Lafferty et al., 2001]. X and Y may have
+a natural graph structure. In this paper, we use a common
+special-case structure, which is a linear chain suitable for se-
+quence labeling. We further assume that there is a one-to-one
+correspondence between states and labels (two states/labels
+in our problem: summary sentence and non-summary sen-
+tence). Given an observation sequence (sentence sequence
+here) X = (x1, . . . , xT ) and the corresponding state se-
+quence Y = (y1, . . . , yT ), the probability of Y conditioned
+on X deﬁned in CRFs, P (Y |X), is as follows:
+
+⎛
+⎝(cid:4)
+
+i,k
+
+1
+ZX
+
+exp
+
+λkfk(yi−1, yi, X) +
+
+(cid:4)
+
+i,l
+
+⎞
+⎠ (1)
+
+μlgl(yi, X)
+
+where ZX is the normalization constant that makes the prob-
+ability of all state sequences sum to one; fk(yi−1, yi, X) is
+an arbitrary feature function over the entire observation se-
+quence and the states at positions i and i − 1 while gl(yi, X)
+is a feature function of state at position i and the observation
+sequence; λk and μl are the weights learned for the feature
+functions fk and gl, reﬂecting the conﬁdence of feature func-
+tions. The feature functions can describe any aspect of a tran-
+sition from yi−1 to yi as well as yi and the global character-
+istics of X. For example, fk may have value 1 when yi−1 is
+a summary sentence while yi is not a summary sentence and
+the similarity between xi−1 and xi is larger than a threshold;
+gl has a value 1 when yi is a summary sentence and xi has
+upper-case words.
+
+Parameters Estimation
+Let Λ = {λk, μl} be the set of weights in a CRF
+Λ is usually estimated by a maximum likeli-
+model.
+hood procedure, that is, by maximizing the conditional log-
+likelihood of the labeled sequences in the training data Ψ =
+{(X1, Y1), . . . , (XN , YN ))}, which is deﬁned as:
+
+LΛ =
+
+log(PΛ(Yj|Xj))
+
+(2)
+
+(cid:4)
+
+j=1..N
+
+To avoid overﬁtting, some regularization methods are em-
+ployed [Peng and McCallum, 2006]. A common method is
+to add a Gaussian prior over the parameters:
+λ2
+k
+2σ2
+k
+
+log(PΛ(Yj|Xj)) −
+
+μ2
+l
+2σ2
+l
+
+LΛ =
+
+(cid:4)
+
+(cid:4)
+
+(cid:4)
+
+(3)
+
+−
+
+j=1..N
+
+k
+
+l
+
+where σ2
+
+k and σ2
+
+l are the variances of the Gaussian priors.
+
+Various methods can be used to optimize LΛ, including It-
+erative Scaling algorithms such as GIS and IIS [Lafferty et al.,
+2001]. It has been found that a quasi-Newton method such
+as L-BFGS converges signiﬁcantly faster [Sha and Pereira,
+2003; Malouf, 2002]. Therefore, in this paper, we use L-
+BFGS.
+Inference
+Given the conditional probability of the state sequence de-
+ﬁned by a CRF in (1) and the parameters Λ, the most probable
+labeling sequence can be obtained as
+
+∗ = argmaxY PΛ(Y |X)
+
+Y
+
+(4)
+which can be efﬁciently calculated with the Viterbi algo-
+rithm [Rabiner, 1990]. The marginal probability of states at
+each position in the sequence can be computed by a dynamic
+programming inference procedure similar to the forward-
+backward procedure for HMM [Lafferty et al., 2001]. We
+can deﬁne the “forward values” αi(y|X) by setting α1(y|X)
+equal to the probability of starting with state y and then iterate
+as follows:
+
+αi+1(y|X) =
+
+(cid:3)|X)exp (Λi(y
+
+(cid:3)
+
+αi(y
+
+, y, X))
+
+(5)
+
+where Λi(y
+
+(cid:3)
+
+, y, X) is deﬁned by:
+
+(cid:4)
+
+y(cid:2)
+
+(cid:4)
+
+(cid:3)
+
+Λi(y
+
+, y, X) =
+
+(cid:3)
+
+, yi+1 = y, X)
+
+λkfk(yi = y
+(cid:4)
+
+l
+
+μlgl(yi+1 = y, X)
+
+k
++
+(6)
+(cid:7)
+y αT (y|X). The “backward values”
+Then ZX equals to
+βi(y|X) can be deﬁned similarly. After that, we calculate
+the marginal probability of each sentence being a summary
+sentence given the whole sentence sequence by:
+
+P (yi = 1|X) = αi(1|X) ∗ βi(1|X)
+
+(7)
+Thus we can order the sentences based on P (yi = 1|X) and
+select the top ones into the summary.
+
+ZX
+
+IJCAI-07
+
+2864
+
+(cid:7)
+
+3.3 Feature Space
+Many features have been designed for document summariza-
+tion and can be leveraged through CRF models. In this paper,
+we use some common features which are widely used in the
+supervised summarization methods as well as several features
+induced from the unsupervised methods. The detailed study
+of other sophisticated features such as the rhetorical relations
+between sentences is left for future work.
+Basic Features
+The basic features are the commonly used features in pre-
+vious summarization approaches, which can be extracted di-
+rectly without complicated computation [Yeh et al., 2005].
+Given a sentence xi , the features are deﬁned as follows.
+Position: the position of xi along the sentence sequence of a
+document. If xi appears at the beginning of the document, the
+feature “Pos” is set to be 1; if it is at the end of the document,
+“Pos” is 2; Otherwise, “Pos” is set to be 3.
+Length: the number of terms contained in xi after removing
+the words according to a stop-word list.
+Log Likelihood:
+the log likelihood of xi being gener-
+ated by the document, logP (xi|D). This is calculated by
+(cid:7)
+wk N(wk, xi) log p(wk|D) where N(wk, xi) is the num-
+ber of occurrences of wk in xi and p(wk|D) can be estimated
+by N(wk, D)/
+Thematic Words: these are the most frequent words in the
+document after the stop words are removed. Sentences con-
+taining more thematic words are more likely to be summary
+sentences. We use this feature to record the number of the-
+matic words in xi .
+Indicator Words: some words are indicators of summary
+sentences, such as “in summary” and “in conclusion”. This
+feature is to denote whether xi contains such words.
+Upper Case Words: some proper names are often impor-
+tant and presented through upper-case words, as well as some
+other words the authors want to emphasize. We use this fea-
+ture to reﬂect whether xi contains the upper-case words.
+Similarity to Neighboring Sentences: we deﬁne features
+to record the similarity between a sentence and its neighbors.
+“Sim to Pre N” and “Sim to Next N” (N = 1, 2, 3) record the
+similarity of xi to the previous three sentences and next three
+sentences respectively. The similarity measurement we use in
+this work is the cosine similarity.
+
+wj N(wj, D).
+
+There are some other popular features such as the number
+of words in the sentence which are also present in the title,
+and the position of the sentence in its paragraph. However,
+since the information about the title and the paragraph is not
+available in the dataset that we are working on, we do not
+consider such features in this paper.
+Complex Features
+LSA Scores: by decomposing the word-sentence matrix
+through Singular Vector Decomposition , we can obtain the
+hidden topics in a document as well as the projection of each
+sentence on each topic [Gong and Liu, 2001]. Then we can
+use the projections as scores to rank sentences and select the
+top sentences into summary. In this paper, we can also treat
+such projections as features to reﬂect the importance of the
+sentences.
+
+HITS Scores: as shown in the related work section, a docu-
+ment can be treated as a graph and after applying a graph-
+based ranking algorithm such as HITS or PageRank, each
+sentence gets a score reﬂecting its importance. According to
+[Mihalcea, 2005] and our own experimental results, the au-
+thority score of HITS on the directed backward graph is more
+effective than other graph-based methods. Therefore, we con-
+sider only these authority scores and take them as features.
+
+4 Experiments and Results
+In this section, we conduct experiments to test our CRF-
+based summarization approach empirically. The data set is
+an open benchmark data set which contains 147 document-
+summary pairs from Document Understanding Conference
+(DUC) 2001 (http://duc.nist.gov/). We use it because it is for
+generic single-document extraction task that we are interested
+in and it is well preprocessed. We denoted it by DUC01.
+
+For the supervised summarization methods, we need to
+split the data set into training data set and test data set. In
+order to remove the uncertainty of a data split, a 10-fold cross
+validation procedure is applied in our experiments, where 9
+folds are used for training and one fold for test. Though we
+do not need to split the data set for unsupervised methods, we
+apply the unsupervised methods on the same test data as the
+supervised methods, for the convenience of comparison.
+
+We use two methods to evaluate the results. The ﬁrst one is
+by Precision, Recall and F1 which are widely used in Infor-
+mation Retrieval [Van Rijsbergen, 1979]. For each document,
+the manually extracted sentences are considered as the refer-
+ence summary (denoted by Sref ). This approach compares
+the candidate summary (denoted by Scand) with the reference
+summary and computes the precision, recall and F1 values as
+shown in equation (8). We report only F1 for simplicity, since
+we come to similar conclusions in our experiments in terms
+of any of the three measurements.
+(cid:8)
+|Sref
+
+Scand|
+
+Scand|
+
+|Sref
+
+(cid:8)
+
+F1 =
+
+2pr
+p + r
+
+(8)
+
+p =
+
+r =
+
+Scand
+
+Sref
+
+A second evaluation method is by the ROUGE toolkit,
+which is based on N-gram statistics [Lin and Hovy, 2003].
+This tool is adopted by DUC for automatic summarization
+evaluation that was found to highly correlate with human
+evaluations. According to [Lin and Hovy, 2003], among
+the evaluation methods implemented in ROUGE, ROUGE-
+N (N=1, 2) is relatively simple and works well in most cases.
+Therefore, we employ only ROUGE-2 for simplicity.
+4.1 Baselines
+We compare our proposed method with both supervised and
+unsupervised methods. Among the supervised methods,
+we choose Support Vector Machine (SVM), Naive Bayes
+(NB), Logistic Regression (LR) and Hidden Markov Model
+(HMM). SVM is one of the state-of-the-art classiﬁers. HMM
+extends NB by considering the sequential information, while
+LR is a discriminative version of NB. At the same time, LR
+can be considered as a linear chain CRF model of order zero
+and CRF is a discriminative version of HMM. That is, CRF
+combines the merits of HMM and LR. Recent literature has
+
+IJCAI-07
+
+2865
+
+claimed the advantages of the discriminative models in clas-
+siﬁcation problems and the effectiveness of sequential infor-
+mation in sequence processing [Sutton and McCallum, 2006].
+Therefore, a detailed comparison among these methods can
+make it clear whether CRF really hold these advantages in
+our summarization problem.
+
+We also compare our approach with four unsupervised
+methods. The simplest being to select sentences randomly
+from the document is denoted as RANDOM. The approach
+selecting the lead sentences, which is taken as the baseline
+popularly on the DUC01 dataset, is denoted as LEAD. A sim-
+ilar method is to select the lead sentence in each paragraph.
+Since the information about the paragraphs is not available in
+DUC01, we do not include this method as a baseline. Two
+other unsupervised methods we compare include Gong’s al-
+gorithm based on LSA and Mihalcea’s algorithm based on
+graph analysis. Among the several options of Mihalcea’s al-
+gorithm, the method based on the authority score of HITS on
+the directed backward graph is the best. It is taken by us for
+comparison. These two unsupervised methods are denoted by
+LSA and HITS respectively.
+4.2 Results and Analysis
+Performance based on the basic features
+The ﬁrst experiment compares our CRF-based method with
+the eight baselines, only using the basic features. Tables 1
+and 2 show the results of all the methods in terms of ROUGE-
+2 and F 1. We can see that RANDOM is the worst method
+as expected, while CRF is the best in terms of both evalua-
+tion metrics. HITS beats all other baselines, which conﬁrms
+the effectiveness of graph-based approaches for discovering
+the importance of sentences. LEAD, by simply selecting the
+lead sentences, achieves a similar performance to LSA. Both
+HMM and LR improve the performance as compared to NB
+due to the advantages of leveraging sequential information
+and discriminative models. LR and SVM achieve similar per-
+formance on the summarization problem. By combining the
+advantages of HMM and LR together, CRF makes a further
+improvement by 8.4% and 11.1% over both HMM and LR in
+terms of ROUGE-2 and F1, respectively. In fact, CRF is not
+just a discriminative version of HMM; it is a more powerful
+method in exploiting dependent features. Due to the same
+reason, CRF outperforms HITS by 5.3% and 5.7% in terms
+of ROUGE-2 and F1, respectively.
+
+ROUGE-2
+
+F1
+
+RANDOM LEAD LSA HITS
+0.431
+0.368
+
+0.245
+0.202
+
+0.377
+0.311
+
+0.382
+0.324
+
+Table 1: Results of unsupervised methods
+
+ROUGE-2
+
+F1
+
+NB
+0.394
+0.336
+
+LR
+0.415
+0.349
+
+SVM HMM CRF
+0.454
+0.416
+0.343
+0.389
+
+0.419
+0.350
+
+Table 2: Results of supervised methods with basic features
+
+Incorporation of the complex features
+The second experiment is to test the effectiveness of the com-
+plex features as well as the capability of the supervised meth-
+
+ods to incorporate the complex features. The results are
+shown in Table 3. Compared to the results only based on
+the basic features, as shown in Table 2, we see that the per-
+formance of all the supervised methods are improved signiﬁ-
+cantly. After incorporating the complex features, CRF is still
+the best method, which improves the values of ROUGE-2 and
+F1 achieved by the best baselines by more than 7.1% and
+8.8%. Compared with the best unsupervised method HITS,
+the CRF based on both kinds of features improves the per-
+formance by 12.1% and 13.9% in terms of ROUGE-2 and
+F1, respectively. In fact, the complex features are the out-
+comes of the unsupervised methods LSA and HITS. To lever-
+age the complex features through the supervised methods can
+be thought as a way of combining the outcomes of different
+methods. In order to test the effectiveness of CRF on combin-
+ing the outcomes, we compared it to the linear combination
+method used to combine the results of LSA, HITS and CRF
+based only on the basic features. By tuning the weight of
+each method for combination, the best result we can obtain
+on DUC01 is 0.458 and 0.392 in terms of ROUGE-2 and F1
+respectively, where the improvement is not as signiﬁcant as
+CRF based on all the features. Therefore, we can conclude
+that CRF provides an effective way to combine the outcomes
+of different methods by treating the outcomes as features.
+
+ROUGE-2
+
+F1
+
+NB
+0.436
+0.372
+
+LR
+0.450
+0.383
+
+SVM HMM CRF
+0.483
+0.449
+0.385
+0.419
+
+0.451
+0.380
+
+Table 3: Results of supervised methods with all features
+SVM HMM CRF
+0.470
+0.425
+0.360
+0.411
+
+NB
+0.414
+0.351
+
+LR
+0.427
+0.365
+
+0.422
+0.363
+
+ROUGE-2
+
+F1
+
+Table 4: Results of supervised methods with less training data
+
+Effect of the size of the training data
+In order to study the impact of the size of the training data
+on the supervised methods, we conduct a third experiment.
+We change the training data and test data in the 10-fold cross
+validation procedure, where one fold is for training and the
+other nine folds for test. Table 4 shows the results based on
+both the basic features and the complex features. We can see
+that the performances of all the supervised methods shown in
+Table 4 are not as good as those given in Table 3, which is
+consistent with our intuition, that is we can obtain more pre-
+cise parameters of the models with more training data. An-
+other observation is that the gap in the performance between
+CRF-based methods and the other four supervised methods
+is clearly larger when the size of the training data is small.
+The reason is that CRF performs better with less training data
+than HMM since it does not require the features to specify
+completely a state or observation [Lafferty et al., 2001]. On
+the other side, HMM, as a generative model, spends a lot of
+resources on modeling the generative models which are not
+particularly relevant to the task of inferring the class labels.
+The bad performance of NB, LR and SVM may be due to the
+fact that they tend to be overﬁtting with a small amount of
+training data.
+
+IJCAI-07
+
+2866
+
+5 Conclusion and Future Work
+In this paper, we have proposed a novel CRF based approach
+for document summarization, where the summarization task
+is treated as a sequence labeling problem. By applying the
+effective sequence labeling algorithm CRF, we provided a
+framework to consider all available features that include the
+interactions between sentences. When comparing our CRF-
+based approach with several existing summarization methods,
+including the supervised and unsupervised ones on an open
+data set, we found that our approach can improve the summa-
+rization results signiﬁcantly. The experimental results also
+validated the capability of our proposed approach to integrate
+the outcomes of other summarization methods.
+
+In our future work, we plan to exploit more features, es-
+pecially the linguistic features which are not covered in this
+paper, such as the rhetorical structures. We will also apply
+our approach to some more data sets with different genres to
+test its robustness.
+
+6 Acknowledgements
+Dou Shen and Qiang Yang are supported by a grant from NEC
+(NECLC05/06.EG01). We thank Ms Qionghua Wang and the
+anonymous reviewers for their useful comments.
+
+References
+[Barzilay and Elbadad, 1997] Resina Barzilay and Michael
+Elbadad. Using lexical chains for text summarization. In
+ISTS, 1997.
+
+[Brin and Page, 1998] Sergey Brin and Lawrence Page. The
+anatomy of a large-scale hypertextual web search engine.
+Computer Networks, 30(1-7):107–117, 1998.
+
+[Carbonell et al., 1997] Jaime Carbonell, Yibing Geng, and
+Jade Goldstein. Automated query-relevant summarization
+and diversity-based reranking. In IJCAI-97 Workshop on
+AI in Digital Libraries, pages 12–19, Japan, 1997.
+
+[Conroy and O’leary, 2001] John M. Conroy and Dianne P.
+O’leary. Text summarization via hidden markov models.
+In SIGIR, pages 406–407, 2001.
+
+[Deerwester et al., 1990] Scott C. Deerwester, Susan T. Du-
+mais, Thomas K. Landauer, George W. Furnas, and
+Richard A. Harshman. Indexing by latent semantic analy-
+sis. JASIS, 41(6):391–407, 1990.
+
+[Goldstein et al., 1999] Jade Goldstein, Mark Kantrowitz,
+Vibhu Mittal, and Jaime Carbonell. Summarizing text doc-
+uments: sentence selection and evaluation metrics. In SI-
+GIR, pages 121–128, 1999.
+
+[Gong and Liu, 2001] Yihong Gong and Xin Liu. Generic
+text summarization using relevance measure and latent se-
+mantic analysis. In SIGIR, pages 19–25, 2001.
+
+[Kleinberg, 1999] Jon M. Kleinberg. Authoritative sources
+
+[Kupiec et al., 1995] Julian Kupiec,
+
+in a hyperlinked environment. J. ACM, 46(5), 1999.
+Jan Pedersen,
+
+and
+Francine Chen. A trainable document summarizer. In SI-
+GIR, pages 68–73, 1995.
+
+[Lafferty et al., 2001] John D. Lafferty, Andrew McCallum,
+and Fernando C. N. Pereira. Conditional random ﬁelds:
+Probabilistic models for segmenting and labeling sequence
+data. In ICML, pages 282–289, 2001.
+
+[Lin and Hovy, 2003] Chin-Yew Lin and Eduard Hovy. Au-
+tomatic evaluation of summaries using n-gram co-
+occurrence statistics. In NAACL, pages 71–78, 2003.
+
+[Luhn, 1958] Hans P. Luhn. The automatic creation of liter-
+
+ature abstracts. IBM J. of R. and D., 2(2), 1958.
+
+[Malouf, 2002] Robert Malouf. A comparison of algorithms
+In CoNLL,
+
+for maximum entropy parameter estimation.
+2002.
+
+[Mani and Bloedorn, 1998] Inderjeet Mani and Eric Bloe-
+dorn. Machine learning of generic and user-focused sum-
+marization. In AAAI/IAAI, pages 820–826, 1998.
+
+[Mani, 1999] Inderjeet Mani. Advances in Automatic Text
+Summarization. MIT Press, Cambridge, MA, USA, 1999.
+[Marcu, 1997] Daniel Marcu. From discourse structures to
+text summaries. In ACL’97/EACL’97 Workshop on Intelli-
+gent Scalable Text Summarization, pages 82–88, 1997.
+
+[McCallum et al., 2000] Andrew McCallum, Dayne Freitag,
+and Fernando C. N. Pereira. Maximum entropy markov
+models for information extraction and segmentation.
+In
+ICML, pages 591–598, 2000.
+
+[Mihalcea, 2005] Rada Mihalcea. Language independent ex-
+tractive summarization. In AAAI, pages 1688–1689, 2005.
+[Peng and McCallum, 2006] Fuchun Peng and Andrew Mc-
+Callum. Information extraction from research papers using
+conditional random ﬁelds. IPM, 42(4):963–979, 2006.
+
+[Pollock and Zamora, 1975] J.; Pollock and A. Zamora. Au-
+tomatic abstracting research at chemical abstracts service.
+JCICS, 15(4), 1975.
+
+[Rabiner, 1990] Lawrence R. Rabiner. A tutorial on hidden
+markov models and selected applications in speech recog-
+nition. pages 267–296, 1990.
+
+[Sha and Pereira, 2003] Fei Sha and Fernando Pereira. Shal-
+In NAACL,
+
+low parsing with conditional random ﬁelds.
+pages 134–141, 2003.
+
+[Shen et al., 2004] Dou Shen, Zheng Chen, Qiang Yang,
+Hua-Jun Zeng, Benyu Zhang, Yuchang Lu, and Wei-Ying
+Ma. Web-page classiﬁcation through summarization. In
+SIGIR, pages 242–249, 2004.
+
+[Sutton and McCallum, 2006] Charles Sutton and Andrew
+McCallum. An introduction to conditional random ﬁelds
+for relational learning. In Lise Getoor and Ben Taskar, ed-
+itors, Introduction to Statistical Relational Learning. MIT
+Press, 2006.
+
+[Van Rijsbergen, 1979] C. Van Rijsbergen. Information Re-
+
+trieval. 1979.
+
+[Yeh et al., 2005] Jen-Yuan Yeh, Hao-Ren Ke, Wei-Pang
+Yang, and I-Heng Meng. Text summarization using a
+trainable summarizer and latent semantic analysis. IPM,
+41(1):75–95, 2005.
+
+IJCAI-07
+
+2867
+
+

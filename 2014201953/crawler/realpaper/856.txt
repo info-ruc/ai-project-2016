@@ -1,0 +1,1211 @@
+State Similarity Based Approach for Improving Performance in RL
+
+∗
+
+Sertan Girgin1,2 and Faruk Polat1 and Reda Alhajj2,3
+
+Middle East Technical University1
+Dept. of Computer Engineering
+{sertan,polat}@ceng.metu.edu.tr
+
+University of Calgary2
+
+Global University3
+
+Dept. of Computer Science
+
+{girgins,alhajj}@cpsc.ucalgary.ca
+
+Dept. of Computer Science
+
+rhajj@gu.edu.lb
+
+Abstract
+
+This paper employs state similarity to improve rein-
+forcement learning performance. This is achieved
+by ﬁrst identifying states with similar sub-policies.
+Then, a tree is constructed to be used for locat-
+ing common action sequences of states as derived
+from possible optimal policies. Such sequences are
+utilized for deﬁning a similarity function between
+states, which is essential for reﬂecting updates on
+the action-value function of a state onto all similar
+states. As a result, the experience acquired during
+learning can be applied to a broader context. Effec-
+tiveness of the method is demonstrated empirically.
+
+1 Introduction
+
+Reinforcement learning (RL) is the problem faced by an agent
+that must learn behavior through trial-and-error interactions
+with a dynamic environment, by gaining percepts and rewards
+from the world and taking actions to affect it. In most of the
+realistic and complex domains, the task that an agent tries
+to solve is composed of various subtasks and has a hierar-
+chical structure formed by the relations between them [Barto
+and Mahadevan, 2003]. Each of these subtasks repeats many
+times at different regions of the state space. Although all in-
+stances of the same subtask, or similar subtasks, have almost
+identical solutions, without any (self) guidance an agent has
+to learn these solutions independently by going through sim-
+ilar learning stages again and again. This situation affects the
+learning process in a negative way, making it difﬁcult to con-
+verge to optimal behavior in reasonable time.
+
+The main reason of this problem is the lack of connec-
+tions, that would allow to share solutions, between simi-
+lar subtasks scattered throughout the state space. One pos-
+sible way to build connections is to use temporally ab-
+stract actions (TAAs), which generalize primitive actions
+and last for a period of time [Sutton et al., 1999; Diet-
+terich, 2000; Barto and Mahadevan, 2003]. TAAs can be
+included in the problem deﬁnition, which requires extensive
+domain knowledge and becomes more difﬁcult as the com-
+plexity of the problem increases, or be constructed automat-
+
+∗
+
+This work was supported by the Scientiﬁc and Technological
+
+Research Council of Turkey under Grant No. 105E181(HD-7).
+
+ically either by ﬁnding sub-goal states and generating corre-
+sponding options that solve them [Stolle and Precup, 2002;
+Menache et al., 2002; Mannor et al., 2004; Simsek et al.,
+2005] or by identifying frequently occurring patterns over
+the state, action and reward trajectories [McGovern, 2002;
+Girgin et al., 2006]. Since different instances of the same
+or similar subtasks would probably have different subgoals
+in terms of state representation, with subgoal based meth-
+ods they will be discovered and treated separately. Although
+sequence based methods are capable of combining different
+instances of the same subtask, multiple abstractions may be
+generated for each of them.
+
+TAA based methods try to solve the solution sharing prob-
+lem inductively. Based on the fact that states with similar pat-
+terns of behavior constitute the regions of state space corre-
+sponding to different instances of similar subtasks, the notion
+of state equivalence can be used as a more direct mechanism
+of solution sharing. By reﬂecting experience acquired on one
+state to all similar states, connections between similar sub-
+tasks can be established implicitly. In fact, this reduces the
+repetition in learning, and consequently improves the perfor-
+mance. State equivalence is closely related with model min-
+imization in Markov Decision Processes (MDPs), and var-
+[Givan et al., 2003] deﬁne equiva-
+ious deﬁnitions exist.
+lence of states based upon stochastic bisimilarity, such that
+two states are said to be equivalent if they are both action
+sequence and optimal value equivalent. Based on the no-
+tion of MDP homomorphism, [Ravindran and Barto, 2001;
+2002] extended equivalence over state-action pairs, which as
+a result allows reductions and relations not possible in case of
+bisimilarity. Furthermore, they applied state-(action) equiva-
+lence to the options framework to derive more compact op-
+tions without redundancies, called relativized options. While
+relativized options are deﬁned by the user, instances are gen-
+erated automatically. [Zinkevich and Balch, 2001] also ad-
+dressed how symmetries in MDPs can be used to acceler-
+ate learning by employing equivalence relations on the state-
+action pairs; in particular for the multi-agent case, where
+permutations of features corresponding to various agents are
+prominent, but without explicitly formalizing them.
+
+In this paper, following homomorphism notion, we pro-
+pose a method to identify states with similar sub-policies
+without requiring a model of the MDP or equivalence rela-
+tions, and show how they can be integrated into RL frame-
+
+IJCAI-07
+
+817
+
+work to improve the learning performance. Using the col-
+lected history of states, actions and rewards, traces of policy
+fragments are generated and then translated into a tree form
+to efﬁciently identify states with similar sub-policy behavior
+based on the number of common action-reward sequences.
+Updates on the action-value function of a state are then re-
+ﬂected to all similar states, expanding the inﬂuence of new
+experiences. The proposed method can be treated as a meta-
+heuristic to guide any underlying RL algorithm. We demon-
+strate the effectiveness of this approach by reporting test re-
+sults on two domains, namely various versions of the taxi
+cab and the room doorway problems. Further, the proposed
+method is compared with other RL algorithms, and a substan-
+tial level of improvement is observed on different test cases.
+Also, we present how the performance of out work compares
+with hierarchical RL algorithms, although the approaches are
+different. The tests demonstrate the applicability and effec-
+tiveness of the proposed approach.
+
+The rest of this paper is organized as follows: In Section 2,
+we brieﬂy describe the standard RL framework of discrete
+time, ﬁnite MDPs, deﬁne state equivalence based on MDP
+homomorphisms, and show how they can be used to improve
+the learning process. Our approach to how similar states can
+be identiﬁed during the learning process is presented in Sec-
+tion 3. Experimental results are reported and discussed in
+Section 4. Section 5 is conclusions.
+
+(cid:2)
+
+2 Background and Motivation
+In this section, we brieﬂy overview the background necessary
+to understand the material introduced in this paper. We start
+by deﬁning MDP and related RL problem.
+
+An MDP is a tuple (cid:3)S, A, Ψ, T, R(cid:4), where S is a ﬁnite set
+of states, A is a ﬁnite set of actions, Ψ ⊆ S×A is the set of ad-
+missible state-action pairs, T : Ψ × S → [0, 1] is a state tran-
+s(cid:2) ∈S T (s, a, s(cid:3)) = 1,
+sition function such that ∀(s, a) ∈ Ψ,
+and R : Ψ → (cid:9) is a reward function. R(s, a) is the imme-
+diate expected reward received when action a is executed in
+state s.1 A (stationary) policy, π : Ψ → [0, 1], is a mapping
+that deﬁnes the probability of selecting an action in a par-
+ticular state. The value of a state s under policy π, V π(s), is
+the expected inﬁnite discounted sum of rewards that the agent
+will gain if it starts in state s and follows π. In particular, if
+the agent takes action a at state s and then follows π, the re-
+sulting sum is called the value of the state-action pair (s, a)
+and denoted Qπ(s, a). The objective of an agent is to ﬁnd an
+optimal policy, π∗, which maximizes the state value function
+for all states. Based on the experience in the form of sam-
+ple sequences of states, actions, and rewards collected from
+on-line or simulated trial-and-error interactions with the en-
+vironment, RL methods try to ﬁnd a solution to an MDP by
+approximating optimal value functions. Detailed discussions
+of various approaches can be found in [Kaelbling et al., 1996;
+Sutton and Barto, 1998; Barto and Mahadevan, 2003].
+
+RL problems, in general, inherently contain subtasks that
+need to be solved by the agent. These subtasks can be repre-
+sented by simpler MDPs that locally preserve the state tran-
+sition and reward dynamics of the original MDP. Let M =
+
+1s, a is used instead of (s, a), wherever possible.
+
+s1
+
+a1/1
+
+s2
+
+s3
+
+a2/0
+
+a1/2
+
+s4
+
+s1
+
+a1/1
+
+s2
+
+sΥ
+
+a2/0
+
+a1/0
+
+a1/0
+
+a1/0
+
+aΥ/c
+
+(a)
+
+(b)
+
+Figure 1: (a) Markov Decision Process M , and (b) its homo-
+morphic image M (cid:3). Directed edges indicate state transitions.
+Each edge label denotes the action causing the transition be-
+tween connected states and the associated expected reward.
+
+(cid:3)S, A, Ψ, T, R(cid:4) and M (cid:3) = (cid:3)S (cid:3) ∪{sΥ}, A(cid:3) ∪{aΥ}, Ψ(cid:3), T (cid:3), R(cid:3)(cid:4)
+be two MDPs, such that sΥ is an absorbing state with a single
+admissible action aΥ which, once executed, transitions back
+to sΥ with certainty. A surjection h : Ψ → Ψ(cid:3) ∪ {(sΥ, aΥ)}
+is a partial MDP homomorphism (pMDPH) from M to M (cid:3),
+if for all states that do not map to sΥ, state-action pairs that
+have the same image under h also have the same block tran-
+sition behavior in M and the same expected reward2. Un-
+der h, M (cid:3) is called the partial homomorphic image of M 3.
+Two state-action pairs (s1, a1) and (s2, a2) in M are said to
+be equivalent if h(s1, a1) = h(s2, a2); states s1 and s2 are
+→ As2 such that
+equivalent if there exists a bijection ρ : As1
+∀a ∈ As1 , h(s1, a) = h(s2, ρ(a)). The set of state-action
+pairs equivalent to (s, a), and the set of states equivalent to s
+are called the equivalence classes of (s, a) and s, respectively.
+[Ravindran and Barto, 2001] proved that if h above is a com-
+plete homomorphism, then an optimal policy π∗ for M can
+be constructed from an optimal policy for M (cid:3)4. This makes it
+possible to solve an MDP by solving one of its homomorphic
+images which can be structurally simpler and easier to solve.
+However, in general such a construction is not viable in case
+of pMDPHs, since the optimal policies would depend on the
+rewards associated with absorbing states.
+
+For example, consider the deterministic MDP M given in
+Fig. 1(a). If the discount factor, γ, is set as 0.9, then optimal
+policy at s2 is to select action a2; M (cid:3) given in Fig. 1(b) is a
+partial homomorphic image of M 5 and one can easily deter-
+mine that Q∗(s2, a1) = 1 and Q∗(s2, a2) = 9 ∗ c, where c is
+the expected reward for executing action aΥ at the absorbing
+state. Accordingly, the optimal policy for M (cid:3) at s2 is to select
+a1 if c < 1/9, and a2 otherwise, which is different than the
+optimal policy for M . This example demonstrates that unless
+reward functions are chosen carefully, it may not be possible
+to solve a given MDP by employing the solutions of its par-
+tial homomorphic images. However, if equivalence classes of
+state-action pairs and states are known, they can be used to
+speed up the learning process. Let (s, a) and (s(cid:3), a(cid:3)) be two
+equivalent state-action pairs in a given MDP M based on the
+partial homomorphic image M (cid:3) of M under the surjection h.
+
+2h((s, a)) = (f (s), gs(a)), where f : S → S
+
+(cid:3) ∪ Υ is a sur-
+(cid:3)
+f (s)|s ∈ S} is a set of state dependent
+
+jection and {gs : As → A
+surjections.
+
+3For a formal deﬁnition see [Ravindran and Barto, 2001; 2002]
+4∀a ∈ g−1
+5Under h deﬁned as f (s1) = s1, f (s2) = s2, f (s3) = f (s4) =
+
+s (a(cid:3)), π∗(s, a) = π∗
+
+M (cid:2) (f (s), a(cid:3))/|g−1
+
+s (a(cid:3))|
+
+sΥ, g{s1,s2}(a1) = a1, gs2
+
+(a2) = a2, g{s3,s4}(a1) = aΥ
+
+IJCAI-07
+
+818
+
+Suppose that while learning the optimal policy, the agent se-
+lects action a at state s which takes it to state t with an imme-
+diate reward r, such that t is mapped to a non-absorbing state
+under h. Let Ω be the set of states in M which are accessible
+from s(cid:3) by taking action a(cid:3), i.e. probability of transition is
+non-zero, and are mapped to the same state in M (cid:3) as t under
+h. By deﬁnition, for any t(cid:3) ∈ Ω, the probability of experienc-
+ing a transition from s(cid:3) to t(cid:3) upon taking action a(cid:3) is equal to
+that of from s to t upon taking action a. Also, since (s, a) and
+(s(cid:3), a(cid:3)) are equivalent, we have R(s, a) = R(s(cid:3), a(cid:3)), i.e., both
+state-action pairs have the same expected reward, and since
+t is mapped to a non-absorbing state, independent of the re-
+ward assigned to the absorbing state, they have the same pol-
+icy. Therefore, for any state t(cid:3) ∈ Ω, o = (cid:3)s(cid:3), a(cid:3), r, t(cid:3)(cid:4) can
+be regarded as a virtual experience tuple and Q(s(cid:3), a(cid:3)) can be
+updated similar to Q(s, a) based on observation o, i.e., pre-
+tending as if action a(cid:3) transitioned the agent from state s(cid:3) to
+state t(cid:3) with an immediate reward r.
+
+The method described above assumes that equivalence
+classes of states and corresponding pMDPHs are already
+known. If such information is not available prior to learn-
+ing, then, for a restricted class of pMDPHs, it is still possible
+to identify states that are similar to each other with respect to
+state transition and reward behavior based on the history of
+events, as we show in the next section. Experience gathered
+on one state, then, can be reﬂected to similar states to improve
+the performance of learning.
+
+3 Finding Similar States
+For the rest of the paper, we will restrict our attention to
+direct pMDPHs in which, except the absorbing state and
+its associated action,
+the action sets of an MDP and its
+homomorphic image are the same and there is an iden-
+tity mapping on the action component of state-action tu-
+ples6. Let M = (cid:3)S, A, Ψ, T, R(cid:4) be a given MDP. Start-
+ing from state s, a sequence of states, actions and rewards
+σ = s1, a2, r2, . . . , rn−1, sn, such that s1 = s and each
+ai, 2 ≤ i ≤ n − 1,
+is chosen by following a pol-
+icy π is called a π-history of s with length n. ARσ =
+a1r1a2 . . . an−1rn−1 is the action-reward sequence of σ,
+and the restriction of σ to Σ ⊆ S, denoted by σΣ, is the
+longest preﬁx s1, a2, r2, . . . , ri−1, si of σ, such that for all
+j = 1..i, sj ∈ Σ and si+1 /∈ Σ.
+If two states of M are
+equivalent under a direct pMDPH h, then the set of images of
+π-histories restricted to the states that map to non-absorbing
+states under h, and consequently, the list of associated action-
+reward sequences are the same 7. This property of equiva-
+lent states leads to a natural approach to calculate the similar-
+
+(cid:3)
+
+(cid:3)
+
+, a
+
+, T
+
+(cid:3) ∪ {sΥ}, A ∪ {aΥ}, Ψ(cid:3)
+
+6gs(a) = a, for every s that maps to a non-absorbing state.
+7Let (s, a) and (s
+
+(cid:3)) be two state-action pairs that are equiv-
+(cid:3) =
+alent to each other based on partial homomorphic image M
+(cid:3)(cid:7) of M = (cid:6)S, A, Ψ, T, R(cid:7) un-
+(cid:6)S
+der direct pMDPH h. Consider a π-history of state s of length
+n, and let Σh ⊆ S be the inverse image of S
+under h, and
+= s1, a2, r2, . . . , rk−1, sk, k ≤ n be the restriction of σ on
+σΣh
+), is obtained
+Σh. The image of σΣh under h, denoted by F (σΣh
+, i.e., F (σΣh
+) =
+by mapping each state si to its counterpart in S
+h(s1), a2, r2, h(s2), a3, . . . , rk−1, h(sk). By deﬁnition, F (σΣh
+) is
+a π-history of h(s) in M
+are equivalent, there
+
+, and since s and s
+
+, R
+
+(cid:3)
+
+(cid:3)
+
+(cid:3)
+
+(cid:3)
+
+ity between any two states based on the number of common
+action-reward sequences.
+
+Given any two states s and s(cid:3) in S, let Πs,i be the set of
+π-histories of state s with length i, and ςi(s, s(cid:3)) calculated as
+
+(cid:2)i
+
+j=1
+
+ςi(s, s(cid:3)) =
+
+|{σ ∈ Πs,j |∃σ(cid:3) ∈ Πs(cid:2),j, ARσ = ARσ(cid:2) }|
+
+(cid:2)i
+
+|Πs,j|
+
+j=1
+
+be the ratio of the number of common action-reward se-
+quences of π-histories of s and s(cid:3) with length up to i to the
+number of action-reward sequences of π-histories of s with
+length up to i. ςi(s, s(cid:3)) will be close to 1, if s(cid:3) is similar to s
+in terms of state transition and reward behavior; and close to
+0, in case they differ considerably from each other. Note that,
+even for equivalent states, the action-reward sequences will
+eventually deviate and follow different courses as the subtask
+that they are part of ends. As a result, for i larger than some
+threshold value, ςi would inevitably decrease and no longer
+be a permissible measure of the state similarity. On the con-
+trary, for very small values of i, such as 1 or 2, ςi may over
+estimate the amount of similarity since number of common
+action-reward sequences can be high for short action-reward
+sequences. Also, since optimal value of i depends on the
+subtasks of the problem, to increase robustness, it is neces-
+sary to take into account action-reward sequences of various
+lengths. Therefore, the maximum value or weighted average
+of ςi(s, s(cid:3)) over a range of problem speciﬁc i values, kmin
+and kmax, can be used to combine the results of evaluations
+and approximately measure the degree of similarity between
+states s and s(cid:3), denoted by ς(s, s(cid:3)). Once ς(s, s(cid:3)) is calcu-
+lated, s(cid:3) is regarded as equivalent to s if ς(s, s(cid:3)) is over a
+given threshold value τsimilarity . Likewise, by restricting the
+set of π-histories to those that start with a given action a in the
+calculation of ς(s, s(cid:3)), similarity between state-action pairs
+(s, a) and (s(cid:3), a) can be measured approximately.
+
+If the set of π-histories for all states are available in ad-
+vance, then equivalent states can be identiﬁed prior to learn-
+ing. However, in general, the dynamics of the system is not
+known in advance and consequently such information is not
+accessible. Therefore, using the history of observed events
+(i.e. sequence of states, actions taken and rewards received),
+the agent must incrementally store the π-histories of length
+up to kmax during learning and enumerate common action-
+reward sequences of states in order to calculate similarities
+between them. For this purpose, we propose an auxiliary
+structure called path tree, which stores the preﬁxes of action-
+reward sequences of π-histories for a given set of states. A
+path tree P = (cid:3)N, E(cid:4) is a labeled rooted tree, where N is the
+set of nodes, such that each node represents a unique action-
+reward sequence; and e = (u, v, (cid:3)a, r(cid:4)) ∈ E is an edge
+from u to v with label (cid:3)a, r(cid:4), indicating that action-reward
+sequence v is obtained by appending a, r to u, i.e., v = uar.
+The root node represents the empty action sequence. Fur-
+thermore, each node u holds a list of (cid:3)s, ξ(cid:4) ∈ S × R tuples,
+stating that state s has one or more π-histories starting with
+
+(cid:3)
+
+(cid:3)
+
+exists a π-history σ
+under h is equal to F (σΣh
+more ARσ(cid:2)
+.
+
+= ARσΣ
+
+of s
+
+h
+
+Σ
+
+h
+
+such that the image of its restriction to Σh
+); and further-
+), i.e., F (σ
+
+) = F (σΣh
+
+(cid:3)
+Σh
+
+IJCAI-07
+
+819
+
+Algorithm 1 Q-learning with equivalent state update.
+1: Initialize Q arbitrarily (e.g., Q(·, ·) = 0)
+2: Let T be the path tree initially containing root node only.
+3: repeat
+4:
+5:
+6:
+
+(cid:4) for each step
+Choose and execute a from s using policy derived from
+(cid:3)
+;
+
+Let s be the current state
+repeat
+
+Q with sufﬁcient exploration. Observe r and the next state s
+append (cid:6)s, a, r, s
+
+(cid:3)(cid:7) to observation history.
+
+(cid:3)
+
+s(cid:2) Q(s
+
+(cid:3)) − Q(s, a))
+
+, a
+
+ΔQ(s, a) = α(r + γ maxa(cid:2)∈A
+for all (t, at) similar to (s, a) do
+be a state similar to s(cid:3)
+.
+
+Let t(cid:3)
+ΔQ(t, at) = α(r + γ maxa
+
+t(cid:2) ∈A
+
+t(cid:2) Q(t(cid:3), at(cid:2) ) −
+
+7:
+8:
+9:
+10:
+
+11:
+12:
+13:
+14:
+
+15:
+
+16:
+
+Q(t, at))
+
+end for
+s = s(cid:3)
+
+until s is a terminal state
+Using the observation history, generate the set of π-histories
+
+of length up to kmax and add them T .
+
+Traverse T and update eligibility values of the tuples in each
+
+node; prune tuples with eligibility value less than ξthreshold.
+
+Calculate ς and determine similar states s, s
+
+ς(s, s
+
+(cid:3)) > τsimilarity.
+
+(cid:3)
+
+such that
+
+Clear observation history.
+
+17:
+18: until a termination condition holds
+
+action sequence σu. ξ is the eligibility value of σu for state s,
+representing its occurrence frequency. It is incremented every
+time a new π-history for state s starting with action sequence
+σu is added to the path tree, and gradually decremented oth-
+erwise. A π-history h = s1a2r2 . . . rk−1sk can be added to a
+path tree by starting from the root node, following edges ac-
+cording to their label. Let ˆn denote the active node of the path
+tree, which is initially the root node. For i = 1..k − 1, if there
+is a node n such that ˆn is connected to n by an edge with label
+(cid:3)ai, ri(cid:4), then either ξ of the tuple (cid:3)s1, ξ(cid:4) in n is incremented
+or a new tuple (cid:3)s1, 1(cid:4) is added to n if it does not exist, and ˆn
+is set to n. Otherwise, a new node containing tuple (cid:3)s1, 1(cid:4) is
+created, and ˆn is connected to this node by an edge with label
+(cid:3)ai, ri(cid:4). The new node becomes the active node.
+
+After each episode, or between two termination conditions
+such as reaching reward peaks in case of non-episodic tasks,
+using the consecutive fragments of the observed sequence of
+states, actions and rewards, a set of π-histories of length up
+to kmax are generated and added to the path tree using the
+procedure described above. Then, the eligibility values of
+tuples in the nodes of the tree are decremented by a factor
+of 0 < ξdecay < 1, called eligibility decay rate, and tuples
+with eligibility value less than a given threshold, ξthreshold,
+are removed to keep the tree of manageable size and focus
+the search on recent and frequently used action-reward se-
+quences. Using the generated path tree, ς(s, s(cid:3)) can be cal-
+culated incrementally for all s, s(cid:3) ∈ S by traversing it in
+breadth-ﬁrst order and keeping two arrays κ(s) and K(s, s(cid:3)).
+κ(s) denotes the number of nodes containing s, and K(s, s(cid:3))
+denotes the number of nodes containing both s and s(cid:3) in their
+tuple lists. Initially ς(s, s(cid:3)), K(s, s(cid:3)), and κ(s) are set to 0.
+At each level of the tree, the tuple lists of nodes at that level
+are processed, and κ(s) and K(s, s(cid:3)) are incremented accord-
+ingly. After processing level i, kmin ≤ i ≤ kmax, for ev-
+
+ery s, s(cid:3) pair that co-exist in the tuples list of a node at that
+level, ς(s, s(cid:3)) is compared with K(s, s(cid:3))/κ(s) and updated
+if the latter one is greater. Note that, since eligibility values
+stored in the nodes of the path tree is a measure of occurrence
+frequencies of corresponding sequences, it is possible to ex-
+tend the similarity function by incorporating eligibility val-
+ues in the calculations as normalization factors. This would
+improve the quality of the metric and also result in better dis-
+crimination in domains with high degree of non-determinism,
+since the likelihood of the trajectories will also be taken into
+consideration. In order to simplify the discussion, we opted
+to omit this extension. Once ς values are calculated, equiv-
+alent states, i.e., state pairs with ς greater than τsimilarity ,
+can be identiﬁed and incorporated into the learning process.
+The proposed method applied to Q-learning algorithm is pre-
+sented in Alg. 1.
+
+4 Experiments
+
+We applied the similar state update method described in Sec-
+tion 3 to Q-learning and compared its performance with dif-
+ferent RL algorithms on two test domains: a six-room maze8
+and various versions of the taxi problem9 (Fig. 2(a)). Also, its
+behavior is examined under various parameter settings, such
+as maximum length of π-histories and eligibility decay rate.
+In all test cases, the initial Q-values are set to 0, and -greedy
+action selection mechanism, where action with maximum Q-
+value is selected with probability 1 −  and a random action
+is selected otherwise, is used with  = 0.1. The results are
+averaged over 50 runs. Unless stated otherwise, the path tree
+is updated using an eligibility decay rate of ξdecay = 0.95
+and an eligibility threshold of ξthreshold = 0.1, and in sim-
+ilarity calculations the following parameters are employed:
+kmin = 3, kmax = 5, and τsimilarity = 0.8.
+
+Fig. 2(b) shows the total reward obtained by the agent un-
+til goal position is reached in six-room maze problem when
+equivalent state update is applied to Q-learning and Sarsa(λ)
+algorithms. Based on initial testing, we used a learning rate
+and discount factor of α = 0.125, and γ = 0.90, respectively.
+For the Sarsa(λ) algorithm, λ is taken as 0.98. State simi-
+larities are calculated after each episode. As expected, due to
+backward reﬂection of received rewards, Sarsa(λ) converges
+much faster compared to Q-learning. The learning curve of
+
+8The agent’s task is to move from a randomly chosen position in
+the top left room to the goal location in the bottom right room us-
+ing primitive actions that move the agent to one of four neighboring
+cells. Each action is non-deterministic and succeeds with probabil-
+ity 0.9, or moves the agent perpendicular to the desired direction
+with probability 0.1. The agent only receives a reward of 1 when it
+reaches the goal location and a negative reward of −0.01 otherwise.
+9The agent tries to transport a passenger between predeﬁned lo-
+cations on a n × n grid world using six primitive actions: move
+to one of four adjacent squares, pickup or dropoff the passenger.
+Should a move action cause the agent hit to wall/obstacle, the posi-
+tion of the agent will not change. The movement actions are non-
+deterministic and with 0.2 probability agent may move perpendic-
+ular to the desired direction. An episode ends when the passenger
+is successfully transported and the agent receives a reward of +20.
+There is an immediate negative reward of −10 if pickup or drop-off
+actions are executed incorrectly, and −1 for any other action.
+
+IJCAI-07
+
+820
+
+B
+
+d
+r
+a
+w
+e
+r
+
+ 5
+ 0
+-5
+-10
+-15
+-20
+-25
+-30
+-35
+-40
+
+D
+3
+
+4
+
+1
+
+2
+
+4
+
+3
+
+2
+
+1
+
+0
+
+A
+
+C
+0
+
+(a)
+
+ 0
+-1000
+-2000
+-3000
+-4000
+-5000
+-6000
+-7000
+-8000
+
+ 6000
+ 5000
+ 4000
+ 3000
+ 2000
+ 1000
+ 0
+
+d
+r
+a
+w
+e
+r
+
+i
+
+e
+z
+s
+ 
+e
+e
+r
+t
+ 
+.
+g
+v
+a
+
+d
+r
+a
+w
+e
+r
+
+d
+r
+a
+w
+e
+r
+
+ 0
+-100
+-200
+-300
+-400
+-500
+-600
+-700
+-800
+
+ 0
+-100
+-200
+-300
+-400
+-500
+-600
+-700
+-800
+
+q
+sarsa (0.90)
+q w/ equ.
+
+ 0
+
+ 500
+
+ 1000
+episode
+(d)
+
+ 1500
+
+ 2000
+
+0.95
+0.75
+0.50
+
+ 0
+
+ 200
+
+ 400
+
+ 600
+
+ 800
+
+ 1000
+
+episode
+(g)
+
+q
+sarsa(0.98)
+q w/ equ.
+sarsa(0.98) w/ equ.
+
+ 0  100  200  300  400  500  600  700
+
+episode
+(b)
+
+q
+er (q)
+er (sarsa)
+q w/ equ.
+
+ 0
+
+ 200
+
+ 400
+
+ 600
+
+ 800
+
+ 1000
+
+episode
+(e)
+
+3,4
+3,5
+3,6
+3,7
+
+ 0
+
+ 200
+
+ 400
+
+ 600
+
+ 800
+
+ 1000
+
+episode
+(h)
+
+d
+r
+a
+w
+e
+r
+
+d
+r
+a
+w
+e
+r
+
+i
+
+e
+z
+s
+ 
+e
+e
+r
+t
+ 
+.
+g
+v
+a
+
+ 0
+-100
+-200
+-300
+-400
+-500
+-600
+-700
+-800
+
+ 0
+-100
+-200
+-300
+-400
+-500
+-600
+-700
+-800
+
+q
+sarsa(0.9)
+smdp-q
+q w/ equ.
+
+ 0
+
+ 200
+
+ 400
+
+ 600
+
+ 800
+
+ 1000
+
+episode
+(c)
+
+q
+0.95
+0.75
+0.50
+
+ 0
+
+ 200
+
+ 400
+
+ 600
+
+ 800
+
+ 1000
+
+ 30000
+ 25000
+ 20000
+ 15000
+ 10000
+ 5000
+ 0
+
+episode
+(f)
+
+3,4
+3,5
+3,6
+3,7
+
+ 0
+
+ 200
+
+ 400
+
+ 600
+
+ 800  1000
+
+episode
+(i)
+
+Figure 2: (a) Six-room maze and 5 × 5 Taxi problems, (b) Results for the six-room maze problem; Results for the (c) 5 × 5
+and (d) 12 × 12 taxi problems; (e) Experience replay with the same number of state updates; Effect of ξdecay and kmin,max on
+5 × 5 taxi problem: (f,h) Reward obtained, and (h,i) average size of the path tree.
+
+Q-learning with equivalent state update indicates that, start-
+ing from early states of learning, the proposed method can
+effectively utilize state similarities and improve the perfor-
+mance considerably. Since convergence is attained in less
+than 20 episodes, the result obtained using Sarsa(λ) with
+equivalent state update is almost indistinguishable from that
+of Q-learning with equivalent state update.
+
+The results of the corresponding experiments in 5 × 5 taxi
+problem showing the total reward obtained by the agent is
+presented in Fig. 2(c). The initial position of the taxi agent,
+location of the passenger and its destination are selected ran-
+domly with uniform probability. α is set to 0.05, and λ is
+taken as 0.9 in Sarsa(λ) algorithm. State similarities are com-
+puted every 5 episodes starting from the 20th
+episode in order
+to let the agent gain experience for the initial path tree. Simi-
+lar to the six-room maze problem, Sarsa(λ) learns faster than
+regular Q-learning. In SMDP Q-learning [Bradtke and Duff,
+1994], in addition to primitive actions, the agent can select
+and execute hand-coded options, which move the agent from
+any position to one of predeﬁned locations using minimum
+number of steps. Although SMDP Q-learning has a very steep
+learning curve in the initial stages, by utilizing abstractions
+
+and symmetries more effectively Q-learning with equivalent
+state update performs better in the long run. The learning
+curves of algorithms with equivalent state update reveals that
+the proposed method is successful in identifying similar states
+which leads to an early improvement in performance, which
+allows the agent to learn the task more efﬁciently. The results
+for the larger 12 × 12 taxi problem presented in Fig. 2(d)
+demonstrate that the improvement becomes more evident as
+the complexity of the problem increases.
+
+The proposed idea of using state similarities and then up-
+dating similar states leads to more state-action value, i.e., Q-
+value, updates per experience. It is known that remember-
+ing past experiences and reprocessing them as if the agent re-
+peatedly experienced what it has experienced before, which
+is called experience replay [Lin, 1992], speed up the learn-
+ing process by accelerating the propagation of rewards. Ex-
+perience replay also results in more updates per experience.
+In order to test whether the gain of the equivalent state up-
+date method in terms of learning speed is simply due to the
+fact that more Q-value updates are made or not, we compared
+its performance to experience replay using the same number
+of updates. The results obtained by applying both methods
+
+IJCAI-07
+
+821
+
+to regular Q-learning algorithm on the 5 × 5 taxi problem
+are presented in Fig. 2(e). Even though the performance of
+learning improves with experience replay, it falls short of
+Q-learning with equivalent state update. This indicates that
+in addition to number of updates, how they are determined
+is also important. By reﬂecting updates in a semantically
+rich manner based on the similarity of action-reward patterns,
+rather than neutrally as in experience replay, the proposed
+method turns out to be more efﬁcient. Furthermore, in or-
+der to apply experience replay, the state transition and reward
+formulation of a problem should not change over time as past
+experiences may no longer be relevant otherwise. The dy-
+namic nature of the sequence tree allows the proposed method
+to handle such situations as well.
+
+In order to analyze how various parameter choices of the
+proposed method affect the learning behavior, we conducted
+a set of experiments under different settings. The results for
+various ξdecay values are presented in Fig. 2(f,g). As the
+eligibility decay decreases, the number of π-histories repre-
+sented in the path tree also decrease, and recent π-histories
+dominate over existing ones. Consequently, the less num-
+ber of equivalent states can be identiﬁed and the perfor-
+mance of the method also converges to that of regular Q-
+learning. Fig. 2(h,i) shows how the length of π-histories
+affect the performance in the taxi domain. Different kmax
+values show almost indistinguishable behavior, although the
+path tree shrinks considerably as kmax decreases. Despite
+the fact that minimum and maximum π-history lengths are
+inherently problem speciﬁc, in most applications, kmax near
+kmin is expected to perform well as restrictions of pMDPHs
+to smaller state sets will also be pMDPHs themselves.
+
+5 Conclusions
+
+In this paper, we proposed and analyzed the interesting and
+useful characteristics of a tree-based approach that, during
+learning, identiﬁes states similar to each other with respect to
+action-reward patterns, and based on this information reﬂects
+state-action value updates of one state to multiple states. Ex-
+periments conducted on two well-known domains highlighted
+the applicability and effectiveness of utilizing such a relation
+between states in the learning process. The reported test re-
+sults demonstrate that experience transfer performed by the
+algorithm is an attractive approach to make learning systems
+more efﬁcient. However, when the action set is very large, the
+parameters, such as eligibility decay, must be chosen care-
+fully in order to reduce the computational cost and keep the
+size of the tree manageable. Also, instead of matching action-
+reward sequences exactly, they can be matched partially and
+grouped together based on their reward values (ex.  neigh-
+borhood). This is especially important in cases where the im-
+mediate reward has a distribution. We are currently working
+on adaptation of the method to continuous domains, which
+also covers these issues. Furthermore, since the similarity be-
+tween two states is a value which varies between 0 and 1,
+rather than thresholding to determine equivalent states and
+reﬂecting the whole experience, it is possible to make use of
+the degree of similarity, for example, by updating Q-values in
+proportion to their similarity. Future work will examine pos-
+
+sible ways of extending and improving the proposed method
+to consider such information.
+
+References
+[Barto and Mahadevan, 2003] A. G. Barto and S. Mahadevan. Re-
+cent advances in hierarchical reinforcement learning. Discrete
+Event Dynamic Systems, 13(4):341–379, 2003.
+
+[Bradtke and Duff, 1994] S. J. Bradtke and M. O. Duff. Rein-
+forcement learning methods for continuous-time markov deci-
+sion problems. In Advances in NIPS 7, pages 393–400, 1994.
+
+[Dietterich, 2000] T. G. Dietterich. Hierarchical reinforcement
+learning with the MAXQ value function decomposition. Jour-
+nal of Artiﬁcial Intelligence Research, 13:227–303, 2000.
+
+[Girgin et al., 2006] S. Girgin, F. Polat, and R. Alhajj. Learning
+by automatic option discovery from conditionally terminating se-
+quences. In Proc. of the 17th ECAI, 2006.
+
+[Givan et al., 2003] R. Givan, T. Dean, and M. Greig. Equivalence
+notions and model minimization in markov decision processes.
+Artiﬁcial Intelligence, 147(1-2):163–223, 2003.
+
+[Kaelbling et al., 1996] L. Kaelbling, M. Littman, and A. Moore.
+Reinforcement learning: A survey. Journal of Artiﬁcial Intelli-
+gence Research, 4:237–285, 1996.
+
+[Lin, 1992] L.-J. Lin. Self-improving reactive agents based on re-
+inforcement learning, planning and teaching. Machine Learning,
+8(3-4):293–321, 1992.
+
+[Mannor et al., 2004] S. Mannor,
+
+I. Menache, A. Hoze, and
+U. Klein. Dynamic abstraction in reinforcement learning via
+clustering. In Proc. of the 21st ICML, pages 71–78, 2004.
+
+[McGovern, 2002] A. McGovern. Autonomous Discovery of Tem-
+poral Abstractions From Interactions With An Environment. PhD
+thesis, University of Massachusetts Amherts, May 2002.
+
+[Menache et al., 2002] I. Menache, S. Mannor, and N. Shimkin. Q-
+cut - dynamic discovery of sub-goals in reinforcement learning.
+In Proc. of the 13th ECML, pages 295–306, 2002.
+
+[Ravindran and Barto, 2001] B. Ravindran and A. G. Barto. Sym-
+metries and model minimization in markov decision processes.
+Technical Report 01-43, University of Massachusetts, Amherst,
+2001.
+
+[Ravindran and Barto, 2002] B. Ravindran and A. G. Barto. Model
+minimization in hierarchical reinforcement learning.
+In Proc.
+of the 5th SARA, pages 196–211, London, UK, 2002. Springer-
+Verlag.
+
+[Simsek et al., 2005] O. Simsek, A. P. Wolfe, and A. G. Barto.
+Identifying useful subgoals in reinforcement learning by local
+graph partitioning. In Proc. of the 22nd ICML, 2005.
+
+[Stolle and Precup, 2002] M. Stolle and D. Precup. Learning op-
+tions in reinforcement learning. In Proc. of the 5th SARA, pages
+212–223, 2002.
+
+[Sutton and Barto, 1998] R. S. Sutton and A. G. Barto. Reinforce-
+ment Learning: An Introduction. MIT Press, Cambridge, MA,
+1998.
+
+[Sutton et al., 1999] R. S. Sutton, D. Precup, and S. Singh. Between
+MDPs and semi-MDPs: a framework for temporal abstraction
+in reinforcement learning. Artiﬁcial Intelligence, 112(1-2):181–
+211, 1999.
+
+[Zinkevich and Balch, 2001] M. Zinkevich and T. R. Balch. Sym-
+metry in markov decision processes and its implications for sin-
+gle agent and multiagent learning.
+In Proc. of the 18th ICML,
+pages 632–, 2001.
+
+IJCAI-07
+
+822
+
+

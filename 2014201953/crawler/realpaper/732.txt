@@ -1,0 +1,1040 @@
+Learning Implied Global Constraints
+
+Christian Bessiere
+
+LIRMM-CNRS
+
+U. Montpellier, France
+bessiere@lirmm.fr
+
+Remi Coletta
+
+LRD
+
+Montpellier, France
+coletta@l-rd.fr
+
+Thierry Petit
+LINA-CNRS
+
+´Ecole des Mines de Nantes, France
+
+thierry.petit@emn.fr
+
+Abstract
+
+Finding a constraint network that will be eﬃciently
+solved by a constraint solver requires a strong ex-
+pertise in Constraint Programming. Hence, there is
+an increasing interest in automatic reformulation.
+This paper presents a general framework for learn-
+ing implied global constraints in a constraint net-
+work assumed to be provided by a non-expert user.
+The learned global constraints can then be added to
+the network to improve the solving process. We ap-
+ply our technique to global cardinality constraints.
+Experiments show the signiﬁcance of the approach.
+
+1 Introduction
+Encoding a problem as a constraint network (called model)
+that will be solved eﬃciently by a constraint toolkit is a diﬃ-
+cult task. This requires a strong expertise in Constraint Pro-
+gramming (CP), and this is known as one of the main bot-
+tlenecks to the widespread of CP technology [Puget, 2004].
+CP experts often start by building a ﬁrst model that expresses
+correctly the problem without any other requirement. Then,
+if the time to solve this model is too high, they reﬁne it
+by adding new constraints that do not change the set of so-
+lutions but that increase the propagation capabilities of the
+solver. In Ilog Solver 5.0. user’s manual, a Gcc constraint
+is added to improve the solving time of a graph coloring
+problem (page 279 in [Ilog, 2000]). In [R´egin, 2001], new
+constraints are added in a sports league scheduling problem.
+Such constraints are called implied constraints [Smith et al.,
+1999]. The community has studied automatic ways of gener-
+ating implied constraints from a model. Colton and Miguel
+[Colton and Miguel, 2001] exploit a theory formation pro-
+gram to provide concepts and theorems which can be trans-
+lated into implied constraints. In Hnich et al. [Hnich et al.,
+2001], some implied linear constraints are derived by using an
+extension of the Prolog Equation Solving System [Sterling et
+al., 1989]. In all these frameworks the new generated con-
+straints are derived from structural properties of the original
+constraints. They do not depend on domains of variables.
+
+This paper presents a framework based on ideas presented
+in [Bessiere et al., 2005]. This framework contains two orig-
+inal contributions in automatic generation of implied con-
+straints: First, it permits to learn global constraints with pa-
+
+rameters; Second, the implied constraints are learned accord-
+ing to the actual domains of the variables in the model.
+
+Learning global constraints is important because global
+constraints are a key feature of constraint programming. They
+permit to reduce the search space with eﬃcient propaga-
+tors. Global constraints generally involve parameters. For
+instance, consider the NValue(k, [x1, . . . , xn]) constraint. It
+holds iﬀ k is equal to the number of diﬀerent values taken
+by x1, . . . , xn. k can be seen as the parameter, which leads
+to diﬀerent sets of allowed tuples on the xi’s depending on
+the value it takes. The increase of expressiveness provided
+by the parameters increases the chances to ﬁnd implied con-
+straints in a network. A learning algorithm will try, for exam-
+ple, to learn the smallest range of possible values for k s.t. the
+NValue is an implied constraint. The tighter the range for k,
+the more the learned constraint can reduce the search space.
+Many constraints from [Beldiceanu et al., 2005] may be used
+as implied constraints involving parameters.
+
+Learning implied constraints according to the actual do-
+mains is important because constraints learned that way take
+into account more than just the structure of the network and
+the constraints. They are closer to the real problem to be
+solved. For instance, if we know that X, Y and Z are 0/1
+variables, we can derive X = Z from the set of constraints
+X (cid:2) Y, Y (cid:2) Z. Without knowledge on the domains, we cannot
+derive anything. Even an expert in CP has diﬃculties to ﬁnd
+such constraints because they depend on complex interactions
+between domains and constraints.
+
+2 Motivation Example
+Let us focus on a simple problem where n tasks have to be
+scheduled. All tasks have the same duration d. Each task i
+requires a given amount mi of resource. Steps of time are rep-
+resented by integers starting at 0. At any time, the amount of
+resource used by all tasks is bounded by maxR. The starting
+times of any two tasks must be separated by at least two steps
+of time. Random precedence constraints between start times
+of tasks are added. The makespan (maximum time) is equal to
+2 ∗ (n − 1) + d (the best possible makespan w.r.t. the constraint
+on starting times). The question is to ﬁnd a feasible schedule.
+We implemented a naive model with Choco [Choco, 2005].
+The start time of task i is represented by a variable xi with
+domain [0..2 ∗ (n − 1)] (because of the makespan), and the
+resource capacity is represented at each unit of time t by an
+
+IJCAI-07
+
+44
+
+n / d / n1 / n2 / maxR
+
+#nodes / time (sec.)
+
+Naive model
+
+Implied constraint
+#nodes / time (sec.)
+
+4 / 4 / 4 / 0 / 4
+4 / 4 / 4 / 0 / 3
+4 / 4 / 4 / 0 / 2
+4 / 4 / 3 / 1 / 4
+4 / 4 / 3 / 1 / 3
+4 / 4 / 3 / 1 / 2
+
+—– / > 60
+42,129 / 7.50
+85 / 0.20
+45 / 0.05
+33 / 0.05
+
+46 / 0.05
+46 / 0.03
+25 / 0.05
+45 / 0.05
+32 / 0.05
+
+7 (unsat) / 0.05
+
+3 (unsat) / 0.03
+
+Table 1: Results on the naive model (left) and when an implied Gcc
+is added to the model (right). (n tasks of duration d among which n j
+tasks use j resources.)
+
+(cid:2)
+n
+
+array R[t][1..n] of variables, where R[t][i] = mi if task i is
+active at time t, R[t][i] = 0 otherwise. Constraints ensuring
+consistency between xi and R[t][i] and constraints on separa-
+tion of starting times are primitive ones. Sum constraints are
+i=1 R[t][i] ≤ maxR).
+used for expressing resource capacity (
+We place us in the context of a non expert user, so we run the
+default search heuristics of Choco (the variable with mini-
+mum domain ﬁrst, assigned with its smallest available value).
+We put a cutoﬀ at 60 seconds. Table 1(left) reports results on
+instances where n = 4, d = 4 and n j is the number of tasks
+requiring j resources. Only two precedence constraints are
+added. It shows that even on these small instances, our naive
+model can be hard to solve with standard solving techniques.
+If we want to solve this problem with more tasks, we def-
+initely need to improve the model. An expert-user will see
+that constraints on the starting time of tasks induce limits on
+the number of tasks that can start at each point of time.1 The
+makespan is indeed equal to the minimal possible value for
+scheduling all the tasks if they are separated by at least two
+units. We therefore have to place tasks as soon as possible.
+This means that one task starts at time zero, one task at time
+2, etc. This can be expressed explicitly with a global cardi-
+nality constraint (Gcc). Gcc([x1, . . . , xn], [pv1
+, . . . , pvk ]) holds
+iﬀ |{i | xi = v j}| = pv j for all j. So, we add to our model a Gcc
+constraint that involves all starting times x1, . . . , xn and guar-
+antees that the n ﬁrst even values of time are taken at least
+once: Gcc([x1, . . . , xn], [p0, . . . , p2n−1]), where pv ∈ 1 . . . n if
+v is even, pv ∈ 0 . . . n otherwise. As shown in Table 1(right),
+adding this simple Gcc constraint to the naive model leads to
+signiﬁcant improvements. This example shows that for a non-
+expert user, even very small problems can lead to bad perfor-
+mance of the solver. Adding simple implied constraints to the
+model can dramatically reduce the solving cost.
+
+3 Basic Deﬁnitions
+A constraint network N is deﬁned by a set X = {x1, . . . , xn} of
+variables, a set D = {D(x1), . . . , D(xn)} of domains of values
+for the variables in X, and a set C of constraints. A constraint
+c is deﬁned on its scope X(c) ⊆ X. c speciﬁes which com-
+binations of values (or tuples) are allowed on the variables in
+X(c). A solution to N is an assignment of values from their
+domain to all variables in X s.t. all constraints in C are satis-
+ﬁed. sol(N) denotes the set of solutions of N.
+
+1The automatic generation of robust search heuristics is out of
+
+the scope of this paper.
+
+An implied constraint for a constraint network N is a con-
+straint that does not change the solutions of N. That is,
+given the constraint network N = (X, D, C), the constraint
+c with X(c) ⊆ X is an implied constraint for N if sol(N) =
+sol(N + c) where N + c denotes the network (X, D, C ∪ {c}).
+Global constraints are deﬁned on any number of vari-
+ables. For instance, alldifferent is a global constraint
+that can be instantiated on scopes of variables of any size.
+For most of the global constraints, the signature is not com-
+pletely ﬁxed. Some of their variables can be seen as pa-
+rameters, that is, ’external’ variables that are not involved
+in any other constraint of the problem. For instance, the
+Gcc constraint Gcc([x1, . . . , xn], [pv1
+, . . . , pvk ]) involves xi’s
+and pv’s. The pv’s can be variables of the problem (like
+in [Quimper et al., 2003]), or parameters that take a value
+in a range (like in [R´egin, 1996]). Another example is the
+Among constraint. Among([x1, . . . , xn], [v1, . . . , vk], N) holds
+iﬀ |{i | ∃ j ∈ 1..k, xi = v j}| = N. The v j’s and N can be
+parameters or variables [Beldiceanu and Contejean, 1994;
+Bessiere et al., 2006]. So, a global constraint C deﬁned on
+a scheme scheme(C) can be speciﬁed into diﬀerent types
+of parametric constraints depending on which elements in
+scheme(C) are variables or parameters.
+Deﬁnition 1 (Parametric constraint) Given a global con-
+straint C deﬁned on scheme(C), a parametric constraint de-
+rived from C is a global constraint C[P] s.t. P = {p1, . . . , pm}
+is the set of parameters of C[P] with P ⊂ scheme(C), and
+X(C[P]) is the scope of C[P] with X(C[P]) = scheme(C) \ P.
+So, in addition to its variables, a constraint can be deﬁned
+by a set P of parameters. The set of tuples that are allowed by
+the constraint depends on the values the parameters can take.
+
+Deﬁnition 2 (Instance of parametric constraint) Given a
+constraint network N = (X, D, C), an instance of a para-
+metric constraint C[P] in N is a constraint C[P ← S ] s.t.:
+
+is a set of tuples on P,
+
+• X(C[P ← S ]) = X(C[P]) ⊆ X,
+• P ∩ X = ∅,
+• S ⊆ |P|
+• C[P ← S ] is satisﬁed by an instantiation e on X(C[P])
+iﬀ there exists t ∈ S s.t. the tuple (e + t) on scheme(C) is
+a satisfying tuple for the global constraint C from which
+C[P] is derived.
+
+Example 1 Let C[P] be the parametric constraint derived from
+Among([x1, . . . , x4], [v], N) with scope (x1, . . . , x4) and parameters
+P = (v, N). Let S = {(1, 3), (2, 1)} be a set of combinations for
+P. A tuple on (x1, . . . , x4) is accepted by the instance of constraint
+C[P ← S ] iﬀ it has three occurrences of value 1 or one occurrence
+of value 2. Tuples (1, 1, 3, 1) and (1, 1, 2, 3) satisfy the constraint.
+Tuples (3, 2, 2, 2) and (2, 1, 1, 2) do not. We suppose that this para-
+metric constraint allows us specifying combinations of parameters
+that are allowed. In practice, propagation algorithms often put re-
+strictions on how parameters can be expressed.
+
+Given a parametric constraint C[P], diﬀerent sets S and
+(cid:12) of tuples for the parameters lead to diﬀerent constraints
+S
+(cid:12)]. Hence, when adding an instance
+C[P ← S ] and C[P ← S
+of parametric constraint C[P] as implied constraint in a net-
+work N, it is worth using a set S of tuples for the parameters
+which is as tight as possible and C[P ← S ] is implied in N.
+
+IJCAI-07
+
+45
+
+4 Learning Implied Parametric Constraints
+The objective is to learn a ’target’ set T ⊆ |P|, as small as
+possible s.t. C[P] is still an implied constraint. Any s ∈ |P|
+which is not necessary to accept some solutions of N can be
+discarded from T . The tighter the learned constraint is, the
+more promising its ﬁltering power is.
+
+Deﬁnition 3 (Learning an implied parametric constraint)
+Given a constraint network N = (X, D, C) and a parametric
+constraint C[P] with P ∩ X = ∅ and X(C[P]) ⊆ X, learning
+an instance of the parametric constraint C[P] implied in N
+consists in ﬁnding a set S ⊆
+as tight as possible s.t.
+C[P ← S ] is implied in N.
+
+|P|
+
+A set of tuples T s.t. C[P ← T ] is implied in N and there
+does not exist any S ⊂ T with C[P ← S ] implied in N is
+called a target set for C[P] in N.
+
+We now give a general process to learn the parameters of
+implied global constraints. Since our goal is to deal with any
+type of constraint network, we focus on global constraints C
+and sets of parameters P ⊆ scheme(C) s.t. C[P ← |P|] is the
+universal constraint. This means that if N contains the vari-
+ables in scheme(C) \ P, C[P ← |P|] is an implied constraint
+in N. The learning task is to ﬁnd a small superset of a target
+set T (see Deﬁnition 3). Given a problem N = (X, D, C) and
+a parametric constraint C[P], we denote by:
+
+• ubT a subset of
+
+|P| s.t. C[P ← ubT ] is an implied con-
+
+straint,
+
+• lbT a subset of ubT s.t. for any t ∈ lbT , C[P ← ubT \ {t}]
+
+is not an implied constraint.
+
+In other words, lbT represents those combinations of values
+for the parameters that are necessary in ubT to preserve the
+set of solutions of N, and ubT those for which we have not
+proved yet that we would not lose solutions without them.
+The following propositions give some general conditions on
+how to incrementally tighten the bounds lbT and ubT while
+keeping the invariant lbT ⊆ T ⊆ ubT , where T is a target.
+Proposition 1 Let C[P ← ubT ] be an implied constraint in
+a network N. If there exists S ⊂ ubT s.t. sol(N) = sol(N +
+C[P ← S ]) then C[P ← S ] is an implied constraint in N. So
+ubT can be replaced by S .
+
+Testing equivalence of the sets of solutions of two networks
+is coNP-complete. This cannot be handled by classical con-
+straint solvers. Hence, we have to relax the condition to a
+condition that can more easily be checked by a solver.
+Corollary 1 Let C[P ← ubT ] be an implied constraint in a
+network N. If there exists S ⊆ ubT s.t. N + C[P ← S ] is
+inconsistent then C[P ← ubT \ S ] is an implied constraint in
+N. So ubT can be replaced by ubT \ S .
+
+The weakness of this corollary is that we have no clue on
+which subsets S of ubT to test for inconsistency. But we know
+that an implied constraint should not remove solutions when
+we add it to the network. Hence, solutions can help us.
+Proposition 2 Let C[P ← ubT ] be an implied constraint in
+a network N and e be a solution of N. For any S ⊆ ubT s.t.
+C[P ← S ] is an implied constraint for N there exists t in S
+s.t. e satisﬁes C[P ← {t}].
+
+If a given solution is accepted by a unique combination of
+values for the parameters, then this combination is necessary
+for having an implied constraint (i.e., it belongs to lbT ).
+Corollary 2 Let C[P ← ubT ] be an implied constraint in a
+network N and e be a solution of N. If there is a unique t in
+ubT s.t. e satisﬁes C[P ← {t}] then t can be put in lbT .
+
+By Corollaries 1 and 2 we can shrink the bounds of an ini-
+tial set of possibilities for the parameters. Algorithm 1 per-
+forms a brute-force computation of a set ubT s.t. C[P ← ubT ]
+is an implied constraint for a network N. This algorithm
+works when no extra-information is known from the param-
+eters. It uses corollaries 1 and 2. The input is a parametric
+constraint and a constraint network (and optionally an initial
+upper bound U B on the target set). The output is a set ubT
+of tuples for the parameters, s.t. no solution of the problem is
+lost if we add C[P ← ubT ] to the network.
+
+Algorithm 1: Brute-force Learning Algorithm
+
+Input: C[P], N (optionally U B);
+Output: ubT ;
+begin
+
+← ∅;
+← |P| ;
+
+lbT
+ubT
+while lbT
+
+/* or the tighter U B */
+
+(cid:2) ubT and not ’time-out’ do
+
+Choose S ⊂ ubT
+if sol(N + C[P ← S ]) = ∅ then
+
+\ lbT ;
+
+else
+
+ubT
+
+← ubT
+
+\ S ;
+
+/* Corollary 1 */
+
+pick e in sol(N + C[P ← S ]);
+if there is a unique t in ubT s.t. e satisﬁes
+C[P ← {t}] then
+
+lbT
+
+← lbT
+
+∪ {t} ;
+
+/* Corollary 2 */
+
+1
+
+2
+
+end
+
+It is highly predictable that Algorithm 1 can be ineﬃcient.
+The space of possible combinations of values to explore is
+exponential in the number of parameters. In addition, check-
+ing whether N + C[P ← S ] is inconsistent (line 1) is NP-
+complete. Even if N in this learning phase should be only
+a subpart of the whole problem, it is necessary to use some
+heuristics to improve the process. Fortunately, in practice,
+constraints have characteristics that can be used. The next
+section studies some of these properties.
+
+5 Using Properties on the Constraints
+For a given parametric constraint C[P], diﬀerent representa-
+tions of parameters may exist. The complexity of associated
+ﬁltering algorithms generally diﬀers according to the repre-
+sentation used. The more general case studied in Section 4
+consists in considering that allowed tuples of parameters for
+C[P] are given in extension as a set S ⊆ |P|.
+
+5.1 Partitioning parameters
+
+In practice, many parametric constraints satisfy the follow-
+ing property: any two diﬀerent combinations of values in
+|P| for the parameters correspond to disjoint sets of so-
+lutions on X(C[P]). For instance, this is the case for the
+Gcc([x1, . . . , xn], [pv1
+, . . . , pvk ]) constraint: Each combination
+
+IJCAI-07
+
+46
+
+of values for the parameters pv1
+ber of occurrences for each value v1, . . . , vk in x1, . . . , xn.
+
+, . . . , pvk imposes a ﬁxed num-
+
+Deﬁnition 4 A parametric
+parameter-partitioning iﬀ for any t, t
+C[P ← {t}] ∩ C[P ← {t
+
+(cid:12)}] = ∅.
+
+(cid:12)
+
+in
+
+constraint C[P]
+
+is
+
+|P|
+
+, if t (cid:2) t
+
+called
+(cid:12)
+then
+
+Given an instantiation e on X(C[P]), the unique tuple t on
+
+P s.t. e satisﬁes C[P ← {t}] is denoted by te.
+
+When a constraint is parameter-partitioning, we have the
+
+nice property that there is a unique target set.
+
+Lemma 1 Given a constraint network N, if a parametric
+constraint C[P] is parameter-partitioning then there exists a
+unique target set T for C[P] in N.
+
+The next proposition tells us that when a constraint is
+parameter-partitioning, updating the lower bound on the tar-
+get set is easier than in the general case.
+
+Proposition 3 Let C[P ← ubT ] be an implied constraint in a
+network N and e be a solution of N. If C[P] is a parameter-
+partitioning constraint then the unique tuple te on P s.t. e
+satisﬁes C[P ← {t}] can be put in lbT .
+
+This Proposition is a ﬁrst way to improve Algorithm 1. It
+allows a faster construction of lbT because any solution of N
+contributes to the lower bound lbT in line 2.
+
+5.2 Parameters as sets of integers
+
+As far as we know, existing parametric constraints are deﬁned
+by sets of possible values for their parameters p1, . . . , pm
+taken separately. This means that the target set T must be
+a Cartesian product T (p1) × · · · × T (pm), where T (pi) is the
+target set of values for parameter pi. In other words, T is de-
+rived from the sets of possible values of each parameter. This
+|P|,
+is less expressive than directly considering any subset of
+but the learning process is easier to handle. Let lbT (pi) and
+ubT (pi) be the required and possible values in T (pi). Corol-
+laries 1 and 2 are specialized in Corollaries 3 and 4.
+
+Corollary 3 Let C[P ← ubT ] be an implied constraint in
+a constraint network N, with ubT =
+∈P(ubT (pi)). Let
+pi ∈ P, S i ⊆ ubT (pi) \ lbT (pi) and S =
+j(cid:2)i ubT (p j) × S i.
+If N + C[P ← S ] has no solution then values in S i can be
+removed from ubT (pi).
+
+
+pi
+
+
+
+This corollary says that if a parametric constraint instance
+C[P ← S ] is inconsistent with a network whereas all its pa-
+rameters except one (pi) can take all the values in their upper
+bound, then all values in S (pi) can be discarded from ubT (pi).
+
+Corollary 4 Let C[P ← ubT ] be an implied constraint in a
+network N and e be a solution of N. Given a parameter
+pi ∈ P and a value v ∈ ubT (pi), if we have t[pi] = v for every
+tuple t in ubT s.t. e satisﬁes C[P ← {t}], then v can be put in
+lbT (pi).
+
+5.3 Parameters as ranges
+
+The possible values for a parameter pi can be represented by
+a range of integers, that is, a special case of set where all val-
+ues must be consecutive w.r.t. the total order on integers. The
+only possibility for modifying the sets lbT (pi) and ubT (pi)
+of a parameter pi is to shrink their bounds min(lbT (pi)),
+max(lbT (pi)), min(ubT (pi)) and max(ubT (pi)). This case re-
+stricts even more the possibilities for the combinations of pa-
+rameters allowed, and simpliﬁes the learning process. Corol-
+laries 1 and 2 can be specialized as Corollaries 5 and 6.
+Corollary 5 Let C[P ← ubT ] be an implied constraint in
+a constraint network N, where parameters are represented
+as ranges. Let pi ∈ P and v < min(lbT (pi)) (resp. v >
+j(cid:2)i ub(p j) × (−∞..v] (resp. S =
+max(lbT (pi))) and S =
+
+j(cid:2)i ub(p j) × [v.. + ∞)). If N + C[P ← S ] has no solution
+
+
+
+then min(ubT (pi)) > v (resp. max(ubT (pi)) < v).
+Corollary 6 Let C[P ← ubT ] be an implied constraint in a
+network N and e be a solution of N. Given a parameter
+pi ∈ P and a value v ∈ ubT (pi), if we have t[pi] = v for every
+tuple t in ubT s.t. e satisﬁes C[P ← {t}], then min(lbT (pi)) ≤
+v ≤ max(lbT (pi)).
+
+Thanks to Corollary 5, tightening the upper bounds for a
+given pi is simply done by checking if forcing it to take val-
+ues smaller than the minimum (or greater than the maximum)
+value of its lower bound leads to an inconsistency in the net-
+work. If yes, we know that all these values smaller than the
+minimum of lbT (pi) (or greater than the maximum of lbT (pi))
+can be removed from ubT (pi).
+
+6 Making the Learning Process Tractable
+
+One of the operations performed by the learning technique
+described in Sections 4 and 5 is a call to a solver to check
+if the network containing a given instance of parametric con-
+straint is still consistent (line 1 in Algorithm 1). This is NP-
+complete. A key idea to tackle this problem is that implied
+constraints learned on a relaxation of the original network are
+still implied constraints on the original network.
+
+Proposition 4 Given a network N = (X, D, C) and a net-
+work N (cid:12) = (X, D(cid:12)
+and
+sol(N) ⊆ sol(N (cid:12)) then c is implied in N.
+
+, C(cid:12)), if a constraint c is implied in N (cid:12)
+
+Selecting a subset of the constraints.
+Thanks to Proposition 4, we can select any subset of the con-
+straints of the network on which we want to learn an implied
+constraint, and the constraint learned on that subnetwork will
+be implied in the original network. In the example of Sec-
+tion 2, the Gcc constraint is only posted on the variables rep-
+resenting tasks and is an implied constraint on the subnet-
+work where neither the resource constraints nor the prece-
+dence constraints are taken into account. Thus, the underly-
+ing network was a simple one that could easily be solved.
+
+As in Section 5.1, Algorithm 1 can be modiﬁed to deal with
+the speciﬁc case where parameters are represented as sets of
+integers. Corollary 4 tells us when a value must go in lbT (pi)
+for some parameter pi. Corollary 3 tells us when a value can
+be removed from ubT (pi) for some parameter pi.
+
+Optimization problems.
+In an optimization problem, the set of solutions is the set of
+instantiations that satisfy all constraints and s.t. a cost func-
+tion has minimal (or maximal) value. If N = (X, D, C) is the
+network and f is the cost function, let N (cid:12) = (X, D, C ∪ {cUB
+})
+
+f
+
+IJCAI-07
+
+47
+
+n / d / n1 / n2 / maxR
+
+#nodes
+
+4 / 4 / 4 / 0 / 4
+4 / 4 / 4 / 0 / 3
+4 / 4 / 4 / 0 / 2
+4 / 4 / 3 / 1 / 4
+4 / 4 / 3 / 1 / 3
+4 / 4 / 3 / 1 / 2
+
+47
+47
+23
+43
+30
+
+3 (unsat)
+
+learning(sec.)
++ solve (sec.)
+
+0.3 + 0.05
+0.3 + 0.05
+0.3 + 0.02
+0.5 + 0.05
+0.3 + 0.02
+0.5 + 0.02
+
+Table 2: Learning an implied Gcc on the naive model of Section 2:
+time to learn and solving time. (n tasks of duration d among which
+n j tasks use j resources.)
+
+f
+
+is a constraint accepting all tuples on X with cost
+where cUB
+below a ﬁxed upper bound U B (we concentrate on minimiza-
+tion). If U B is greater than the minimal cost, then any im-
+plied constraint in N (cid:12) accepts all solutions of N optimal wrt
+f . The idea is thus to run a branch and bound on N for a
+ﬁxed (short) amount of time. U B is set to the value of the
+best solution found. Then, the classical learning process is
+launched on the network N + cUB
+. Note that if the learned
+implied constraint improves the solving phase, it can permit
+(cid:12) better than U B. Using this new
+to quickly ﬁnd a bound U B
+(cid:12), we can continue the learning process on N + cUB
+bound U B
+instead of N + cUB
+. The learned implied constraint will be
+tighter because N + cUB
+. We ob-
+serve a nice cooperation between the learning process and the
+solving process.
+
+is a relaxation of N + cUB
+
+(cid:12)
+
+f
+
+(cid:12)
+
+f
+
+f
+
+f
+
+f
+
+Time limit.
+It can be the case that ﬁnding a subnetwork easy to solve is not
+possible. In this case, we have to ﬁnd other ways to decrease
+the cost of the consistency test of line 1 in Algorithm 1. A
+simple way is to put a time limit to the consistency test. If the
+solver has not ﬁnished its search before the limit, ubT is not
+updated and the algorithm goes to the next loop.
+
+7 Experiments
+
+We evaluate our learning technique on the Gcc constraint (see
+Section 2). The Gcc global constraint is NP-hard to propagate
+when all elements in its scheme are variables [Quimper et al.,
+2003]. However, when the cardinalities of the values are pa-
+rameters that take values in a range, eﬃcient algorithms exist
+to propagate it [R´egin, 1996; Quimper et al., 2004]. In ad-
+dition, the Gcc constraint can express many diﬀerent features
+on the cardinalities of the values. This is thus a good can-
+didate for being added as an implied constraint. In all these
+experiments we learn a Gcc where cardinalities are ranges of
+integers. Results in Sections 5.1 and 5.3 apply directly. We
+used the Choco constraint solver [Choco, 2005].
+
+Satisfaction Problem.
+The ﬁrst experiment was performed on the problem of Sec-
+tion 2. The learning algorithm was run on the subnetwork
+where resource constraints and precedence constraints are
+discarded. The learning is thus fast (300 to 800 milliseconds
+for n = 4 or n = 5). We ﬁxed to 30 the limit on the number of
+consistency tests of the subnetwork with the added Gcc (line
+
+n / d / n1 / n2 / maxR
+
+5 / 5 / 5 / 0 / 3
+5 / 5 / 5 / 0 / 2
+5 / 5 / 3 / 2 / 4
+5 / 5 / 3 / 2 / 3
+5 / 5 / 1 / 4 / 5
+5 / 5 / 1 / 4 / 4
+
+#nodes
+
+—–
+
+53,250 (unsat)
+
+—–
+
+1,790 (unsat)
+
+11,065
+
+7,985 (unsat)
+
+solve (sec.)
+
+> 60
+19
+> 60
+1.2
+3.9
+2.9
+
+Table 3: Naive model with 5 tasks (n tasks of duration d among
+which n j tasks use j resources.)
+
+n / d / n1 / n2 / maxR
+
+#nodes
+
+5 / 5 / 5 / 0 / 3
+5 / 5 / 5 / 0 / 2
+5 / 5 / 3 / 2 / 4
+5 / 5 / 3 / 2 / 3
+5 / 5 / 1 / 4 / 5
+5 / 5 / 1 / 4 / 4
+
+63
+
+361 (unsat)
+
+92
+
+123 (unsat)
+
+39
+
+154 (unsat)
+
+learning (sec.)
++ solve (sec.)
+
+0.7 + 0.05
+0.7 + 0.3
+0.8 + 0.08
+0.7 + 0.2
+0.7 + 0.05
+0.7 + 0.2
+
+Table 4: Learning an implied Gcc on the problems with 5 tasks:
+time to learn and solving time. (n tasks of duration d among which
+n j tasks use j resources.)
+
+1 in Algorithm 1). Table 2 shows the results on a model con-
+taining the learned implied Gcc. The ﬁrst time number corre-
+sponds to the learning process and the second to the solving
+time. Results in Table 2 are almost the same as results in Ta-
+ble 1, where the implied Gcc was added by the expert user.
+This shows that a short run of the learning algorithm gives
+some robustness to the model wrt the solving process: The
+problem is consistently easy to solve on all types of instances
+whereas some of them could not be solved on the naive model
+of Section 2. Tables 3 and 4 show the results when we in-
+crease the number of tasks and their length (n = d = 5 instead
+of 4) and the number of random precedence constraints (4 in-
+stead of 2). We stopped the search at 60 seconds. We were
+able to solve all problems with size n = 6 in a few seconds
+(including the learning time) while most of them are not solv-
+able without the implied Gcc even after several minutes. This
+ﬁrst experiment shows that when taking a naive model with
+a naive search strategy, our learning technique can improve
+the robustness of the model in terms of solving time. The ef-
+fort asked to the user was just to have the intuition that “there
+is maybe some hidden Gcc related to the ordering of tasks”.
+This is a much lower eﬀort than studying by hand the possible
+implied constraints for each number of tasks and durations n
+and d.
+
+Optimization Problem.
+At the Institute of Technology of the University of Mont-
+pellier (IUT), n students provide a totally ordered list
+(u1, . . . , um) of the m projects they prefer: project ui is strictly
+preferred to project ui+1. The goal is to assign projects s.t. two
+students do not share a same project, while maximizing their
+satisfaction: a student is very satisﬁed if she obtains her ﬁrst
+choice, less if she obtains the second one, etc. Obtaining no
+project of her list is the worst possible satisfaction. Additional
+constraints exist such as a limit of 6 projects selected in the set
+
+IJCAI-07
+
+48
+
+Initial model
+
+Implied constraint
+
+#nodes
+
+solve (sec.)
+
+#nodes
+
+110
+
+137,982
+
+0.2
+
+183.2
+
+—
+
+> 12 hours
+
+12
+
+1,998
+
+8.7 × 106
+
+learning (sec.)
++ solve (sec.)
+
+0.2 + 0.0
+10.2 + 8.4
+
+110.0 + 43min.
+
+n
+
+10
+20
+60
+
+Table 5: Learning an implied Gcc on the ’projects’ optimization
+problem. n is the number of students
+
+of projects proposed by a teacher. A ﬁrst model was provided
+by students from that institute who are novices in constraint
+programming: students are variables, domains are their set
+of preferred projects plus an extra-value “0”, which means
+that no project in the preferred list was found. Constraints
+“(xi (cid:2) x j) ∨ (xi = x j = 0)” between each pair (xi, x j) of stu-
+dents express mutual exclusion on projects. Each student has
+a preference-variable measuring her satisfaction. Preference-
+variables are linked to student-variables by table constraints
+{(u1, 0), . . . , (um, m − 1), (0, m)}. The objective is to minimize
+the sum of preference-variables. This model is referred as the
+initial model. We wish to learn an implied Gcc on student
+variables. The solver is ﬁrst launched on the initial model for
+a short time (1 sec.) to get a ﬁrst solution S 0 and an upper
+bound on the quality of solutions, as described in Section 6.
+We had only one real instance (with 60 students), so we de-
+rived from the real data some sub-instances with less students
+(preserving the ratio ”number of projects/number of students”
+and the distribution of the choices).
+
+Left hand side of Table 5 shows the time and number of
+nodes with the initial model according to the number of stu-
+dents n. Right hand side of Table 5 shows the results obtained
+when learning an implied Gcc on the student variables. We
+ﬁxed to 10 × n the limit on the number of consistency tests
+(line 1 in Algorithm 1), with a cutoﬀ of 0.5 seconds for each
+of them. Thus, the maximum learning time grows linearly
+with the size of the problem. The learning time includes the
+generation of an initial positive example. The results show
+a tremendous speed up on the model reﬁned with a learned
+implied Gcc compared to the initial model. This shows that
+learning implied global constraints in an optimization prob-
+lem can greatly pay oﬀ when the model has been designed by
+a non CP expert.
+
+8 Conclusion
+
+Global constraints are essential in improving the eﬃciency of
+solving constraint models. We proposed a generic framework
+for automatically learning implied global constraints with pa-
+rameters. This is both the ﬁrst approach that permits to derive
+implied global constraints and the ﬁrst approach that learns
+implied constraints according to the actual domains, not just
+constraints derived from structural or syntactical properties.
+We applied the generic framework to special properties that
+global constraints often satisfy. Our experiments show that a
+very small eﬀort spent learning implied constraints with our
+technique can dramatically improve the solving time.
+
+References
+[Beldiceanu and Contejean, 1994] N.
+
+E. Contejean.
+Mathl. Comput. Modelling, 20(12):97–123, 1994.
+
+and
+Introducing global constraints in CHIP.
+
+Beldiceanu
+
+[Beldiceanu et al., 2005] N.
+
+and J-X. Rampon.
+SICS Technical
+
+son,
+alog.
+http://www.sics.se/libindex.html#Technical, 2005.
+
+Beldiceanu, M.
+
+Carls-
+Global constraint cat-
+report T2005-08, URL:
+
+[Bessiere et al., 2005] C. Bessiere, R. Coletta, and T. Petit.
+Acquiring parameters of implied global constraints. Pro-
+ceedings CP, pages 747–751, 2005.
+
+[Bessiere et al., 2006] C. Bessiere, E. Hebrard, B. Hnich,
+Z. Kiziltan, and T. Walsh. Among, common and disjoint
+constraints. In CSCLP: Recent Advances in Constraints,
+volume 3978 of LNCS, pages 29–43. Springer, 2006.
+
+[Choco, 2005] Choco.
+
+problems,
+
+satisfaction
+and explanation-based constraint
+http://sourceforge.net/projects/choco, 2005.
+
+A Java library for constraint
+programming
+URL:
+
+constraint
+
+solving.
+
+[Colton and Miguel, 2001] S. Colton and I. Miguel. Con-
+straint generation via automated theory formation. Pro-
+ceedings CP, pages 575–579, 2001.
+
+[Hnich et al., 2001] B. Hnich, J. Richardson, and P. Flener.
+Towards automatic generation and evluation of implied
+constraints. Upsala University T.R., 2001.
+
+[Ilog, 2000] Ilog.
+
+Solver 5.0 User’s Manual.
+
+URL:
+
+http://www.ilog.fr, 2000.
+
+[Puget, 2004] J.F. Puget. Constraint programming next chal-
+lenge: Simplicity of use. Proceedings CP, pages 5–8,
+2004.
+
+[Quimper et al., 2003] C.-G. Quimper,
+
+P. Van Beek,
+A. Lopez-Ortiz, A. Golynski, and S. B. Sadjad. An
+eﬃcient bounds consistency algorithm for the global
+cardinality constraint. Proceedings CP, pages 600–614,
+2003.
+
+[Quimper et al., 2004] C.-G. Quimper, A. L´opez-Ortiz,
+P. van Beek, and A. Golynski. Improved algorithms for
+the global cardinality constraint. Proceedings CP, 2004.
+
+[R´egin, 1996] J-C. R´egin. Generalized arc consistency for
+global cardinality constraint. Proceedings AAAI, pages
+209–215, 1996.
+
+[R´egin, 2001] J-C. R´egin. Minimization of the number of
+breaks in sports scheduling problems using constraints
+programming. DIMACS series in Discrete Mathematics
+and Theoretical Computer Science, 57:115–130, 2001.
+
+[Smith et al., 1999] B. Smith, K. Stergiou, and T. Walsh.
+Modelling the golomb ruler problem. In J.C. R´egin and
+W. Nuijten, editors, Proceedings IJCAI’99 workshop on
+non-binary constraints, Stockholm, Sweden, 1999.
+
+[Sterling et al., 1989] L. Sterling, A. Bundy, L. Byrd,
+R. O’Keefe, and B. Silver. Solving symbolic equations
+with PRESS. Journal of Symbolic Computation, pages 71–
+84, 1989.
+
+IJCAI-07
+
+49
+
+

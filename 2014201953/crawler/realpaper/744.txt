@@ -1,0 +1,1178 @@
+Symmetric Component Caching
+
+Matthew Kitching and Fahiem Bacchus
+
+Department of Computer Science,
+
+University of Toronto, Canada.
+
+[kitching|fbacchus]@cs.toronto.edu
+
+Abstract
+
+Caching, symmetries, and search with decomposi-
+tion are powerful techniques for pruning the search
+space of constraint problems.
+In this paper we
+present an innovative way of efﬁciently combining
+these techniques with branch and bound for solv-
+ing certain types of constraint optimization prob-
+lems (COPs). Our new method signiﬁcantly re-
+duces the overhead of performing decomposition
+during search when dynamic variable orderings are
+employed.
+In addition, it supports the exploita-
+tion of dynamic symmetries that appear only during
+search. Symmetries have not previously been com-
+bined with decomposition. Finally, we achieve a
+superior integration of decomposition and caching
+with branch and bound than previous approaches.
+We test our methods on the Maximum Density Still
+Life problem and show that each of our ideas yields
+a signiﬁcant gain in search performance.
+
+1 Introduction
+
+As the variables of a constraint satisfaction problem (CSP)
+are assigned during backtracking search the problem can
+break into disjoint parts. Consider a CSP consisting of the
+variables {A,B,M ,X,Y } and two constraints C1(A, B, M )
+and C2(M, X, Y ). If we make the assignment M = m, then
+the resulting reduced CSP will consist of two disjoint sub-
+problems that share no variables. One subproblem is over
+the variables A and B with the constraint CM=m
+(A, B) =
+C1(M =m, A, B) while the other subproblem is over X and
+Y with the constraint CM=m
+(X, Y ) = C2(M =m, X, Y ).
+We call these disjoint subproblems created by variable assign-
+ments components. The two components created by the as-
+signment M = m can be solved independently: any solution
+(cid:2)A = a, B = b(cid:3) to the ﬁrst, and solution (cid:2)X = x, Y = y(cid:3)
+to the second, can be combined with M = m to obtain a so-
+lution to the original CSP (cid:2)A = a, B = b, M = m, X =
+x, Y = y(cid:3). Since the worst case complexity of solving a CSP
+is exponential in the number of variables, decomposition into
+components can yield signiﬁcant computational gains.
+
+1
+
+2
+
+This insight has been exploited to perform search where
+decomposition is applied recursively, e.g., [Bayardo & Pe-
+houshek, 2000; Darwiche, 2001; Park & Gelder, 2000; Sang
+et al., 2004; Dechter, 2004; Amir & McIlraith, 2000]. This
+can yield a reduction in the worst case complexity of search
+from 2O(n)
+, where n is the number of variables of
+
+to nO(w)
+
+the problem and w is the tree width of the CSP-graph (the
+graph determined by the constraint scopes) [Darwiche, 2001].
+A component produced by decomposition at one point of
+the search tree might appear at many other nodes of the search
+tree. Caching allows us to solve each component once and
+then reuse that solution in the rest of the search. When
+caching is added to decomposition the worst case complexity
+of search can be further reduced, from nO(w)
+to 2O(w) [Dar-
+wiche, 2001; Bacchus, Dalmao, & Pitassi, 2003]. This can be
+a signiﬁcant speedup in practice (e.g., see the results in [Sang
+et al., 2004]). Of course caching requires space, but in this
+case the space requirements are completely ﬂexible. In partic-
+ular, caching is used only to speedup the algorithm—it is not
+required for correctness. Thus we can cache as many solved
+components as we have space for—within certain practical
+limits the more space we have for caching the faster the search
+will proceed. Furthermore, we can always prune the cache of
+less useful items if available space is exhausted.
+
+Decomposition and caching impose a signiﬁcant overhead
+during search, but these techniques are still very effective for
+more complex constraint problems, e.g., ﬁnding the best solu-
+tion (optimization) [Marinescu & Dechter, 2005] or counting
+the number of solutions [Sang et al., 2004]. When a static
+variable ordering is used much of this overhead can be elim-
+inated using data structures computed prior to search [Dar-
+wiche, 2001]. However, dynamic variable orderings can yield
+signiﬁcant reductions in the size of the search tree, enough to
+pay off their added overhead (e.g., [Marinescu & Dechter,
+2006]). Nevertheless, methods for reducing this overhead
+and for making these techniques even more effective are still
+needed to increase the practical beneﬁts of dynamic decom-
+position.
+
+In this paper we present a method for making search with
+decomposition and caching more effective in the context of
+dynamic variable orderings. Our key contribution involves a
+method for representing the common structure of an entire set
+of components in a single data structure we call a component
+template. The individual components that are instances of the
+template can thus share a single representation of their com-
+mon information, making caching considerable more space
+efﬁcient. With templates we can also increase the efﬁciency
+of cache lookup—we can access any of the template’s in-
+stances by simple array indexing. Templates also allow us to
+perform component detection during search more efﬁciently.
+Another ﬁnal key contribution of this paper is a method for
+automatically detecting symmetries between templates. Once
+we have detected that two templates T1 and T2 are symmet-
+
+IJCAI-07
+
+118
+
+ric we can use the discovered symmetry mapping to map all
+instances of T1 to a symmetric instance of T2. Thus the tem-
+plate symmetry encodes an entire set of individual compo-
+nent symmetries. This makes computing template symme-
+tries much more cost effective than computing symmetries
+between individual components. Template symmetries allow
+us to make more effective use of cached information—cached
+component bounds can now be used to provide bounds for all
+symmetric components as well. This can yield signiﬁcant re-
+ductions in the size of the explored search space.
+
+Finally, we show how to achieve a better integration be-
+tween branch and bound and component caching by caching
+bounds on components rather than requiring that the compo-
+nents be completely solved prior to being stored in the cache
+(as done, e.g., in [Marinescu & Dechter, 2005]).
+
+In the sequel we ﬁrst expand on the background behind
+our approach. Then we present our new technique of compo-
+nent templates and show how they can be exploited so as to
+achieved the beneﬁts just described. Then we present some
+initial empirical results on the test problem of Maximum Den-
+sity Still Life.
+
+2 Background
+In this paper, we concentrate on solving Constraint Opti-
+mization Problems (COPs) that have decomposable objective
+functions. However, our template technique could be used in
+other applications of component caching (search with decom-
+position and caching), e.g., counting solutions.
+A Constraint Optimization Problem (COP), P, is speciﬁed
+by a tuple (cid:2)V, Dom, C, O(cid:3), where V is a set of variables, for
+each V ∈ V, Dom[V ] is its domain of values, C is a set
+of constraints, and O is an objective function that assigns a
+value to all complete assignments of values to the variables.
+The typical goal in solving a COP is to ﬁnd an assignment of
+values to the variables that maximizes O and at the same time
+satisﬁes all of the constraints in C.
+
+(cid:2)
+
+Our techniques are effective on COPs that have decompos-
+able objective functions and constraints. In particular, we re-
+quire that O be decomposed into the sum of objective sub-
+functions oi, O =
+i oi, such that each oi is dependent
+on only a subset of the variables scope(oi) ⊂ V, and that
+each constraint C ∈ C also be dependent on only a subset of
+the variables scope(C) ⊂ V.1 The constraints and objective
+sub-functions can be uniﬁed by treating each constraint as an
+additional objective sub-function mapping satisfying assign-
+ments to 0 and violating assignments to −∞. Thus the overall
+(uniﬁed) objective function becomes O =
+j Cj,
+and the problem is simply to maximize this augmented ob-
+jective function.
+(This formulation is like a soft-constraint
+problem). Hence, in this paper we regard a COP as being the
+tuple (cid:2)V, Dom, O(cid:3) where O includes both the original objec-
+tive sub-functions and the hard constraints encoded as addi-
+tional objective sub-functions. We use the term objectives to
+denote the sub-functions in O.
+
+i oi +
+
+(cid:2)
+
+(cid:2)
+
+1If the objective function or constraints cannot be decomposed,
+our method will still be correct but no decompositions will be gen-
+erated during search. Often, however, the objective and global con-
+straints can be reformulated in a decomposed form.
+
+Note that we could equally use an objective function that
+is decomposed into a product rather than a sum of objectives;
+similarly we could cast the problem as a minimization task
+rather than a maximization task.
+
+Components. In backtracking search each node of the search
+tree n corresponds to a set of variable assignments, and these
+assignments might cause the problem to be broken up into
+disjoint components. A component is a subset of the origi-
+nal problem that has been isolated by a set of assignments.
+Here we present a formalization of this idea tailored to our
+subsequent developments.
+
+A component, ρ, of a COP P = (cid:2)V, Dom, O(cid:3) is a tuple
+(cid:2)ρ.V, ρ.O, ρ.A(cid:3) where ρ.V ⊆ V, ρ.O ⊆ O and ρ.A is a
+set of assignments {Vi = ai, . . .}, subject to the following
+conditions. Let vars(ρ.A) be the set of variables assigned
+values in ρ.A.
+(cid:3)
+
+(cid:3)
+
+o∈ρ.O
+
+V ∈ρ.V
+
+scope(o)
+
+{o|V ∈ scope(o)}
+
+1. ρ.O =
+2. vars(ρ.A) ∪ ρ.V =
+3. vars(ρ.A) ∩ ρ.V = ∅
+4. p is minimal. That is, there is no other tuple p(cid:3) =
+(cid:2)ρ(cid:3).V, ρ(cid:3).O, ρ(cid:3).A(cid:3) that satisﬁes conditions 1-3 with
+ρ(cid:3).V ⊆ ρ.V , ρ(cid:3).O ⊆ ρ.O, ρ(cid:3)A ⊆ ρ.A and with at least
+one of these sets being a strict subset.
+
+That is, a component contains a set of variables and all of
+the objectives over these variables. Furthermore, these ob-
+jectives are isolated from the rest of the problem by a set of
+assignments ρ.A: all of the variables they mention are ei-
+ther variables in the component or are instantiated in ρ.A.
+Furthermore none of the variables of the component, i.e., the
+variables in ρ.V, are assigned in ρ.A.
+The Components at a node. At each node n some set of
+assignments A have been made, and some set of variables
+U remain unassigned. The components at n, ρ1, ...ρk, are
+those components such that (a) ρi.V ⊆ U (the variables of
+the components are unassigned), (b) ρi.A ⊆ A (the current
+assignments isolate the variables of the component).
+Example 1 Consider a COP with variables {A, B, M, N,
+X, Y } and constraints C1(A, B, M ), C2(X, Y, N ), and
+C3(M, N ). At a node n where just the assignment M=a
+has been made, there will be two components: ρab with
+ρab.V = {A,B}, ρab.O = {C1}, and ρab.A = {M = a}
+and ρxyn with ρxyn.V = {X,Y ,N }, ρxyn.O = {C2, C3},
+and ρxyn.A = {M = a}.
+Computing the components at a node n is easily accom-
+plished by standard algorithms for detecting the CONNECTED
+COMPONENTS of a graph, e.g., union-ﬁnd or depth-ﬁrst
+search. In particular, we consider an undirected graph Gn,
+that contains a node for every objective in O and for every
+uninstantiated variable V . There is an edge between two
+nodes in Gn if and only if one of the nodes is a variable node
+V , the other is an objective node o, such that V ∈ scope(o).
+Observation 1 The CONNECTED COMPONENTS of Gn cor-
+respondto theminimalcomponentsof n. In particular, ρ is a
+component at n if and only there exists a connected compo-
+nent c of Gn such ρ.V is theset ofvariablenodesin c, ρ.O is
+
+IJCAI-07
+
+119
+
+the set of objective nodes of c, and ρ.A are the assignments
+made to the instantiated variablesof these objectives.
+
+This observation can be veriﬁed by realizing that conditions
+(1) and (2) in the deﬁnition of a component (above) can
+be achieved by incrementally adding connected objectives to
+ρ.O and connected variables to ρ.V stopping when there are
+no more connections to follow. This is precisely what CON-
+NECTED COMPONENTS algorithms do (these algorithms also
+compute minimal components). ρ.A can then computed after
+ρ.V and ρ.O have been ﬁnalized. Note also that any objective
+that has been fully instantiated at the node n will become an
+isolated node in Gn; i.e., a single node component. These
+fully instantiated objectives form components with no vari-
+ables, one objective, and the assignments required to fully
+instantiate that objective.
+Example 2 Suppose in our example we next assign N = b,
+so that only the two assignments M = a and N = b have
+been made. This will generate 3 components: ρab is un-
+affected by the new assignment, but ρxyn is now split into
+two components ρxy = (cid:2){X, Y }, C2, N = b(cid:3) and ρmn =
+(cid:2){}, C3, {N = b, M = a}(cid:3). Note the ρmn contains no vari-
+ables, just a single fully instantiated objective, and that the
+component ρxy does not contains M = a in its assignment
+set eventhoughits parentcomponent ρxyn did.
+
+Computation Beneﬁts of Components. If ρ is a component
+then the value of any assignment A to its variables, ρ.V, is
+equal to the sum of its objectives ρ.O evaluated at the set
+of assignments A ∪ ρ.A. Note that the objectives of ρ are
+functions only of ρ.V and the assignments in ρ.A, thus any
+complete assignment to ρ.V along with ρ.A is sufﬁcient to
+fully instantiate all of these objectives (yielding a single nu-
+meric value for each objective which we can then sum). The
+value (maximal value) of ρ, value(ρ), is the maximum value
+that can be achieved by any assignment to its variables ρ.V:
+
+(cid:4)
+
+value(ρ) =
+
+max
+
+o(A ∪ ρ.A).
+
+A:A is an assignment to ρ.V
+
+o∈ρ.O
+
+A solution to the component is any assignment to its variables
+that achieves its (maximal) value. Note that components cor-
+responding to fully instantiated objective have a value equal
+to the value of the instantiated objective. Note also that the
+value of a component can be computed by examining assign-
+ments to the component’s variables only, the rest of the prob-
+lem can be ignored.
+Proposition 1 Let n.A be the set of assignments made at a
+node n, and let ρ1, . . . , ρk be the set of components at n.
+The maximal value that can be obtain for any complete set
+of assignments A to the variables of the COP P such that
+A ⊇ n.A (i.e., at any leaf node in the subtree below n),
+i=1 value(ρi). Furthermore a complete assignment A
+is
+achieves this maximal value if and only if it is equal to n.A
+unionedwith a solution foreach component ρi.
+This proposition follows from the fact that the values of the
+components are independent of each other. Computationally,
+this means that we can solve each component independently,
+and that we obtain further computational advantage by ap-
+
+(cid:2)k
+
+plying decomposition recursively as we solve the individual
+components.
+3 Templates
+Now we introduce our new idea of component templates used
+to represent the shared information of a group of components,
+each of which then becomes an instance of the template. The
+basic idea is quite simple, with most of the innovation arising
+from how templates can be exploited algorithmically.
+
+From the deﬁnitions above it can be observed that for
+any two components ρ1 and ρ2 if ρ1.V = ρ2.V (cid:12)= ∅ then
+ρ1.O = ρ2.O: both of these sets are all the objectives men-
+tioning these variables (and no others due to minimal). Fur-
+thermore, the variables assigned in ρ1.A are identical to the
+variables assigned in ρ2.A: both of these sets must assign
+all variables of the ρi.O not in ρi.V.
+In fact the only dif-
+ference between two non-equal components containing the
+same (non-empty) set of variables is that the particular val-
+ues assigned in ρ1.A and ρ2.A differ, and as a consequence
+value(ρ1) and value(ρ2) might also differ (since the objec-
+tives are being maximized subject to the differing values in
+ρ1.A and ρ2.A).
+
+We use component templates to represent all the compo-
+nents that have an identical set of variables. Formally, a com-
+ponent template T = (cid:2)T .V, T .O, T .D(cid:3) is a set of variables
+T .V, objectives T .O, and another set of variables T .D dis-
+joint from T .V called the dependency variables, such that
+every set of assignments A to the variables in T .D (a) gener-
+ates an instance of the template T (cid:2)A(cid:3) and (b) every instance
+T (cid:2)A(cid:3) is a component: T (cid:2)A(cid:3) = (cid:2)T .V, T .O, A(cid:3). That is, the
+instance is a component with the same variables and objec-
+tives as the templates and with A being the set of assignments
+that disconnects it from the rest of the problem.
+Example 3 For instance, consider the component ρab =
+(cid:2){A, B}, C1, M = a(cid:3) seen in the previous example. The
+component template Tab = (cid:2){A, B}, {C1}, {M }(cid:3) includes
+ρab as one of its instances. Inparticular Tab(cid:2)M = a(cid:3) = ρab.
+
+Using Templates During Search. As described above, the
+components at each node n of a backtracking search can be
+determined by a CONNECTED COMPONENTS algorithm run
+on the graph Gn. Note however that Gn contains only vari-
+ables and objectives, it does not mention the actual values
+assigned to the instantiated variables. Hence the algorithm
+actually identiﬁes a set of templates. The components at the
+node n are the particular instances of these templates de-
+termined by the assignments at n.
+
+Once a template is detected for the ﬁrst time we create a
+data structure to represent the template instance and store this
+in a template cache. This data structure can then be used to
+efﬁciently detect when any of its instances are components of
+future nodes in the search as follows.
+Observation 2 Let A bethesetofassignmentsmadeatnode
+n, andlet T be a componenttemplate. If A instantiatesallof
+the variables in T .D and none of the variables in T .V, then
+T (cid:2)A(cid:2)T .D(cid:3) is one of the components at n, where A(cid:2)T .D =
+{V =a|V =a ∈ A ∧ V ∈ T .D} isthesubsetof A thatassigns
+the variablesin T .D.
+We can efﬁciently detect when all of the variables in T .D are
+
+IJCAI-07
+
+120
+
+instantiated at a node using standard lazy watch techniques
+[Moskewicz et al., 2001]. Once all of T .D has been assigned
+we test T .V. If all of these variables are unassigned then T
+has been triggered, and we know that T .V forms a compo-
+nent at the current node. All of the template’s variables and
+objectives can then be removed from Gn, further reducing
+its size. CONNECTED COMPONENTS can then be run on this
+smaller remaining graph to identify the other components at
+the current node. Triggering components and reducing the
+size of Gn in this way can yield a non-trivial improvement in
+the total time needed to perform component detection.
+
+Once a template has been triggered, we need to access in-
+formation about the particular instance that exists at the cur-
+rent search node, T (cid:2)A(cid:2)T .D(cid:3). Associated with each template
+is a value cache that is used to store upper and lower bounds
+on the values of its instances (solutions can also be stored
+for solved instances). If T (cid:2)A(cid:3) is a template instance, then
+T (cid:2)A(cid:3).lb and T (cid:2)A(cid:3).ub will denote the stored lower and up-
+per bounds on value(T (cid:2)A(cid:3)). If the instance has never been
+seen before, these bounds are given some default initial val-
+ues. The search in the subtree below the current node will
+either compute the value of the instance (making T (cid:2)A(cid:3).lb =
+T (cid:2)A(cid:3).ub), compute better bounds on its value, or backtrack
+without updating these bounds. Once we have the template,
+accessing an instance’s bounds can be very efﬁcient. In par-
+ticular, each variable in T .D has a ﬁnite domain of values,
+and each instance T (cid:2)A(cid:3) is deﬁned by the values in A it assign
+to these variables. Thus we can use an instance’s deﬁning se-
+quence of values as an index into a multi-dimensional array.
+Many instances of the template might, however, never be en-
+countered during the search (because of branch and bound
+pruning), so if such an array would be too large we can use
+the instance’s sequence of values as a hash code to index into
+a small hash table more suitable for storing sparse data.
+Example 4 In our previous example, when we set M = a
+for the ﬁrst time, we create a new template Tab with Tab.V =
+{A,B}, Tab.O = {C1}, and Tab.D = {M } which represent
+component ρab. An instance of the template Tab(cid:2)M = a(cid:3) is
+immediately created. Search proceeds over the variables A
+and B, returning the upper and lower bounds of component
+ρab under the instantiation M = a. These are bounds on
+the maximal value that can be achieved by the objectives in
+Tab.O overallpossiblevaluesforAandBsubjectto M = a.
+These bounds are stored in the template cache as Tab(cid:2)M =
+a(cid:3).lb and Tab(cid:2)M = a(cid:3).ub, i.e., as bounds indexed by the
+assignment M = a.
+
+If we assign M = k later in search with A and B still
+unassigned then Tab is triggered and the bounds on the new
+instance TM (cid:2)M = k(cid:3) are retrievedfromthe template’svalue
+cache. If k = m thenthecachedupperandlowerboundscan
+be reused atthis new search node.
+
+Template Symmetries Another key computational use of
+templates is to perform automatic symmetry detection be-
+tween components at the abstract level of templates. In par-
+ticular, we compute symmetries between templates during
+search (templates are only created during search). A sym-
+metry between two templates can then be applied to all of
+their instances, thus allowing us to amortize a single sym-
+
+metry computation over many different components. This is
+key in making automatic symmetry detection cost effective.
+To further reduce the cost of symmetry detection we conﬁne
+ourselves to variable symmetries rather than ﬁner-grain sym-
+metries deﬁned over variable-values.
+
+Formally, we require a symmetry between two templates
+T1 and T2 to be a one-to-one and onto mapping σ between
+the variables T1.D ∪ T1.V and T2.D ∪ T2.V such that
+
+1. T2.D = σ(T1.D) and T2.V = σ(T1.V), where σ applied
+
+to a set S is σ(S) = {σ(V )|V ∈ S}.
+
+2. for any assignment A to all of the variables in T1.D ∪
+T1.V, the value of the objectives T1.O evaluated at A is
+identical to the value of the objectives of T2.O evaluated
+at σ(A), where σ applied to a set of assignments A is
+σ(A) = {σ(V ) = a|V = a ∈ A}.
+
+In otherwords, σ keeps the dependency variables and tem-
+plate variables separated, and it preserves the value of the
+template objectives. Since the value of a template instance
+T1(cid:2)A(cid:3) is the maximum of the sum of the objectives T1.O un-
+der the ﬁxed assignment A to the dependency variables T1.D
+and any assignment to T1.V, we have that
+Observation 3 If T1 and T2 are symmetric under the map-
+ping σ then for any instance of T1, T1(cid:2)A(cid:3) we have
+value(T1(cid:2)A(cid:3)) = value(T2(cid:2)σ(A)(cid:3).
+This means that any bounds we have computed for the com-
+ponent T2(cid:2)σ(A)(cid:3) can be reused for the component T1(cid:2)A(cid:3).
+
+To automatically detect symmetries between templates
+during search we map the problem to a graph isomorphism
+problem by constructing a graph representation for each tem-
+plate. The graph representation has the property that two tem-
+plates’ graph representations are graph isomorphic if and only
+if the templates are symmetric in the sense deﬁned above. The
+graph isomorphism, which maps the vertices of one graph to
+the other, provides the variable to variable symmetry mapping
+between the two templates.
+
+We solve the graph isomorphism problem using available
+graph automorphism software (in our case NAUTY [McKay,
+2004]). As shown in [Puget, 2005] such software can be sur-
+prising efﬁcient even though graph isomorphism is not known
+to be of polynomial complexity. To utilize symmetries during
+search we proceed as follows. When a template T is ﬁrst
+created, we construct its graph representation GT . NAUTY
+is then used to compute iso(GT ), a canonical isomorph of
+GT . T is symmetric to some previously cached template T (cid:3)
+if and only if their graph isomorphs are equal, iso(GT ) =
+iso(GT (cid:2)). By using hashing techniques on iso(GT ) we can
+ﬁnd any isomorphic template in near constant time. If an iso-
+morphic template T (cid:3) is found we utilize the invertible map-
+(cid:14)→ iso(GT (cid:2)) and GT (cid:14)→ iso(GT ) produced by
+pings GT (cid:2)
+NAUTY to compute a symmetry map from T to T (cid:3).
+
+To utilize this symmetry, we avoid allocating a value cache
+for T ’s instances. Instead we mark T as being symmetric to
+T (cid:3) and store the symmetry map σ. We continue to use T to
+detect when any of its instances are created, but, transparently
+to the rest of the code, whenever we read or store information
+about one of T ’s instances we instead remap that access to
+the symmetric instance of T (cid:3). Thus, all instances of T are
+
+IJCAI-07
+
+121
+
+able to utilize bounds computed for instances of T (cid:3). Fur-
+thermore any bound computed for instances of T are stored
+as information about instances of T (cid:3). Since we might have
+many different templates being symmetric to T (cid:3) (symmetries
+always map to the earliest created template), this means that
+information computed for an instance of T can then be uti-
+lized by many other symmetric components.
+
+Example 5 Consider the same COP describedearlier. When
+we set N = b for the ﬁrst time, we create a new template
+Txy with Txy.V = {X,Y}, Txy.O = {C2}, and Txy.D =
+{N } which representcomponent ρxy. If C1 is the same type
+of constraint as C2, then the graph representation of Tab and
+Txy will be the same, and an isomorphism between the two
+templates will be the found, in this case mapping variable
+N to M. The cache of template Txy will point to the cache
+of template Tab under the mapping N (cid:14)→ M. If we create
+an instance Txy(cid:2)N = a(cid:3) we can then use the cached results
+Tab(cid:2)M = a(cid:3).lb and Tab(cid:2)M = a(cid:3).ub.
+
+Note that in the originalCOP (Example1), if N andM are
+not exchangable in C3(N, M ), then this symmetry does not
+existuntilbothMandNareassigned. Thatis,ourmechanism
+can detectdynamicsymmetries.
+
+Unfortunately space restrictions prohibit us from present-
+ing the details of our template graphical representation. But
+we will mention that many choices for this representation
+exist. Our representation utilizes NAUTY’s ability to input
+coloured graphs to ensure that the computed graph symme-
+tries keep the dependency variables and template variables
+separated (condition (1) above), it allows exploitation of the
+fact that some objectives have exchangeable variables,2 and
+it uses colours to ensure that only equivalent objectives can
+map to each other.
+
+4 Symmetric Component Caching Search
+The search algorithm given in Figure 1 shows how we uti-
+lize the above ideas to perform recursive decompositions in-
+tegrated with branch and bound. CCS+BB attempts to ﬁnd
+the value for a single component given as a template instance
+T (cid:2)A(cid:3). It is also provided with a lower bound LB, and can
+abort its computation as soon as it discovers that T (cid:2)A(cid:3) can-
+not achieve a value greater than this bound. Even if the com-
+putation is aborted, however, the routine still stores the best
+bounds it was able to compute before termination, line 14.
+Storing the bounds produced by a partial computation of a
+component’s value allows a better integration with branch
+and bound. As described above, these bounds are stored in
+the template’s value cache (or in some symmetric template’s
+value cache).
+
+Branch and bound inevitably implies that the search might
+attempt to compute the value of a particular template instance
+many times, aborting each attempt because of the current
+bound. By updating the component’s bounds after each of
+these attempts work is saved.
+In particular, each new at-
+tempt can proceed more efﬁciently by utilizing the stronger
+bounds computed in the previous attempt. This approach is in
+contrast with that presented in [Marinescu & Dechter, 2005],
+
+2Two variables Xi and Xj are exchangeable in a objective if
+
+exchanging their assigned values has no effect on the objective.
+
+return
+
+CCS+BB(T (cid:2)A(cid:3),LB)
+1. if T .V = ∅ ∨ (T (cid:2)A(cid:3).ub ≤ LB) ∨ (T (cid:2)A(cid:3).lb = T (cid:2)A(cid:3).ub)
+2.
+3. if LB < T (cid:2)A(cid:3).lb
+4. V := select variable from T .V to branch on
+5. Ts := Find the templates contained in the graph
+
+LB := T (cid:2)A(cid:3).lb
+
+consisting of T.Ob and T.V −{V }.
+
+foreach Ti ∈ Ts
+
+foreach Ti ∈ Ts while
+
+Ai := (A ∪ {V = d})(cid:2)Ti .D
+
+6. foreach d ∈ Dom[V ]
+7.
+8.
+9.
+10.
+11.
+12.
+13.
+14. (T (cid:2)A(cid:3).lb, T (cid:2)A(cid:3).ub) = (maxd(lb
+
+LBi := LB-
+CCS+BB(Ti(cid:2)Ai(cid:3),LBi)
+d,ub
+
+(lb
+LB := max(LB,lb
+
+j(cid:2)=i Tj(cid:2)Aj(cid:3).ub
+P
+i
+
+Ti(cid:2)Ai(cid:3).lb,
+d)
+
+P
+
+P
+i
+
+P
+i
+
+Ti(cid:2)Ai(cid:3).ub > LB
+
+d) = (
+
+Ti(cid:2)Ai(cid:3).ub)
+
+d), maxd(ub
+
+d))
+
+Figure 1: Template Component Caching Search with Branch and
+Bound and Templates. Try to compute value(T (cid:2)A(cid:3)), but give up as
+soon as we discover that value(T (cid:2)A(cid:3)) ≤ LB.
+
+where the cache is used only to store the values of fully solved
+components. Hence, default initial bounds are always used
+when trying to solve an unsolved component, even when the
+search had computed better bounds in a previous attempt.
+
+The ﬁrst thing the algorithm does (line 1) is to check if
+(a) the template contains no variables (in which case it con-
+tains only a single objective function that is fully instantiated
+by the assignments A, hence T (cid:2)A(cid:3).lb and T (cid:2)A(cid:3).ub are both
+equal to the value of the objective on A); (b) T (cid:2)A(cid:3).ub ≤ LB
+(in which case the required bound cannot be achieved); or (c)
+T (cid:2)A(cid:3).lb = T (cid:2)A(cid:3).ub (in which case the component has al-
+ready been fully solved, which actually captures case (a) as
+well); in any of these cases the procedure can immediately
+return.
+
+Otherwise we check if it is already known that the com-
+ponent can achieve a higher value than required (LB), line
+3. In this case the algorithm is going to compute the com-
+ponent’s maximum value (the computation cannot be aborted
+by bounding), and we can make it more efﬁcient by reset-
+ting the lower bound to the higher value. A variable V to
+split on is then selected, and we determine how the compo-
+nent will decompose when this variable is assigned, line 5.
+This is done by a combination of template triggering and con-
+nected component analysis. Once the triggered templates are
+removed from the constraint graph each remaining connected
+component forms a new template. Any objective of the input
+template o ∈ T .O whose only uninstantiated variable was
+V forms a template T (cid:3) with T (cid:3).V = ∅ and T (cid:3).O = {o}.
+Any instance of this template, T (cid:3)(cid:2)A(cid:3), will have upper and
+lower bounds equal to o evaluated at A. The other compo-
+nents, containing variables, will generate new templates upon
+which automatic symmetry detection is performed. As V is
+assigned different values, different instances of the templates
+in Ts will be created and solved.
+
+Lines 7 and 8, identify the new template instances (compo-
+nents) created by the current value of V . These components
+are solved in lines 9–11. We can abandon the assignment
+V =d (line 9) if at any time the sum of the upper bounds of
+these components fails to reach the required lower bound (this
+
+IJCAI-07
+
+122
+
+sum changes as we compute the component values). We need
+from each component a value large enough so that if the other
+components reach their upper bound, the sum will exceed the
+lower bound required for the input component. This is the
+value LBi computed at line 10. When we have ﬁnished with
+V =d we compute bounds that can be achieved for the input
+component under this setting of V , line 12. It could be that
+d > LB.
+these bounds exceed the inputed lower bound, i.e., lb
+In that case, the algorithm will continue to compute the in-
+put component’s maximum value, by trying the remaining as-
+d
+signments to V . However, since V = d achieves at least lb
+,
+any new value for V needs to achieve an even higher value,
+hence we can reset the lower bound (line 13) before attempt-
+ing the next assignment to V . Finally, after all values for V
+have been tried, we can update the bounds for the input com-
+ponent. Note that if the computation succeeded in solving the
+component, then for some value d of V achieving the maxi-
+for all d(cid:3) (cid:12)= d.
+mum we will have lb
+Hence line 14 will set T (cid:2)A(cid:3).lb = T (cid:2)A(cid:3).ub = value(T (cid:2)A(cid:3))
+as required.
+
+d(cid:2) ≤ lb
+d
+
+d
+d = ub
+
+and ub
+
+Constraint Propagation. The algorithm can also employ
+constraint propagation over the hard objectives (the original
+constraints) to prune domain values that would necessarily
+lead to values of −∞.
+In particular, domain pruning will
+simply reduce the iterations we have to perform at line 6, the
+algorithm requires no other changes. It can be proved that
+this simple change is all that is needed, but here we provide
+only the intuition behind the proof.
+
+Since the values pruned by constraint propagation violate
+hard constraints and thus make the sum of the objectives
+−∞, it can be seen that the parts of the search space that are
+avoided by not branching on the pruned values cannot con-
+tain an optimal solution to the COP. Thus these pruned parts
+of the space cannot cause the algorithm to miss an optimal
+solution.
+
+The other part of the proof is to ensure that the parts of
+the space that are explored continue to compute the same val-
+ues when propagation is used, so that overall the search still
+computes the optimal value. Here the key element is showing
+that cached template values remain correct even when some
+the domains of its unassigned variables T .V have been re-
+duced by constraint propagation. This can be seen by re-
+alizing that the template values correspond to a maximiza-
+tion over all possible assignments of the unassigned variables
+(subject to some ﬁxed setting of the dependency variables).
+Since pruned values violate hard constraints, the maximum
+cannot have arisen from any of the pruned values. That is, the
+maximization over all possible values of the template vari-
+ables is equal to the maximization over all unpruned values
+of the template variables, and the cached template values re-
+main correct.
+
+This highlights a subtely in the template algorithm. A tem-
+plate T cannot be triggered if any variable Var ∈ T .V is as-
+signed a value. This is because the maximum value stored in
+T ’s value cache might require that Var be assigned a differ-
+ent value. That is, T ’s cached values will might not be valid
+when Var ∈ T .V has been assigned. In contrast, if Var ’s do-
+main has been reduced to a singleton by propagation, its value
+
+is forced and as we just explained T ’s cached values are still
+valid. In this case T can be triggered. Hence, our algorithm
+must treat variables with singleton domains (after propaga-
+tion) differently from variables that have been assigned.
+
+5 Empirical Results
+
+We have implemented our approach and tried it on the Maxi-
+mum Density Still Life problem (MDSL) [Larrosa, Morancho,
+& Niso, 2005]. This problem involves ﬁnding maximum den-
+sity stable conﬁgurations in Conway’s game of Life. In par-
+ticular, we have a N ×N grid of cells that can be either dead
+or alive, implicitly surrounded by a boundary of dead cells.
+A cell is live and stable if it is surrounded by 2 or 3 live cells,
+it is dead and stable if it is surrounded by any other number
+of live cells. The goal is to ﬁnd a stable conﬁguration of the
+cells that has a maximum number of live cells.
+
+State of the art solvers for this problem [Larrosa, Moran-
+cho, & Niso, 2005] employ an extensive amount of prob-
+lem speciﬁc information. However, our solution is entirely
+generic; our aim is to use the problem to evaluate the effec-
+tiveness of our techniques. We use the most basic represen-
+tation of the problem with N 2
+boolean variables, each one
+representing the alive/dead status of a single cell, N 2
+unary
+objective functions, one for each cell, assigning 1 to live cells
+and 0 to dead cells, and N 2
+hard objective functions, one for
+each cell, that assigns 0 to stable settings of the cell given its
+neighbour’s values and −∞ to unstable settings.
+
+We solved MDSL using six different algorithms always
+performing GAC constraint propagation on the hard objec-
+tives to prune domain values. All experiments were run on a
+2.2 GHz Pentium IV with 6GB of memory. The time limit for
+each run was set to 10,000 seconds.
+The algorithms we tested were.
+
+(1) a standard Branch
+and Bound algorithm (BB) which uses the variable ordering
+heuristic of domain size plus degree (both computed dynam-
+ically). The remaining algorithms use a heuristic that is bi-
+ased toward completing rows or columns that have already
+been started in the grid; this tends to encourage the genera-
+tion of components. We chose domain plus degree for BB
+because it performs better with this heuristic. (2) Component
+Branch and Bound (C+BB). This version searches for com-
+ponents and solves them separately, i.e., it performs search
+with decomposition. However, it does not use templates,
+nor does it cache already solved components. (3) Template
+Branch and Bound (T+BB) is a template version of C+BB.
+Its only improvement over C+BB is the use of templates to
+improve component detection. There is no template cache
+to store bounds for the instances.
+(4) Component Caching
+Search + Branch and Bound (CCS+BB) extends T+BB by
+activating the template cache to store computed bounds for
+the instances. (5) Symmetric Component Caching Search +
+Branch and Bound (SCCS+BB) extends CCS+BB by per-
+forming automated symmetric detection between templates.
+(6) ASCCS+BB which extends SCCS+BB to exploit auto-
+morphisms as well as symmetries.
+In particular, automor-
+phisms (also computed by NAUTY) tell us that different in-
+stances of the same template are equivalent, so we can utilize
+cached instance bounds for all automorphic instances (as well
+as for instances of symmetric templates).
+
+IJCAI-07
+
+123
+
+Size
+
+ASCCS+BB
+
+SCCS+BB
+
+CCS+BB
+
+T+BB
+
+C+BB
+
+BB
+
+nodes
+
+486
+
+3991
+
+18299
+
+251522
+9.7*106
+1.5*107
+5.8*107
+
+time
+
+nodes
+
+time
+
+0
+
+0
+
+0.2
+
+3.4
+
+13.8
+
+408.7
+
+1540.5
+
+1076
+
+7744
+
+41346
+
+492939
+2.0*106
+3.1*107
+1.2*108
+
+0
+
+0
+
+0.5
+
+6.5
+
+29.3
+
+704.8
+
+3003
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10
+
+nodes
+
+1646
+
+7744
+
+93335
+
+644175
+6.1*106
+9.7*107
+5.6*108
+
+time
+
+0
+
+0.1
+
+1.1
+
+8.5
+
+82.3
+
+4662.4
+
+7845.4
+
+nodes
+
+1646
+
+8146
+
+206141
+1.5*106
+2.4*107
+
+time
+
+0
+
+0.1
+
+2.0
+
+19.8
+
+316.6
+
+nodes
+
+1646
+
+8146
+
+177540
+2.1*106
+2.3*107
+
+time
+
+0
+
+0.24
+
+2.4
+
+41.8
+
+408.8
+
+nodes
+
+767
+
+5364
+
+177522
+4.7*106
+3.1*108
+
+time
+
+0
+
+0
+
+2.0
+
+55.1
+
+2207
+
+NA > 10000
+
+NA > 10000
+
+NA > 10000
+
+NA > 10000
+
+NA > 10000
+
+NA > 10000
+
+Table 1: Nodes Searched and Time taken in CPU secs.
+
+[Bayardo & Pehoushek, 2000] Bayardo, R. J., and Pehoushek, J. D.
+In Pro-
+
+2000. Counting models using connected components.
+ceedings of the AAAI National Conference (AAAI), 157–162.
+
+[Darwiche, 2001] Darwiche, A. 2001. Recursive conditioning. Ar-
+
+tiﬁcial Intelligence 126:5–41.
+
+[Dechter, 2004] Dechter, R. 2004. And/or search spaces for graph-
+ical models. Technical report, School of Information and Com-
+puter Science, University of California, Irvine.
+
+[Larrosa, Morancho, & Niso, 2005] Larrosa, J.; Morancho, E.; and
+Niso, D. 2005. On the practical applicability of bucket elimina-
+tion: Still-life as a case study. Journal of Artiﬁcial Intelligence
+Research 23:412–440.
+
+[Marinescu & Dechter, 2005] Marinescu, R., and Dechter, R. 2005.
+Advances in and/or branch-and-bound search for constraint opti-
+mization. In Workshop on Preferences and Soft Constraints.
+
+[Marinescu & Dechter, 2006] Marinescu, R., and Dechter, R. 2006.
+Dynamic orderings for and/or branch-and-bound search in graph-
+ical models. In Proceedings of the European Conference on Ar-
+tiﬁcial Intelligence (ECAI).
+
+[McKay, 2004] McKay, B. D. 2004. Nauty. available at http:
+
+//cs.anu.edu.au/people/bdm/nauty.
+
+[Moskewicz et al., 2001] Moskewicz, M.; Madigan, C.; Zhao, Y.;
+Zhang, L.; and Malik, S. 2001. Chaff: Engineering an efﬁcient
+sat solver. In Proc. of the Design Automation Conference (DAC).
+
+[Park & Gelder, 2000] Park, T. J., and Gelder, A. V. 2000. Parti-
+tioning methods for satisﬁability testing on large formulas. Infor-
+mation and Computation 162:179–184.
+
+[Puget, 2005] Puget, J.-F. 2005. Automatic detection of variable
+and value symmetries. In International Conference on Principles
+and Practice of Constraint Programming, 475–489.
+
+[Sang et al., 2004] Sang, T.; Bacchus, F.; Beame, P.; Kautz, H.; and
+Pitassi, T. 2004. Combining component caching and clause learn-
+ing for effective model counting. In Theory and Applications of
+Satisﬁability Testing (SAT-2004).
+
+Table 1 shows the relative performance of the six algo-
+rithms in terms of nodes searched and time taken. We see
+that decomposition (C+BB) yields signiﬁcant improvements
+over standard branch and bound (BB) decreasing the size of
+the search tree. For the smaller problems C+BB takes more
+time, due to its larger overhead, but this overhead is quickly
+recouped as the problems get large and the reduction in the
+search tree achieved by decomposition becomes more sig-
+niﬁcant. Since T+BB does not employ caching, it does not
+reduce the size of C+BB’s search tree (except for heuristic
+reasons). But it does provide a non-trivial improvement in ef-
+ﬁciency. In particular, T+BB shows that template triggering
+does improve the efﬁciency of detecting components. The
+times in the table show that the overhead of detecting compo-
+nents is non-trivial. CCS+BB makes a further improvement
+by activating storage of bounds in the template, which results
+in a signiﬁcant decrease in the size of the search space over
+T+BB. There is a corresponding decrease in time. SCCS+BB
+makes an improvement by performing symmetric detection
+between templates providing another signiﬁcant decrease in
+the size of the search space. ASCCS+BB performs automor-
+phism detection within a single template in addition to sym-
+metries between template and provides another useful per-
+formance gain. We also see that on this problem automated
+symmetry detection is not adding a signiﬁcant overhead. That
+is, the nodes/second search rate with symmetry detection is
+only 5% less than the search rate without symmetry detection
+on the largest problem. In all of these cases, the size of the
+cached information was never a problem. So we did not have
+to implement any strategy for pruning the cache.
+
+6 Conclusions
+We have presented an algorithm which incorporates search
+with decomposition, caching, and symmetric use of the ca-
+che, while mitigating much of the computational cost associ-
+ated with such techniques. Component templates reduce the
+costs associated with dynamically ﬁnding components, and
+also offer effective and efﬁcient caching during search. Tem-
+plates also allow us to use symmetries detected during search
+to make more effective use of previous computations.
+
+References
+[Amir & McIlraith, 2000] Amir, E., and McIlraith, S.
+
+2000.
+Partition-based logical reasoning.
+In Proceedings of the Inter-
+national Conference on Principles of Knowledge Representation
+and Reasoning, 389–400.
+
+[Bacchus, Dalmao, & Pitassi, 2003] Bacchus, F.; Dalmao, S.; and
+Pitassi, T. 2003. Algothims and complexity results for sat and
+bayesian inference. FOCS 2003 340–351.
+
+IJCAI-07
+
+124
+
+

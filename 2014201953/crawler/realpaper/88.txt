@@ -1,0 +1,1506 @@
+Existential arc consistency:
+
+Getting closer to full arc consistency in weighted CSPs(cid:3)
+
+Simon de Givry
+
+degivry@toulouse.inra.fr
+
+Matthias Zytnicki
+
+Federico Heras
+
+fheras@lsi.upc.edu
+
+Javier Larrosa
+
+zytnicki@toulouse.inra.fr
+
+larrosa@lsi.upc.edu
+
+INRA
+
+Toulouse, France
+Abstract
+
+The weighted CSP framework is a soft constraint
+framework with a wide range of applications. Most
+current state-of-the-art complete solvers can be de-
+scribed as a basic depth-ﬁrst branch and bound
+search that maintain some form of arc consistency
+during the search. In this paper we introduce a new
+stronger form of arc consistency, that we call exis-
+tential directional arc consistency and we provide
+an algorithm to enforce it. The efﬁciency of the al-
+gorithm is empirically demonstrated in a variety of
+domains.
+
+1 Introduction
+Weighted constraint satisfaction problems (WCSP) is a well-
+known optimization version of the CSP framework with
+many practical applications. Recently, the celebrated arc
+consistency property has been generalized from the classi-
+cal CSP framework to WCSP [Cooper and Schiex, 2004;
+Larrosa and Schiex, 2004]. There are three known gener-
+alizations: AC*, FDAC* and FAC*, all of them collapsing
+to classical arc consistency in the CSP case. In [Larrosa and
+Schiex, 2003] it was shown that maintaining FDAC* during
+search was usually the best option.
+
+In this paper we introduce a new form of local consis-
+tency called existential directional arc consistency (EDAC*).
+We show that EDAC* is stronger than FDAC* and we in-
+troduce an algorithm to enforce EDAC* that runs in time
+O(ed2 (cid:2) maxfnd; >g), where e, n and d are the number of
+constraints, variables and domain values, respectively; > is
+the upper bound of the WCSP instance (to be deﬁned later).
+The main use of EDAC* and its associated ﬁltering algo-
+rithm is to embed it into a complete depth-ﬁrst branch and
+bound solver that maintains EDAC* at every visited node.
+We have experimentally evaluated this idea on random Max-
+SAT, Max-CSP, and uncapacitated warehouse location prob-
+lems. We observe that maintaining EDAC* is never worse
+than maintaining FDAC* and, in many instances, it is orders
+of magnitude better.
+
+(cid:3)This research is partially supported by the French-Spanish col-
+laboration PICASSO 05158SM - Integrated Action HF02-69 and the
+REPLI project TIC-2002-04470-C03.
+
+LSI, UPC
+
+Barcelona, Spain
+
+2 Preliminaries
+Valuation structures are algebraic objects to specify costs in
+valued constraint satisfaction problems [Schiex et al., 1995].
+They are deﬁned by a triple S = (E ; (cid:8); (cid:23)), where E is the set
+of costs totally ordered by (cid:23). The maximum and a minimum
+costs are noted > and ?, respectively. (cid:8) is an operation on E
+used to combine costs.
+
+Following [Larrosa and Schiex, 2004], the valuation struc-
+ture of Weighted CSP (WCSP) is, S(k) = ([0::k]; (cid:8); (cid:21)) where
+k > 0 is a natural number; (cid:8) is deﬁned as a (cid:8) b = minfk;a +
+bg; (cid:21) is the standard order among naturals. Observe that in
+S(k), we have 0 = ? and k = >. It is useful to deﬁne the
+subtraction (cid:9) of costs. Let a;b 2 [0::k] be two costs such that
+a (cid:21) b,
+
+a (cid:9) b =(cid:26) a (cid:0) b : a 6= k
+
+: a = k
+
+k
+
+A binary weighted constraint satisfaction problem (WCSP)
+is a tuple P = (S(k);X ;D;C ). S(k) is the valuation structure.
+X = fx1; : : : ;xng is a set of variables that we will often call
+by just their index. Each variable xi 2 X has a ﬁnite domain
+Di 2 D of values that can be assigned to it. (i;a) denotes the
+assignment of value a 2 Di to variable xi. C is a set of unary
+and binary weighted constraints (namely, cost functions) over
+the valuation structure S(k). A unary weighted constraint Ci
+is a cost function Ci(xi) ! [0::k]. A binary constraint Ci j is
+a cost function Ci j(xi;x j) ! [0::k] We assume the existence
+of a unary constraint Ci for every variable, and a zero-arity
+constraint (i.e. a constant), noted C? (if no such constraint
+is deﬁned, we can always deﬁne dummy ones: Ci(xi) = ?,
+C? = ?).
+
+When a constraint C assigns cost >, it means that C forbids
+the corresponding assignment, otherwise it is permitted by
+C with the corresponding cost. The cost of an assignment
+X = (x1; : : : ;xn), noted V (X), is the sum over all the problem
+cost functions,
+
+V (X) = (cid:229)
+
+Ci j(xi;x j) (cid:8) (cid:229)
+
+Ci j 2C
+
+Ci2C
+
+Ci(xi) (cid:8)C?
+
+An assignment X is consistent if V (X) < >. The usual
+task of interest is to ﬁnd a consistent assignment with mini-
+mum cost, which is NP-hard. Observe that WCSP with k = 1
+reduces to classical CSP.
+
+Co=0
+
+i
+
+0
+
+0
+
+a
+
+b
+
+1
+
+a)
+
+j
+
+0
+
+1
+
+a
+
+b
+
+a
+
+b
+
+Co=0
+
+i
+
+1
+
+0
+
+j
+
+0
+
+0
+
+a
+
+b
+
+1
+
+b)
+
+Figure 1: Two equivalent WCSP instances (> = 2).
+
+Algorithm 1: Algorithms to propagate costs.
+Function PruneVar(i) : boolean
+
+f lag := false ;
+foreach a 2 Di do
+
+if (C? (cid:8)Ci(a) (cid:21) >) then
+
+Di := Di (cid:0) fag ;
+f lag := true ;
+
+return f lag ;
+
+Procedure ProjectUnary(i)
+
+:= mina2Di fCi(a)g ;
+
+C? := C? (cid:8) a
+foreach a 2 Di do Ci(a) := Ci(a) (cid:9) a
+
+;
+
+;
+
+Procedure Project(i;a; j;a )
+
+Ci(a) := Ci(a) (cid:8) a
+foreach b 2 D j do Ci j(a;b) := Ci j(a;b) (cid:9) a
+
+;
+
+Procedure Extend(i;a; j;a )
+
+foreach b 2 D j do Ci j(a;b) := Ci j(a;b) (cid:8) a
+Ci(a) := Ci(a) (cid:9) a
+
+;
+
+;
+
+;
+
+Example 1 Consider the problem depicted in Figure1.a. It
+has two variables i; j with two values (a;b) in their domains.
+Unary costs are depicted within small circles. Binary costs
+are represented by edges connecting the corresponding val-
+ues. The label of each edge is the corresponding cost. If two
+values are not connected, the binary cost between them is 0.
+In this problem the optimal cost is 0 and it is attained with the
+assignment (b;a).
+
+3 Some local consistencies in WCSP
+
+Two WCSPs deﬁned over the same variables are said to be
+equivalent if they deﬁne the same cost distribution on com-
+plete assignments. Local consistency properties are widely
+used to transform problems into equivalent simpler ones. In
+general, constraints can be given explicitly as tables of costs,
+or implicitly as mathematical expressions or algorithmic pro-
+cedures. For simplicity in our exposition, we will assume the
+explicit form. This is done without loss of generality as dis-
+cussed in [Cooper and Schiex, 2004]. The simplest form of
+local consistency is Node consistency (NC*).
+
+Deﬁnition 1 Variable xi is node consistent if: for all values
+a 2 Di, C? (cid:8)Ci(a) < > , and there exists a value a 2 Di such
+that Ci(a) = ?. A WCSP is node consistent (NC*) if every
+variable is node consistent.
+
+Any WCSP can be easily transformed into an equivalent
+NC* instance by projecting every unary constraints towards
+C? and subsequently pruning every unfeasible value. Func-
+tions ProjectUnary and PruneVar (Algorithm1) perform the
+projection of a unary constraint towards C? and prune unfea-
+sible values, respectively.
+
+Arc consistency properties are based on the notion of sim-
+ple and full support. Given a binary constraint Ci j, we say
+that b 2 D j is a simple support for a 2 Di if Ci j(a;b) = ?.
+Similarly, we say that b 2 D j is a full support for a 2 Di if
+Ci j(a;b) (cid:8)C j(b) = ?.
+Deﬁnition 2 Variable xi is arc consistent if every value a 2
+Di has a simple support in every constraint Ci j. A WCSP is
+arc consistent (AC*) if every variable is node and arc consis-
+tent.
+Deﬁnition 3 Variable xi is full arc consistent if every value
+a 2 Di has a full support in every constraint Ci j. A WCSP is
+full arc consistent (FAC*) if every variable is node and full
+arc consistent.
+Simple supports for a 2 Di in D j can be enforced by pro-
+jecting binary costs Ci j(a; (cid:1)) towards Ci(a), as performed by
+procedure Project (Algorithm 1). Procedure FindSupports
+(Algorithm 2) enforces simple supports in D j for every value
+in Di.
+Example 2 The WCSP depicted in Figure2.a is not AC* be-
+cause value a 2 Di does not have a simple support in variable
+j. AC* is enforced by executing FindSupports(i; j) (produc-
+ing the problem in 2.b) and then ProjectUnary(i) (producing
+the problem in 2.c).
+
+To enforce full supports for Di values in D j (Procedure
+FindFullSupports in Algorithm 2) we need to extend unary
+costs from C j((cid:1)) towards Ci j((cid:1); (cid:1)) (procedure Extend in Algo-
+rithm 1). Then, binary costs are projected towards Ci(a).
+
+In the CSP case (i.e, k = 1), being a simple support for (i;a)
+is equivalent to being a full support for it and both notions re-
+duce to the classical notion of support. Therefore, AC* and
+FAC* reduce to classical arc consistency. In the WCSP case,
+however, being a full support is stronger than being a sim-
+ple support. In [Larrosa and Schiex, 2004] it was shown that
+every WCSP can be transformed into an equivalent arc con-
+sistent one in time O(ed3). Unfortunately, not every WCSP
+can be transformed into an equivalent full arc consistent one.
+Example 3 The problem in Figure1.a is AC*, but it is not
+FAC* because value a 2 Di is not fully supported. We can en-
+force the full support by calling FindFullSupports(i; j). The
+resulting problem, depicted in Figure1.b is not FAC* because
+value b 2 D j is not fully supported.
+If we enforce the full
+support by calling FindFullSupports( j;i), we return to the
+problem in Figure1.a. It can be easily proved that this prob-
+lem does not have an equivalent FAC* one.
+
+Therefore, FAC* is not a practical property. To circumvent
+this problem, a weaker property has been proposed. In the
+sequel, we assume that the set of variables X is totally ordered
+by >.
+Deﬁnition 4 Variable xi is directional arc consistent if every
+value a 2 Di has a full support in every constraint Ci j such
+
+a
+Algorithm 2: Algorithms to enforce supports.
+Function FindSupports(i; j) : boolean
+
+:= minb2D j fCi j(a;b)g ;
+
+if (a > ? ^Ci(a) = ?) then f lag := true ;
+Project(i;a; j;a ) ;
+
+f lag := false ;
+foreach a 2 Di do
+
+ProjectUnary(i) ;
+return f lag ;
+
+f lag := false ;
+foreach a 2 Di do
+
+Function FindFullSupports(i; j) : boolean
+
+P[a] := minb2D j fCi j(a;b) (cid:8)C j(b)g ;
+if (P[a] > ? ^Ci(a) = ?) then f lag := true ;
+
+foreach b 2 D j do
+
+E[b] := maxa2DifP[a] (cid:9)Ci j(a;b)g ;
+
+foreach b 2 D j do Extend( j;b;i;E[b]) ;
+foreach a 2 Di do Project(i;a; j;P[a]) ;
+ProjectUnary(i) ;
+return f lag ;
+
+Function FindExistentialSupport(i) : boolean
+
+f lag := false ;
+:= mina2Di fCi(a) LCi j2C s.t. j<i minb2D j fCi j(a;b) (cid:8)C j(b)gg;
+
+1
+
+2
+
+if (a > ?) then
+
+foreach Ci j 2 C s.t. j < i do
+
+f lag := f lag _ FindFullSupports(i; j) ;
+
+return f lag ;
+
+that j > i. It is full directional arc consistent (FDAC) if, in
+addition, every value a 2 Di has a simple support in every
+constraint Ci j such that j < i. A WCSP is full directional arc
+consistent (FDAC*) if every variable is node and full direc-
+tional arc consistent.
+Example 4 The problem in 2.c is AC* but not FDAC*, be-
+cause value a 2 i does not have a full support in variable
+j. FDAC* is enforced by executing FindFullSupports(i; j)
+(producing the problem in Figure 2.d).
+
+Every WCSP can be transformed into an equivalent
+FDAC* WCSP with time complexity O(end3) [Larrosa and
+Schiex, 2003].
+In the CSP case, FDAC* also reduces to
+classical arc-consistency. In the general case FAC* implies
+FDAC* and FDAC* implies AC* (namely, the satisfaction of
+one property implies the satisfaction of the other). An im-
+portant question is whether it is possible to strengthen the
+FDAC* property to make it closer to FAC*, but still having
+the guarantee of existence for an arbitrary WCSP instance. In
+the next Section we address this issue.
+
+4 Existential arc consistency: a stronger new
+
+property
+
+Consider the FDAC* problem in Figure2.d. Observe that
+value a 2 Dk has a simple support in x j (required by the
+FDAC* property) but does not have any full support. We
+have the same situation with value b 2 Dk and variable xi.
+
+a
+
+b
+
+1
+
+2
+
+Co=0
+
+i
+
+0
+
+1
+
+Co=1
+
+a
+
+b
+
+1
+
+i
+
+0
+
+0
+
+Co=1
+
+i
+
+0
+
+0
+
+a
+
+b
+
+1
+
+a
+
+b
+
+a
+
+b
+
+a
+
+b
+
+j
+
+0
+
+2
+
+1
+
+a)
+
+j
+
+0
+
+2
+
+1
+
+c)
+
+j
+
+0
+
+0
+
+1
+
+e)
+
+1
+
+1
+
+1
+
+k
+
+0
+
+0
+
+k
+
+0
+
+0
+
+k
+
+1
+
+1
+
+a
+
+b
+
+1
+
+a
+
+b
+
+1
+
+a
+
+b
+
+1
+
+Co=0
+
+i
+
+1
+
+1
+
+Co=1
+
+i
+
+1
+
+0
+
+Co=2
+
+i
+
+0
+
+0
+
+a
+
+b
+
+a
+
+b
+
+a
+
+b
+
+a
+
+b
+
+a
+
+b
+
+a
+
+b
+
+j
+
+0
+
+2
+
+1
+
+b)
+
+j
+
+0
+
+1
+
+1
+
+d)
+
+j
+
+0
+
+0
+
+1
+
+f)
+
+1
+
+1
+
+1
+
+k
+
+0
+
+0
+
+k
+
+0
+
+0
+
+k
+
+0
+
+0
+
+a
+
+b
+
+a
+
+b
+
+a
+
+b
+
+Figure 2: Six equivalent WCSP problems (> = 4): (a) origi-
+nal problem (c) made AC*, (d) made FDAC* with i < j < k
+and (f) made EDAC*.
+
+As a consequence, the unary cost of both values in Dk can
+be increased by enforcing full supports (Figure 2.e). Since all
+unary costs of Di values are larger than zero, node consistency
+is lost and the lower bound can be increased (Figure 2. f ). In
+general, full supports can be safely enforced in both direc-
+tions if their enforcement produces an increment in the lower
+bound. Next, we show that there is a natural local consistency
+property behind this observation, that we call existential arc
+consistency (EAC*).
+
+Deﬁnition 5 Variable xi is existential arc consistent if there
+is at least one value a 2 Di such that Ci(a) = ? and it has a
+full support in every constraint Ci j. A WCSP is existential arc
+consistent (EAC*) if every variable is node and existential arc
+consistent.
+
+All the previous forms of arc consistency required the same
+condition for every domain value. However, EAC* requires
+the existence for every variable of a special value. The impor-
+tant fact to note is: if a variable xi is not EAC*, then for all
+domain value a with Ci(a) = ? there is a variable x j such that
+8b 2 D j;Ci j(a;b) (cid:8)C j(b) > ?. Thus enforcing full supports
+in xi will break the NC* property and it will be possible to in-
+crease the lower bound. It is possible to integrate EAC* with
+FDAC* in order to exploit the beneﬁts of each. It is achieved
+by the existential directional arc consistency (EDAC*) prop-
+erty.
+
+Deﬁnition 6 A WCSP is EDAC* if it is FDAC* and EAC*.
+
+a
+a
+3
+4
+
+5
+
+6
+7
+
+8
+
+9
+
+10
+
+11
+
+In words, EDAC* requires that every value is fully sup-
+ported in one direction and simply supported in the other di-
+rection (to satisfy FDAC*). Additionally, at least one value
+per variable must be fully supported in both directions (to
+satisfy EAC*). The special value is called the fully supported
+value. Observe that in the CSP case EDAC* instantiates to
+classical arc consistency. Besides, EDAC* is weaker than
+FAC*, but stronger than FDAC*.
+
+5 Algorithm
+We present an algorithm for the enforcement of EDAC* in
+the case of binary WCSPs. EDAC* (Algorithm 3) trans-
+forms an arbitrary problem into an equivalent one verifying
+the EDAC* local property. It uses three propagation queues,
+Q, R and P, that are implemented as priority queues so that
+the lowest or the highest variable in the queue can be popped
+in constant time. If j 2 Q, it means that some value in D j
+has been pruned (neighbors of j higher than j may have lost
+their simple support and must be revised). If j 2 R, it means
+that some value in D j has increased its unary cost from ?
+(neighbors of j lower than j may have lost their full support
+and must be revised). If i 2 P, it means that some value in
+D j ( j < i neighbor of i) has increased its unary cost from ? (i
+may have lost the full support of its fully supported value and
+must be revised). Besides, there is an auxiliary queue S that
+is used to efﬁciently build P.
+
+The algorithm is formed by a main loop, with four inner
+loops. The while loops at lines 5, 8 and 10 respectively en-
+force EAC*, DAC* and AC*; the line 11 enforces NC*. Each
+time some costs are projected by the enforcement of a local
+property, another property may be broken. The variables for
+which the local property may be broken are stored in a queue
+for revision. The enforcement of NC*, AC* and DAC* is
+achieved as proposed in [Larrosa and Schiex, 2003]. Thus,
+we focus on the enforcement of EAC*.
+
+EAC* enforcement is mainly encoded by Function Find-
+ExistentialSupport(i), which enforces the existential sup-
+port in xi by ﬁnding full supports wrt. every lower neighbor
+x j (it does not have to worry for higher neighbors because
+DAC* enforcement takes care of them). While enforcing the
+existential support in xi, the cost function C j decreases or re-
+mains the same. As a consequence, we do not need to revise
+the existential consistency of x j nor the directional arc con-
+sistencies of the lowest neighbors of x j. Furthermore, as the
+existential consistency is stronger than the arc one, enforc-
+ing AC* between xi and x j is useless. However, the direc-
+tional arc consistency of variable xi should be checked, be-
+cause some unary cost of xi could have been increased (line
+6). Similarly, the existential consistency of higher neighbors
+of xi should also be veriﬁed (line 7).
+
+PruneVar() enforces node consistency after unary cost and
+lower bound increments (line 11). This function can be exe-
+cuted more often in order to avoid unnecessary value exami-
+nations during the while loops. It does not change the worst-
+case time complexity. For simplicity reasons, the case of in-
+consistent problems where C? reaches > is not described.
+Theorem 1 The
+of
+O(ed2 maxfnd; >g) and space O(ed).
+
+complexity
+
+EDAC*
+
+time
+
+is
+
+Algorithm 3: Enforcing EDAC*, initially, Q = R = S = X .
+Procedure EDAC*
+
+while (Q 6= ? _ R 6= ? _ S 6= ?) do
+P := fl j i 2 S;l > i;Cil 2 C g [ S ;
+S := ? ;
+while (P 6= ?) do
+
+i := popMin(P) ;
+if FindExistentialSuppor t(i) then
+
+R := R [ fig ;
+foreach Ci j 2 C s.t. j > i do P := P [ f jg ;
+
+while (R 6= ?) do
+
+j := popMax(R) ;
+foreach Ci j 2 C s.t. i < j do
+
+if FindFullSupports(i; j) then
+
+R := R [ fig ;
+S := S [ fig ;
+
+while (Q 6= ?) do
+
+j := popMin(Q) ;
+foreach Ci j 2 C s.t. i > j do
+if FindSupports(i; j) then
+
+R := R [ fig ;
+S := S [ fig ;
+
+foreach i 2 X do
+
+if PruneVar(i) then Q := Q [ fig ;
+
+proof 1 Regarding space, we use the structure suggested by
+[Cooper and Schiex, 2004] to bring the space complexity to
+O(ed). [Larrosa and Schiex, 2003] proved that ProjectU-
+nary, Project, Extend and PruneVar are time O(d); Find-
+Supports and FindFullSupports are time O(d2). Let us now
+focus on the while loop complexities in EDAC*. The loop at
+line 8 enforces DAC*. As described in previous papers, it is
+time O(ed2) because each variable is pushed in R at most
+once and thus each constraint Ci j is checked once (line 9).
+Similarly, the loop at line 10 which enforces AC*, directed
+from the lowest variables to the highest ones, is also O(ed2).
+The loop at line 5 enforces EAC* directed to the highest
+variables. In a single run of this loop, a variable will never
+be pushed twice in P because the popped variable xi is always
+the lowest one, and the pushed variables are higher than xi.
+It implies that the while loop iterates at most n times, leading
+to a O(e) time complexity for line 7. The amortized complex-
+ity time of FindExistentialSupport is O(ed2) because this
+function may be called with each variable, so every binary
+constraint at line 1 and 2 is observed once. Thus, the time
+complexity of EAC* is also O(ed2).
+
+The line 4 is time O(n). The for at line 11 is time O(nd)
+(which is less than O(ed), as the graph is supposed to be
+connected). Compiling the different results, the complexity
+inside the while at line 3 is O(ed2). It loops when:
+
+(cid:15) either Q is not empty: the for at line 11 has pruned a
+
+value and this is done at most nd times;
+
+(cid:15) either R is not empty: AC* has enqueued a variable in R
+and by the preceding remark this cannot be done more
+than O(nd) times;
+
+and solved the problem instances cap71-134 from the stan-
+dard OR Library benchmarks for UWLP, as well as the MO*-
+MP* instances by courtesy of J. Kratica [Kratica et al., 2001].
+The M* instances are very challenging for mathematical pro-
+gramming approaches because they have a large number of
+suboptimal solutions.
+
+CNF2, 80 vars
+
+CNF3, 40 vars
+
+MFDAC*
+MEDAC*
+
+ 200
+
+ 180
+
+ 160
+
+ 140
+
+ 120
+
+ 100
+
+ 80
+
+ 60
+
+ 40
+
+ 20
+
+e
+m
+
+i
+t
+ 
+u
+p
+c
+
+ 0
+ 100
+
+ 200
+
+ 300
+
+ 400
+
+ 500
+
+ 600
+
+ 700
+
+n. of clauses
+
+e
+m
+
+i
+t
+ 
+u
+p
+c
+
+ 160
+
+ 140
+
+ 120
+
+ 100
+
+ 80
+
+ 60
+
+ 40
+
+ 20
+
+ 0
+
+MFDAC*
+MEDAC*
+
+ 200
+
+ 400
+
+ 600
+
+ 800
+
+ 1000
+
+ 1200
+
+ 1400
+
+n. of clauses
+
+Figure 3: Time in seconds to solve random Max-2SAT and
+Max-3SAT problems.
+
+Sparse Loose
+
+Sparse Tight
+
+MFDAC*
+MEDAC*
+
+MFDAC*
+MEDAC*
+
+ 50
+
+ 40
+
+ 30
+
+ 20
+
+ 10
+
+e
+m
+
+i
+t
+ 
+u
+p
+c
+
+ 30
+
+ 35
+n. of variables
+
+ 40
+
+Dense Loose
+
+MFDAC*
+MEDAC*
+
+ 45
+
+ 0
+
+ 20
+
+ 25
+
+ 100
+
+MFDAC*
+MEDAC*
+
+ 30
+n. of variables
+
+ 35
+
+Dense Tight
+
+ 40
+
+(cid:15) or S is not empty: an element has been enqueued
+while enforcing AC* or DAC*. The ﬁrst case cannot
+happen more than O(nd). The second case happens
+O(maxfnd; >g) times because the condition at line 8 is
+true when AC* has added an element in R (O(nd) times)
+or EAC* has added an element (O(>) times because
+each time EAC* is violated, C? increases).
+
+Consequently, the overall complexity is O(ed2 maxfnd; >g).
+
+6 Experimental results
+In this Section, we perform an empirical comparison of
+EDAC* with FDAC* for the task of proving optimality. The
+main use of the EDAC* and FDAC* properties is to use them
+inside a depth-ﬁrst branch and bound solver. The idea is to
+maintain EDAC* and FDAC* during the search (algorithms
+called MEDAC* and MFDAC*, respectively). We have im-
+plemented (C code) this idea in an efﬁcient incremental ver-
+sion that uses tables of supports `a la AC2001 [Bessiere and
+Regin, 2001]. In non-binary problems, we delay the propaga-
+tion of non-binary constraints until they become binary. For
+variable selection we use the dom/deg heuristics which selects
+the variable with the smallest ratio of domain size divided by
+future degree. For value selection we consider values in in-
+creasing order of unary cost Ci. The variable ordering for
+directional arc consistency is given by their index. The opti-
+mum of each problem instance (except for MAX-SAT where
+only a good upper bound is provided) is given to the branch
+and bound as a ﬁrst upper bound. We experimented with
+three domains easily modeled as WCSP. Given a CNF for-
+mula, Max-SAT is the problem of ﬁnding a complete assign-
+ment with a maximum number of satisﬁed clauses. We have
+generated and solved 80-variable 2-SAT and 40-variable 3-
+SAT instances with varying the number of clauses using Cn-
+fgen1, a random k-SAT generator. Note that this generator
+prevents duplicate or opposite literals in clauses but not du-
+plicate clauses. Given an overconstrained CSP, Max-CSP is
+the problem of ﬁnding a complete assignment with a maxi-
+mum number of satisﬁed constraints. We have generated 6
+classes of binary random problems with domain size set to
+10 (Sparse-Loose (constraint graph connectivity of 12% for
+40 variables), Sparse-Tight, Dense-Loose (constraint graph
+connectivity of 25%), Dense-Tight, Complete-Loose, and
+Complete-Tight) as proposed in [Larrosa and Schiex, 2003].
+In Max-SAT (resp. Max-CSP), samples have 10 (resp. 50)
+instances and we report mean values. In the uncapacitated
+warehouse location problem (UWLP) a company considers
+opening warehouses at some candidate locations in order to
+supply its existing stores. The objective is to determine which
+warehouses to open, and which of these warehouses should
+supply the various stores, such that the sum of the mainte-
+nance and supply costs is minimized. Each store must be
+supplied by exactly one open warehouse. We simply model
+the problem by l boolean variables for the candidate loca-
+tions, s integer variables for the stores with domain size set to
+l, l + s soft unary constraints for the costs, and l (cid:2) s hard bi-
+nary constraints connecting stores and warehouses. We took
+
+1A. van Gelder ftp://dimacs.rutgers.edu/pub/challenge/
+
+satisﬁability/contrib uted/UCSC/instances
+
+ 40
+
+ 35
+
+ 30
+
+ 25
+
+ 20
+
+ 15
+
+ 10
+
+ 5
+
+ 0
+
+ 50
+
+ 40
+
+ 30
+
+ 20
+
+ 10
+
+e
+m
+
+i
+t
+ 
+u
+p
+c
+
+e
+m
+
+i
+t
+ 
+
+u
+p
+c
+
+e
+m
+
+i
+t
+ 
+
+u
+p
+c
+
+ 80
+
+ 60
+
+ 40
+
+ 20
+
+ 0
+
+ 10
+
+ 0
+
+ 20
+
+ 22
+
+ 24
+
+ 26
+
+ 28
+
+ 30
+
+ 32
+
+ 34
+
+ 36
+
+n. of variables
+
+Complete Loose
+
+ 100
+
+MFDAC*
+MEDAC*
+
+e
+m
+
+i
+t
+ 
+
+u
+p
+c
+
+e
+m
+
+i
+t
+ 
+
+u
+p
+c
+
+ 80
+
+ 60
+
+ 40
+
+ 20
+
+ 0
+
+ 140
+
+ 120
+
+ 100
+
+ 80
+
+ 60
+
+ 40
+
+ 20
+
+ 16
+
+ 18
+
+ 20
+
+ 22
+
+ 24
+n. of variables
+
+Complete Tight
+
+ 26
+
+ 28
+
+ 30
+
+MFDAC*
+MEDAC*
+
+ 12
+
+ 14
+
+ 16
+
+ 18
+
+ 20
+
+ 22
+
+n. of variables
+
+ 0
+
+ 6
+
+ 8
+
+ 10
+ 12
+n. of variables
+
+ 14
+
+ 16
+
+Figure 4: Time in seconds to prove optimality for binary ran-
+dom Max-CSPs.
+
+The experiments were all performed on a 2.0 GHz Pen-
+tium 4 computer with 512 MB2. Time results in seconds are
+given in Figures 3 and 4, and Table 5. In all Max-SAT (resp.
+Max-CSP classes), the search effort seems to grow exponen-
+tially with the number of clauses (resp. number of variables).
+We summed the computation times for all the samples that
+were completely solved by both algorithms and computed
+
+2The program named TOOLBAR and the benchmarks are avail-
+
+able at http://carlit.toulouse.inra.fr/cgi-bin/
+awki.cgi/SoftCSP.
+
+the ratio MFDAC*/MEDAC* .
+In Max-2SAT, MEDAC*
+was 5.1 faster than MFDAC*. The improvement is lower
+in Max-3SAT. We think this result is due to our simple de-
+laying mechanism for tackling n-ary constraints. For Max-
+CSP, MEDAC* was faster than MFDAC* by a factor ranging
+from 2.0 (Complete-Tight) to 9.52 (Sparse-Tight). The same
+results were observed when analyzing the number of nodes
+expanded by MEDAC* and MFDAC* (not reported here for
+lack of space). In summary, the speed-up obtained was even
+more important on problems with small constraint graph con-
+nectivity.
+
+Problem
+cap71
+cap72
+cap73
+cap74
+cap101
+cap102
+cap103
+cap104
+cap131
+cap132
+cap133
+cap134
+MO1
+MO2
+MO3
+MO4
+MO5
+MP1
+MP2
+MP3
+MP4
+MP5
+
+Size
+
+16 (cid:2) 50
+16 (cid:2) 50
+16 (cid:2) 50
+16 (cid:2) 50
+25 (cid:2) 50
+25 (cid:2) 50
+25 (cid:2) 50
+25 (cid:2) 50
+50 (cid:2) 50
+50 (cid:2) 50
+50 (cid:2) 50
+50 (cid:2) 50
+100 (cid:2) 100
+100 (cid:2) 100
+100 (cid:2) 100
+100 (cid:2) 100
+100 (cid:2) 100
+200 (cid:2) 200
+200 (cid:2) 200
+200 (cid:2) 200
+200 (cid:2) 200
+200 (cid:2) 200
+
+MFDAC(cid:3) MEDAC(cid:3) CPLEX
+0.02
+0.00
+0.00
+0.02
+0.02
+0.01
+0.01
+0.01
+0.05
+0.04
+0.05
+0.05
+202.48
+36.67
+199.84
+43.26
+42.96
+2296.65
+917.92
+1209.15
+1936.57
+697.51
+
+0.01
+0.01
+0.02
+0.02
+0.03
+0.13
+0.35
+0.24
+65.02
+155.08
+194.36
+44.75
+-
+11775.60
+15123.70
+3525.61
+2354.95
+-
+-
+-
+-
+-
+
+0.00
+0.01
+0.01
+0.01
+0.02
+0.03
+0.03
+0.04
+0.11
+0.12
+0.14
+0.12
+216.57
+44.45
+74.60
+31.74
+33.98
+3403.37
+1443.93
+981.28
+1768.51
+1099.88
+
+Table 5: Time in seconds to prove optimality for uncapac-
+itated warehouse location problems. Problem size is l (cid:2) s,
+with l the number of warehouses and s the number of stores.
+A “-” means the instance was not solved in less than 5 hours.
+
+For UWLP, MEDAC* is several orders of magnitude faster
+than MFDAC* for problem size l (cid:21) 50. We concluded that
+the lower bound computed by EDAC* for UWLP is stronger
+and less variable ordering dependent than the FDAC* one.
+Although UWLP is well-solved by dedicated mathematical
+programming approaches [Erlenkotter, 1978; K¨orkel, 1989]
+and heuristic search methods [Kratica et al., 2001; Michel
+and Hentenryck, 2004], it is worth noticing that our generic
+WCSP algorithm was able to solve to optimality moderately-
+sized problems in reasonable time (in less than 1 hour).
+For comparison purposes, we solved UWLP instances us-
+ing a state-of-the-art mixed-integer programming solver Ilog
+CPLEX 9.0 with default parameters (and without initial upper
+bounds) and a direct formulation of the problem. MEDAC*
+and CPLEX obtained results within the same order of magni-
+tude in terms of cpu time.
+
+Reversing the order of lines 5 (EAC* loop), 8 (DAC* loop),
+and 10 (AC* loop) in MEDAC* slowed down the algorithm
+
+by a factor 3
+2 on our Max-CSP benchmarks. It is important to
+increase the lower bound as soon as possible as it is done ﬁrst
+by EAC*. We are currently investigating a lazy implemen-
+tation of EAC* where the constraints in line 2 are projected
+only for the purpose of increasing the lower bound and not
+for pruning the values. This allows to reduce the number of
+variables inserted in R and P by EAC* and, consequently, the
+number of iterations of the different loops.
+
+7 Conclusions and future work
+In this paper we have introduced a new local consistency
+property called EDAC* and adapted it to WCSP. We have
+studied its complexity, and despite its theoretical cost, it has
+been shown that maintaining EDAC* is always better than
+maintaining FDAC* in a variety of domains. In the future,
+we want to study a lazy version of EDAC* and to apply it to
+other problems.
+
+Acknowledgments
+The authors are grateful to Thomas Schiex for useful com-
+ments on an early version of the paper and to Julia Larrosa
+for being born after the submission deadline.
+
+References
+[Bessiere and Regin, 2001] C. Bessiere and J.C. Regin. Re-
+In
+
+ﬁning the basic constraint propagation algorithm.
+IJCAI-01, pages 309–315, 2001.
+
+[Cooper and Schiex, 2004] M. Cooper and T. Schiex. Arc
+consistency for soft constraints. Artiﬁcial Intelligence,
+154:199–227, 2004.
+
+[Erlenkotter, 1978] D. Erlenkotter. A Dual-Based Procedure
+for Uncapacitated Facility Location. Operations Research,
+26(6):992–1009, 1978.
+
+[K¨orkel, 1989] M. K¨orkel. On the exact solution of large-
+scale simple plant location problems. European Journal
+of Operational Research, 39:157–173, 1989.
+
+[Kratica et al., 2001] J. Kratica, D. Tosic, V. Filipovic, and
+I. Ljubic. Solving the Simple Plant Location Problems by
+Genetic Algorithm. RAIRO Operations Research, 35:127–
+142, 2001.
+
+[Larrosa and Schiex, 2003] J. Larrosa and T. Schiex. In the
+quest of the best form of local consistency for weighted
+CSP. In IJCAI-03, pages 239–244, 2003.
+
+[Larrosa and Schiex, 2004] J. Larrosa and T. Schiex. Solving
+Weighted CSP by Maintaining Arc-consistency. Artiﬁcial
+Intelligence, 159(1-2):1–26, 2004.
+
+[Michel and Hentenryck, 2004] L. Michel and P. Van Hen-
+tenryck. A Simple Tabu Search for Warehouse Location.
+European Journal on Operations Research, 157(3):576–
+591, 2004.
+
+[Schiex et al., 1995] T. Schiex, H. Fargier, and G. Verfail-
+lie. Valued constraint satisfaction problems: hard and easy
+problems. In IJCAI-95, pages 631–637, 1995.
+
+

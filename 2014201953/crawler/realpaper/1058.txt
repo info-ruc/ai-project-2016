@@ -1,0 +1,1189 @@
+Fast Image Alignment Using Anytime Algorithms
+
+Rupert Brooks
+
+∗
+
+Tal Arbel
+
+Doina Precup
+
+Centre for Intelligent Machines
+
+Centre for Intelligent Machines
+
+School of Computer Science
+
+McGill University
+Montreal, Canada
+
+McGill University
+Montreal, Canada
+
+McGill University
+Montreal, Canada
+
+rupert.brooks@mcgill.ca
+
+arbel@cim.mcgill.ca
+
+dprecup@cs.mcgill.ca
+
+Abstract
+
+Image alignment refers to ﬁnding the best transfor-
+mation from a ﬁxed reference image to a new image
+of a scene. This process is often guided by similar-
+ity measures between images, computed based on
+the image data. However, in time-critical applica-
+tions state-of-the-art methods for computing simi-
+larity are too slow. Instead of using all the image
+data to compute similarity, one can use a subset of
+pixels to improve the speed, but often this comes
+at the cost of reduced accuracy. This makes the
+problem of image alignment a natural application
+domain for deliberation control using anytime al-
+gorithms. However, almost no research has been
+done in this direction.
+In this paper, we present
+anytime versions for the computation of two com-
+mon image similarity measures: mean squared dif-
+ference and mutual information. Off-line, we learn
+a performance proﬁle speciﬁc to each measure,
+which is then used on-line to select the appropri-
+ate amount of pixels to process at each optimiza-
+tion step. When tested against existing techniques,
+our method achieves comparable quality and ro-
+bustness with signiﬁcantly less computation.
+
+1 Introduction
+The need to align, or register, two images is one of the ba-
+sic problems of computer vision.
+It can be deﬁned as the
+task of ﬁnding the spatial mapping that places elements in
+one image into meaningful correspondence with elements in
+a second image. It is essential for data fusion tasks in medical
+imaging [Hajnal et al., 2001] and remote sensing (e.g. [Cole-
+Rhodes et al., 2003]). It is also widely applied in tracking and
+automatically mosaicking photographs [Szeliski, 2004].
+
+One of the most straightforward and widely used ap-
+proaches is referred to as direct image alignment. It works
+by deﬁning a similarity measure, D, as a function of a refer-
+ence image, and a template image warped by a transforma-
+tion with some parameters, φ. The computation of D typi-
+cally requires examining all pixels in each image. The align-
+ment problem becomes that of ﬁnding the values of φ that
+
+∗
+
+Mr. Brooks was partially supported by an National Science and
+
+Engineering Research Council Post-Graduate Studies award.
+
+maximize the chosen similarity measure. A number of op-
+timization techniques for smooth functions, such as gradient
+descent, have been used for this problem, and provide good
+solutions on a wide range of image types. However, these
+approaches can be slow, which reduces their usefulness in
+time-sensitive applications such as real-time video registra-
+tion (e.g. [Wildes et al., 2001]) and medical image registra-
+tion during surgery(e.g. [Pennec et al., 2003]). It is possible
+to increase the speed of processing by using only a subset of
+the pixels to compute D, but this can easily lead to a reduc-
+tion in accuracy and reliability. Determining the size of the
+subset to use is typically done in an ad-hoc fashion, or using
+heuristics which are applicable only to certain domains. Fur-
+thermore, since a different number of pixels may be needed
+at different stages in the optimization, a ﬁxed subset is neces-
+sarily a compromise.
+
+In this paper, we propose a deliberation control frame-
+work using anytime algorithms [Dean and Boddy, 1988;
+Horvitz, 1987] to arrive at a principled solution to the speed
+vs. accuracy trade-off in this problem. The ﬁrst step is to
+learn the properties of the similarity measure under consider-
+ation, in terms of accuracy vs. computation time, by training
+off-line on image pairs for which the transformation param-
+eters are known. Given a new pair of images to align, we
+then use this knowledge to determine the number of pixels
+that need to be considered at each step of the optimization.
+In this paper, we explore the effectiveness of this approach
+using two common similarity measures, mean squared dif-
+ference and mutual information, and a gradient descent opti-
+mizer. We tested the algorithm on several types of images:
+images of everyday scenes, multi-modal medical images and
+earth observation data (i.e. Landsat and Radarsat images). In
+all cases, using a deliberation control approach is faster than
+computing the transformation using all the image data and
+gives more reliable results than simply performing the opti-
+mization using an arbitrary, ﬁxed, percentage of the pixels.
+
+The remainder of this paper is organized as follows. In Sec-
+tion 2 we review the image alignment problem and in Section
+3 we review methods of deliberation control using anytime
+algorithms. The details of how deliberation control has been
+implemented in the context of image alignment are given in
+Section 4. Finally, Sections 5 and 6 describe our experimental
+setup, results and conclusions.
+
+IJCAI-07
+
+2078
+
+2 Image Alignment
+
+Direct approaches to image alignment work by deﬁning a
+function D that measures the similarity between a ﬁxed ref-
+erence image, R(x) and a new image T (W (x, φ)). Here, we
+consider the images R(x) and T (x) to be continuous func-
+tions of position, x, deﬁned on some space of coordinates X.
+The coordinate space is warped by W (x, φ) which is a map-
+ping from X to X, parameterized by φ (e.g., a translation or
+rotation). Since our images are actually sets of pixels located
+at integer coordinate positions, we use linear interpolation as
+needed to determine the values of T (W (x; φ)) when W (x; φ)
+is not an integer. The similarity measure, D, is thus a func-
+tion of the transformation parameters φ, and the problem of
+image alignment becomes an optimization problem, which
+can be solved using many standard techniques, e.g., gradi-
+ent descent, second-order methods, stochastic programming
+etc. All these techniques require the repeated calculation of
+D, and/or its gradient, ∇φD, at different points in the space
+of possible transformations. This is by far the most computa-
+tionally intensive part of the process.
+
+Recently, feature based approaches to alignment have seen
+considerable success, and can operate faster than direct ap-
+proaches for many applications. Nevertheless, the direct ap-
+proaches can yield higher overall accuracy and continue to
+be used as a ﬁnal adjustment step [Szeliski, 2004]. Further-
+more, it is difﬁcult to match features reliably when the im-
+ages in question are not of the same modality. Hence, direct
+approaches are the method of choice in applications such as
+medical imaging [Hajnal et al., 2001] and geomatics [Cole-
+Rhodes et al., 2003], where high precision is required and
+multimodal imagery is common.
+
+It has long been known that numerical optimization ap-
+proaches can be signiﬁcantly accelerated by using only a sub-
+set of the pixels in the images to estimate the similarity func-
+tion. For example, many implementations of mutual infor-
+mation (e.g. [Ibanez et al., 2005]) use a random subset of the
+image data. It has been suggested that it may be more efﬁ-
+cient to include only pixels with high derivatives in the calcu-
+lation [Szeliski, 2004]. However, the size of the subset to be
+used is ﬁxed in an ad-hoc fashion. Unfortunately, any ﬁxed
+size is usually too much for some regions of the parameter
+space and too little for others. Furthermore, different types of
+images behave differently, so it is difﬁcult to come up with a
+subset size that is appropriate for all cases. Instead, we will
+use a deliberation control mechanism to choose how much
+computation to perform at each step of the optimization.
+
+3 Deliberation Control with Anytime
+
+Algorithms
+
+In many artiﬁcial intelligence tasks, e.g. planning, the quality
+of the solution obtained depends on the amount of time spent
+in computations. Hence, trade-offs are necessary between the
+cost of sub-optimal solutions and the cost of spending time
+doing further computation. This process, called deliberation
+control, has been investigated in the context of real-time ar-
+tiﬁcial intelligence and a number of approaches have been
+proposed [Horvitz and Zilberstein, 2001]. Deliberation con-
+trol methods rely on two key components: algorithms that
+
+support partial evaluation, and knowledge about how those
+algorithms perform after different amounts of computation.
+
+A class of algorithms supporting partial evaluation are any-
+time algorithms [Horvitz, 1987; Dean and Boddy, 1988],
+which provide a solution when run for any length of time. The
+solution quality is guaranteed to improve with the amount of
+computation performed. Deliberation control strategies us-
+ing anytime algorithms have been applied to both theoreti-
+cal and practical problems including robot control [Vlassis et
+al., 2004], constraint satisfaction [Wah and Chen, 2000] and
+shape extraction in image processing [Kywe et al. , 2006].
+
+To formulate an effective deliberation control strategy us-
+ing anytime algorithms it is necessary to have meta-level
+knowledge of their performance as a function of the amount
+of computation performed [Dean and Boddy, 1988; Horvitz,
+1987]. This knowledge is stored in a performance proﬁle.
+Performance proﬁles may be based on theoretical knowledge
+of the algorithm, on empirical testing of its performance at
+different computation levels, or a combination of the two.
+In any case, the decision to continue computation will be
+based on an estimate of the accuracy of the current result,
+and an estimate of the potential improvement if the algorithm
+continues to run [Dean and Boddy, 1988; Horvitz, 1987;
+Larson and Sandholm, 2004].
+
+The simplest type of performance proﬁle is a static one,
+which predicts accuracy as a function of the amount of com-
+putation completed. However, for our problem of interest,
+this is equivalent to simply using a ﬁxed, arbitrary percent-
+age of the pixels. If feedback about the current run of the
+algorithm is available, it can be incorporated in a more so-
+phisticated approach. A dynamic performance proﬁle [Lar-
+son and Sandholm, 2004] uses feedback to estimate the accu-
+racy as the algorithm progresses. It is described by two func-
+ˆa = Pf wd( f , p), maps the percentage of computation
+tions:
+completed, p, and the feedback parameter, f , to an expected
+accuracy, ˆa. The other, ˆp = Prev( f , a), maps a and f to the
+expected percentage of computation required, ˆp. Conceptu-
+ally, these two functions are inverses. However, both have to
+be maintained in general, to facilitate the decision making.
+A controller can use these functions to gradually increase the
+amount of computation performed, until the estimated accu-
+racy is adequate for the task.
+
+4 Deliberation Control in Image Alignment
+
+As mentioned in Section 2, the most computationally inten-
+sive part of image alignment is the repeated evaluation of the
+similarity measure D and its gradient ∇D. The optimization
+algorithm needs this information in order to take a step in
+parameter space towards the optimal setting. Note that the
+calculation only has to be accurate enough to ensure that the
+next step is correct; determining these values exactly is not
+necessary. Therefore, we propose to implement D and ∇D
+as anytime algorithms, and to learn performance proﬁles de-
+scribing their accuracy at different levels of computation.
+
+4.1 Anytime similarity measures
+
+We implemented two popular image similarity measures as
+anytime algorithms. The resulting implementations have to
+
+IJCAI-07
+
+2079
+
+be able to support partial evaluation, as well as to continue
+an interrupted calculation efﬁciently. To achieve this, we re-
+deﬁne each similarity measure, D(φ), as a function D(φ, p)
+of both the parameters, φ, and the percentage of pixels to be
+used, p. To avoid biasing the computation towards one area
+of the image, the pixels are processed in a random order.
+
+Mean Squared Difference
+The negative mean squared difference DMSD is one of the
+most common similarity measures [Szeliski, 2004], and is
+suitable for images of the same modality. In its original form,
+DMSD is simply an average of the negative squared differences
+in intensity between corresponding pixels (the negative here
+is simply to get a similarity, rather than a distance measure).
+
+DMSD(φ, p) = − 1
+
+(cid:3)pN(cid:4)
+
+(cid:3)pN(cid:4)
+∑
+i=1
+
+(R(xi) − T (W (xi , φ))2
+
+where N is the total number of pixels in the image. The gra-
+dient of this similarity measure is also easy to compute:
+
+∇φDMSD(φ, p) = 2
+
+(cid:3)pN(cid:4)
+
+(cid:3)pN(cid:4)
+∑
+[(R(xi) − T (W (xi , φ)))
+(cid:2)
+i=1
+·∇W T (W (xi , φ))∇φW (xi , φ)
+
+Note that both DMSD(φ, p) and ∇φDMSD(φ, p) can be updated
+incrementally in the usual fashion.
+
+Mutual Information
+The mutual information (MI) image similarity measure [Viola
+and Wells III, 1995] is useful for images of different modal-
+ities. Our anytime implementation is based on the efﬁcient
+mutual information implementation proposed in [Th´evenaz
+and Unser, 2000], which relies on a B-spline windowed rep-
+resentation of the joint probability distribution of the inten-
+sity levels in the two images. Speciﬁcally, let bRk , where
+k = 1 . . . K, be a set of K bins of width dR for the intensity
+R(x). Simi-
+values in the reference image starting at bR
+0
+larly, let bTl be the bins for the intensity values in the template
+image, where l = 1 . . . L, the bins begin at bT
+T (x) and
+0
+have width dT . Then the unnormalized joint distribution is an
+array of size K × L. The entry Pkl is equal to the number of
+pixels in R for which the intensity falls in bin k and the in-
+tensity of the corresponding pixels in the transformed image
+falls in bin l:
+
+= min
+x
+
+= min
+x
+
+(cid:3)
+
+(cid:4)
+
+δ
+
+k,
+
+(cid:5)(cid:6)
+
+(cid:3)
+
+(cid:4)
+
+δ
+
+l ,
+
+Pkl(φ, p) =
+
+(cid:3)pN(cid:4)
+∑
+i=1
+
+R(xi) − bR
+0
+
+dR
+
+T (W (xi , φ)) − bT
+0
+
+dT
+
+(cid:5)(cid:6)
+
+where δ is equal to 1 if its two arguments are equal, and zero
+otherwise. Th´evenaz and Unser (2000) use instead a soft ver-
+sion to compute the entries in the table, based on B-spline
+Parzen windows. Similarly to their work, we will use:
+
+(cid:3)
+k − R(xi) − bR
+
+0
+
+(cid:6)
+
+β3
+
+(cid:3)
+l − T (W (xi , φ)) − bT
+
+0
+
+(cid:6)
+
+Pkl(φ, p) =
+
+(cid:3)pN(cid:4)
+∑
+i=1
+
+β0
+
+dR
+
+dT
+
+where β0 and β3 are 0th and 3rd order B-spline Parzen win-
+dows respectively. The normalization factor of Pkl is:
+
+α(φ, p) =
+
+K
+
+∑
+k=1
+
+L
+
+∑
+l=1
+
+Pkl(φ, p) = (cid:3)pN(cid:4)
+
+This is true because B-splines satisfy the partition of unity
+constraint. The mutual information can then be computed
+using the usual formula:
+
+DMI(φ, p) =
+
+K
+
+∑
+k=1
+
+L
+
+∑
+l=1
+
+Pkl(φ, p)
+(cid:3)pN(cid:4) log
+
+αPkl(φ, p)
+(φ, p)) (∑l
+
+(cid:5) Pkl
+
+(∑k
+
+(cid:5) Pk
+
+(cid:5)
+
+l
+
+(cid:5)(φ, p))
+
+Note that the second factor in the denominator above is just
+the intensity histogram of the original image, which is com-
+puted only once, before the optimization process.
+
+Because a 3rd order B-spline is differentiable, the gradient
+of the joint histogram, ∇φPkl(φ, p), can be computed in the
+usual way as well, and stored in |φ| tables, each of dimension
+K × L. In [Th´evenaz and Unser, 2000] it is shown that when
+using the above formulation the derivative of DMI is:
+
+∇φDMI(φ, p) =
+
+K
+
+∑
+
+L
+
+∑
+
+k
+
+l
+
+γ∇φPkl(φ, p) log
+
+Pkl(φ, p)
+(cid:5) Pk
+
+(φ, p)
+
+l
+
+∑K
+k
+
+(cid:5)
+
+where γ is the normalization factor γ = (dT (cid:3)pN(cid:4))−1. Thus,
+when the derivative is required, we can compute it from the
+joint probability distribution, and its gradient.
+
+The algorithm maintains the unnormalized probability dis-
+tribution, and its unnormalized partial derivatives, as de-
+scribed above, which can be easily updated when more pixels
+are added, because the table entries are simple sums. The dis-
+tance measure and its gradient are then computed as needed
+from this table.
+
+4.2 Performance proﬁles
+
+Exploiting the partial evaluation possibilities of the anytime
+similarity measures requires dynamic performance proﬁles
+describing their expected accuracy at different computation
+levels and feedback values. The notion of accuracy must be
+developed in terms of the optimization method being used.
+In this paper, we used a simple steepest descent optimizer,
+which is described in [Ibanez et al., 2005]1. Carter (1993)
+has analyzed a similar class of optimizers and has proven their
+convergence using the following measure of relative error:
+
+ε =
+
+||∇trueD − ∇measuredD||
+
+||∇trueD||
+
+(1)
+
+A dynamic performance proﬁle requires a feedback param-
+eter which indicates the progress of a particular calculation
+run and based on the above equation the gradient magnitude
+is an ideal candidate. Thus, we designed our performance
+proﬁles to be tables mapping computation level and gradi-
+ent magnitude to accuracy. To construct them we sampled
+the gradient at different computation levels at many points in
+the transformation space. For each computation level, p, we
+grouped the gradient magnitudes into bins and computed the
+expected accuracy, ¯Ep, of the gradient for each bin as follows:
+
+¯Ep = 1 − ∑
+
+i
+
+||∇100%D(φi) − ∇pD(φi)||
+
+||∇100%D(φi)||
+
+,
+
+(2)
+
+1More speciﬁc information may be found in the class documen-
+tation http://www.itk.org/Doxygen/html/classitk
+1 1RegularStepGradientDescentOptimizer.html
+
+IJCAI-07
+
+2080
+
+(where the φi are the sampled points in the transform space).
+The optimizer uses this table to progressively increase the
+amount of computation performed until the estimated ac-
+curacy reaches its criterion for acceptability. The analy-
+sis in [Carter, 1993] indicates that signiﬁcant computational
+gains can be made, with a small (ε ≈ 10%) reduction in ac-
+curacy. Therefore we choose to have the optimizer seek an
+expected accuracy of 90% for each gradient that it computes.
+A simple example of how the table can be used to control
+computation is shown in Figure 1. This table can act as a
+performance proﬁle where two functions, ˆa = Pf wd( f , p) and
+ˆp = Prev( f , a) are implemented through simple lookup. For
+example, suppose an optimizer requires an accuracy of 98%.
+On an initial probe, f (which is in our case the current esti-
+mated performance) is 0.55. By examining the row applying
+to 0.6 and less, we get a prediction that with p = 8%, we will
+obtain the desired accuracy level (arrow 1). After perform-
+ing 8% of the computation, however, suppose f is now 0.1.
+Thus the accuracy is only 93% (arrow 2) meaning more com-
+putation is required. The required p is now estimated as 16%
+(arrow 3), and so on. In our case, the parameter p will be the
+percentage of pixels processed in the image. The feedback
+parameter is the magnitude of the gradient.
+
+Figure 1: Dynamic performance proﬁle example: Values in
+the table represent the expected accuracy of the results.
+
+5 Experiments
+
+To test the anytime algorithm approach, a number of per-
+formance proﬁles were generated, and alignments were per-
+formed. Four classes of images (shown in Figure 2) with at
+least two image pairs each were used in the testing process.
+The ﬁrst image class was typical digital photos (DP) (images
+a-d). Both a) and d) were self-aligned and a) was aligned
+afﬁnely against several images of the same scene taken from
+different camera positions (images b,c) using both similarity
+measures. The second class of images (M1) (images e,f) were
+slices from T1-weighted magnetic resonance imaging (MRI)
+volumes which were self-registered using the DMSD measure.
+The third class of images (EO) are patches from georefer-
+enced, orthorectiﬁed Landsat 7 and Radarsat imagery that
+were registered to each other using the mutual information
+measure (rows 3 and 4). The ﬁnal class of images (M2) are
+slices from previously registered volumes in different medical
+imaging modalities, including T1 and T2 weighted MRI, and
+computed tomography (CT) (last row). These images were
+aligned to each other using the mutual information measure.
+
+1Images 2a, 2b, 2c, and 2d from K. Mikolajczyk http://www.
+inrialpes.fr/lear/people/Mikolajczyk/.
+Landsat
+and Radarsat images (2g,2h,2i,2j, 2k,2l) from Natural Resources
+Canada http://geogratis.gc.ca. Medical images (2e, 2f,
+2m, 2n, and 2o) courtesy Montreal Neurological Institute
+
+(a) boat-1
+
+(b) boat-2
+
+(c) boat-3
+
+(d) grafﬁti
+
+(e) mri-1
+
+(f) mri-2
+
+(g) Landsat-1
+
+(h) Landsat-2
+
+(i) Landsat-3
+
+(j) Radar-1
+
+(k) Radar-2
+
+(l) Radar-3
+
+(m) MRI T1
+
+(o) CT
+Figure 2: Images used for the experiments 1
+
+(n) MRI T2
+
+5.1 Generating performance proﬁles
+Before performing any alignments, performance proﬁles for
+each combination of image class and similarity measure were
+generated off-line. These proﬁles were constructed using
+training image pairs of the same modalities as the ones to
+be aligned. This training data was separate from the test-
+ing data used later. For each training pair, the value of ∇D
+was computed at 4000 points in the transform space, at 12
+different computation levels, and the proﬁle was constructed
+using the method described in Section 4.2. The resulting per-
+formance proﬁles are shown in Figure 5.1. Note that each
+proﬁle has a roughly similar shape. At large values of the
+feedback parameter, ||∇φD||, little computation is needed to
+get a good result. For smaller values, however, progressively
+more computation is needed. This agrees with our intuition;
+since the image noise level remains constant, small values are
+progressively harder to measure.
+It is the curved shape of
+these graphs that allows us to realize important performance
+gains. A constant fraction of pixels would inevitably be too
+many for some feedback values and too few for others.
+
+Despite their basic similarity, however, there are important
+differences between the proﬁles. For example, note that for
+both similarity measures, the medical images require a much
+greater percentage of computation for an accurate result for
+
+IJCAI-07
+
+2081
+
+RMS (pixels)
+
+Run time (s)
+
+Failure Rate
+
+GD100
+
+GD50
+
+GD30
+
+AGD
+
+GD100 GD50 GD30 AGD GD100 GD50 GD30 AGD
+
+0.01±0.01 0.01±0.01 0.01±0.01 0.01±0.01
+0.02±0.02 0.01±0.02 0.01±0.01 0.02±0.02
+0.60±0.14 0.57±0.13 0.58±0.15 0.59±0.11
+0.34±0.12 0.35±0.09 0.35±0.11 0.33±0.08
+0.02±0.04 0.02±0.02 0.02±0.02 0.03±0.04
+0.12±0.54 0.03±0.04 0.03±0.05 0.05±0.07
+
+48.0
+37.7
+106.0
+59.1
+4.6
+2.9
+
+41.9
+
+24.3
+20.6
+40.7
+36.8
+2.6
+1.5
+
+20.5
+
+15.2
+13.1
+22.0
+21.1
+1.7
+1.0
+
+12.0
+
+31.8
+28.2
+35.8
+27.7
+4.5
+2.7
+
+21.5
+
+1.7% 3.3% 1.7% 1.7%
+0.0% 0.0% 1.7% 1.7%
+8.3% 5.0% 8.3% 5.0%
+5.0% 3.3% 8.3% 6.7%
+0.0% 0.0% 0.0% 0.0%
+1.7% 1.7% 1.7% 1.7%
+
+2.8% 2.2% 3.6% 2.8%
+
+MSD-Avg
+
+0.18±0.32 0.16±0.23 0.16±0.23 0.16±0.23
+
+RMS (pixels)
+
+Run time (s)
+
+Failure Rate (%)
+
+GD100
+
+GD50
+
+GD30
+
+AGD
+
+GD100 GD50 GD30 AGD GD100 GD50 GD30 AGD
+
+(a) Results for the MSD measure
+
+0.41±0.17 0.57±0.30
+0.72±0.72 0.55±0.33
+0.96±0.33 1.13±0.53 1.22±0.59 1.10±0.31
+0.17±0.00 0.19±0.03 0.21±0.08 0.17±0.01
+1.90±0.65
+1.69±0.38 1.89±0.39
+1.84±0.74
+1.19±0.01
+1.19±0.02 1.19±0.05
+1.19±0.05
+0.07±0.01
+0.06±0.01 0.07±0.01 0.08±0.02
+0.01±0.01
+0.01±0.02
+0.01±0.01 0.01±0.01
+0.04±0.10 0.01±0.01
+0.01±0.01
+0.02±0.05
+
+9.9
+10.7
+6.2
+13.9
+42.8
+72.4
+115.3
+110.6
+
+60.7
+
+4.5
+4.8
+3.6
+7.2
+25.4
+37.4
+62.9
+52.4
+
+30.9
+
+3.4
+2.7
+2.3
+4.1
+16.2
+24.1
+37.5
+32.7
+
+19.1
+
+9.5
+10.6
+5.4
+7.6
+39.6
+50.3
+14.7
+19.8
+
+18.2
+
+11.7% 25.0% 40.0% 5.0%
+16.7% 31.7% 43.3% 11.7%
+3.3% 31.7% 36.7% 5.0%
+28.3% 45.0% 51.7% 35.0%
+13.3% 30.0% 51.7% 18.3%
+6.7% 21.7% 41.7% 6.7%
+5.0% 5.0% 8.3% 5.0%
+0.0% 5.0% 1.7% 0.0%
+
+10.6% 24.4% 34.4% 10.8%
+
+Image
+Pair
+
+a)-a) (DP)
+d)-d) (DP)
+a)-b) (DP)
+a)-c) (DP)
+e)-e) (M1)
+f)-f) (M1)
+
+Image
+Pair
+
+m)-o) (M2)
+n)-o) (M2)
+m)-n) (M2)
+g)-j) (EO)
+h)-k) (EO)
+i)-l) (EO)
+a)-a) (DP)
+d)-d) (DP)
+
+MI-avg
+
+0.42±0.59 0.47±0.67
+
+0.50±0.73
+
+0.46±0.67
+
+Table 1: Experimental Results: Results by image pair, and combined for each measure (bottom rows)
+Algorithms: GDX - standard algorithm, using X% of pixels; AGD - Anytime algorithm. Entries shown in plain font are not signiﬁcantly
+different from GD100; those in italic are ambiguous (see text) and items in bold signiﬁcantly differ from GD100.
+
+(b) Results for the MI measure
+
+Performance Profiles (MSD)
+
+Performance Profiles (MI)
+
+Digital Photos
+MRI slices
+
+100
+
+80
+
+60
+
+40
+
+20
+
+100
+
+80
+
+60
+
+40
+
+20
+
+Digital Photos
+Medical Imagery
+Landsat−Radar
+
+d
+e
+r
+i
+u
+q
+e
+R
+ 
+s
+e
+x
+P
+%
+
+ 
+
+i
+
+l
+
+d
+e
+r
+i
+u
+q
+e
+R
+ 
+s
+e
+x
+P
+%
+
+ 
+
+i
+
+l
+
+0
+10
+
+−3
+
+−2
+
+10
+
+−1
+
+10
+
+Gradient Magnitude
+
+0
+10
+
+−4
+
+−2
+
+10
+
+0
+10
+
+Gradient Magnitude
+
+Figure 3: Performance proﬁles: The percentage of computa-
+tion required to achieve Ep = 90%.
+
+a given gradient magnitude. The alignment tests, discussed
+below, reveal that these images require more computation to
+align successfully. Also note that the DMI performance pro-
+ﬁles for both geographic data and medical images indicate
+that no less than 30% of the pixels will ever be used for these
+classes of images using this method.
+
+5.2 Alignment tests
+
+We implemented our approach by extending an existing, well-
+tested, image alignment implementation. Speciﬁcally, we
+used an implementation similar to the example MultiResIm-
+ageRegistration1 in [Ibanez et al., 2005], pp. 257–63, with
+appropriate transforms, and with extensions added to the op-
+timizer and measures to support deliberation control. The ex-
+perimental procedure was as follows. Three sets of 20 ran-
+dom starting positions were created. Each set was at a dif-
+ferent effective distance from the identity transform in order
+
+to test the algorithms over the capture range of the optimizer.
+For each combination of image, similarity measure and algo-
+rithm, the true transform was composed with these starting
+positions, and the result was used to initialize the alignment
+process. Alignments were performed using the standard ap-
+proach (labeled GD100 in the graphs), the standard approach
+using only a speciﬁed percentage of pixels (labeled GDx, if
+x% of the pixels is used) and our anytime approach. The com-
+putational efﬁciency was measured in terms of running time.
+Each reported time was obtained on a 1.9GHz AMD Athlon
+machine with 3GB of RAM.
+
+To determine if any observed reductions in runtime came
+at the expense of performance, we also measured the qual-
+ity and reliability of the algorithms. The quality of a result
+was measured by the root-mean-square (RMS) position er-
+ror compared to the true transformation position. To calcu-
+late this, 50 randomly placed points in the unit square were
+scaled to the image extent. These were transformed both us-
+ing the known true transformation and the computed transfor-
+mation. The reported RMS is the square root of the mean of
+the squared coordinate differences for these points.
+
+The reliability of each method was measured by the num-
+ber of failed alignments. A particular run was considered to
+have failed when the registration converged to a transforma-
+tion that lead to RMS pixel position errors greater than 5 pix-
+els, or when the registration failed to converge to an answer
+at all. In practice, we found that this criterion was rarely am-
+biguous. The alignment would either yield results that were
+much better than this RMS value, or much worse. Failed runs
+were not calculated in the average times or registration error.
+
+Since each algorithm being tested was run on the same set
+
+IJCAI-07
+
+2082
+
+of test inputs, we used paired comparisons to test for signif-
+icance. For each criterion, the null hypothesis, H0, was that
+the algorithms had the same performance as the original. The
+RMS errors and run times were compared using pairwise t-
+tests, and the failure rates were compared using the McNe-
+mar test. To adjust for multiple comparisons, we used the
+Tukey method for the RMS and timing data, and the Bon-
+ferroni method for the failure rates [Howell, 2002]. All tests
+were performed at the 95% conﬁdence level.
+
+Adjusting for multiple comparisons can tend to accept H0
+when it should be rejected, artiﬁcially bolstering our argu-
+ment. Therefore, we report all three possible cases. Where
+all tests rejected H0 we conclude that performance differs.
+When H0 was rejected pairwise, but accepted when adjusted
+for multiple comparisons we consider the result ambiguous,
+and ﬁnally when H0 was accepted by all tests, we conclude
+that the data do not indicate a performance difference.
+
+The experimental results are summarized in Table 1 a) (for
+MSD) and b) (for MI). The tables show the runtime of each
+method for each image pair, as well as for all runs combined.
+We also show the failure rate, and the RMS error with stan-
+dard deviation. For the MSD measure, little can be con-
+cluded. All the algorithms under test show some improve-
+ment in speed, without signiﬁcantly affecting failure rate or
+RMS error. For this measure, there is little to distinguish our
+method from simply reducing the number of pixels. How-
+ever, the results for the MI measure highlight the advantages
+of our method. Reducing the number of pixels by a percent-
+age frequently incurs a statistically signiﬁcant loss of quality
+or reliability. The anytime method, however, delivers signif-
+icantly faster times without sacriﬁcing either the RMS error,
+or the failure rate. This is particularly apparent in the overall
+results (bottom row,Table 1-b).
+
+An advantage of our approach is its adaptability. It per-
+formed the alignment of digital photos (DP) with the MI mea-
+sure using a little more than 10% of the original running time,
+without changing the failure rate. In other cases, particularly
+the multimodal medical image registration (M2), more pixels
+seem to be inherently required to successfully align the im-
+ages. Our method adapts to that requirement and maintains a
+low failure rate by increasing the computation performed.
+
+6 Conclusions and future work
+
+We proposed to use deliberation control methods in order to
+improve the efﬁciency of computer vision applications. We
+implemented such methods for the image alignment problem
+and showed a signiﬁcant improvement in speed without de-
+grading the quality of the results. Even when the performance
+gains are limited, a major advantage of this approach is that
+the number of pixels used is determined using a training pro-
+cess. Our results show that arbitrarily selecting a percentage
+of the image data to use for alignment will lead to very differ-
+ent results on different classes of images. Our method gives
+a principled way to determine how much of the image data
+needs to be processed to achieve reasonable results.
+
+In the future, we plan to further investigate the problem of
+multi-modal image alignment using such algorithms. In this
+case, the amount of data is prohibitive for exact methods, es-
+pecially if the data is volumetric, and if the registration has
+
+to be performed in real-time during surgery. We will investi-
+gate the use of more sophisticated methods for obtaining the
+performance proﬁle and doing the deliberation. We will also
+look at other ways of highlighting the anytime aspect of sim-
+ilarity measures commonly used in computer vision.
+
+References
+[Carter, 1993] R. Carter. Numerical experience with a class of al-
+gorithms for nonlinear optimization using inexact function and
+gradient information. SIAM Journal of Scientiﬁc Computing,
+14(2):368–88, 1993.
+
+[Cole-Rhodes et al., 2003] Arlene A. Cole-Rhodes, Kisha L. John-
+son, Jacqueline Le Moigne, and Ilya Zavorin. Multiresolution
+registration of remote sensing imagery by optimization of mutual
+information using a stochastic gradient.
+IEEE Transactions on
+Image Processing, 12(12):1495–1511, 2003.
+
+[Dean and Boddy, 1988] Thomas Dean and Mark Boddy. An anal-
+
+ysis of time-dependent planning. In AAAI, pages 49–54, 1988.
+
+[Hajnal et al., 2001] Joseph Hajnal, Derek Hill, and David Hawkes,
+
+editors. Medical Image Registration. CRC Press, 2001.
+
+[Horvitz and Zilberstein, 2001] Eric Horvitz and Shlomo Zilber-
+stein. Editorial: Computational tradeoffs under bounded re-
+sources. Artiﬁcial Intelligence, 126:1–4, 2001.
+
+[Horvitz, 1987] Eric J. Horvitz. Reasoning about beliefs and ac-
+tions under computational resource constraints. In Proc. of the
+1987 Workshop on Uncertainty in Artiﬁcial Intelligence. 1987.
+
+[Howell, 2002] D. C. Howell. Statistical Methods for Psychology.
+
+Duxbury Press, 5th edition, 2002.
+
+[Ibanez et al., 2005] L. Ibanez, W. Schroeder, L. Ng, and J. Cates.
+
+The ITK Software Guide: ITK V2.0. Kitware Inc, 2005.
+
+[Kywe et al. , 2006] W. Kywe, D. Fujiwara and K. Murakami.
+Scheduling of Image Processing Using Anytime Algorithm for
+Real-time System. In Proc.18th International Conference on Pat-
+tern Recognition, Hong Kong, China, August 2006.
+
+[Larson and Sandholm, 2004] Kate Larson and Tuomas Sandholm.
+Using performance proﬁle trees to improve deliberation con-
+trol. In Nineteenth National Conference on Artiﬁcial Intelligence
+(AAAI 2004), San Jose, CA, USA, July 2004.
+
+[Pennec et al., 2003] Xavier Pennec, Pascal Cachier, and Nicholas
+Ayache. Tracking brain deformations in time sequences of 3d US
+images. Pattern Recognition Letters, 24:801–813, 2003.
+
+[Szeliski, 2004] R. Szeliski. Image alignment and stitching. Tech-
+
+nical Report MSR-TR-2004-92, Microsoft Research, 2004.
+
+[Th´evenaz and Unser, 2000] P. Th´evenaz and M. Unser. Optimiza-
+tion of mutual information for multiresolution image registration.
+IEEE Trans. Image Processing, 9(12):2083–99, 2000.
+
+[Viola and Wells III, 1995] Paul Viola and William M. Wells III.
+Alignment by maximization of mutual information. In Proceed-
+ings of the 5th Int. Conf. on Computer Vision,, pages 16–23, 1995.
+[Vlassis et al., 2004] N. Vlassis, R. Elhorst, and J. Kok. Anytime
+algorithms for multiagent decision making using coordination
+graphs. In IEEE Int. Conf. on Systems, Man & Cybernetics, 2004.
+[Wah and Chen, 2000] Benjamin W. Wah and Yi Xin Chen. Op-
+timal anytime constrained simulated annealing for constrained
+global optimization.
+In Rina Dechter, editor, Lecture Notes in
+Computer Science, Volume 1894, page 425, 2000.
+
+[Wildes et al., 2001] R. P. Wildes, D. Hirvonen, S. Hsu, R. Kumar,
+W. Lehman, B. Matei, and W. Zhao. Video georegistration: Al-
+gorithm and quantitative evaluation. In Proceedings of ICCV’01,
+pages 343–350, 2001.
+
+IJCAI-07
+
+2083
+
+

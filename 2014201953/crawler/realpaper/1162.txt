@@ -1,0 +1,1067 @@
+Locating Complex Named Entities in Web Text
+
+Doug Downey, Matthew Broadhead, and Oren Etzioni
+
+Department of Computer Science and Engineering
+
+Turing Center
+
+University of Washington
+
+Box 352350
+
+Seattle, WA 98195, USA
+
+{ddowney,hastur,etzioni}@cs.washington.edu
+
+Abstract
+
+Named Entity Recognition (NER) is the task of
+locating and classifying names in text. In previous
+work, NER was limited to a small number of pre-
+deﬁned entity classes (e.g., people, locations, and
+organizations). However, NER on the Web is a far
+more challenging problem. Complex names (e.g.,
+ﬁlm or book titles) can be very difﬁcult to pick out
+precisely from text. Further, the Web contains a
+wide variety of entity classes, which are not known
+in advance. Thus, hand-tagging examples of each
+entity class is impractical.
+This paper investigates a novel approach to the
+ﬁrst step in Web NER: locating complex named
+entities in Web text. Our key observation is that
+named entities can be viewed as a species of multi-
+word units, which can be detected by accumulat-
+ing n-gram statistics over the Web corpus. We
+show that this statistical method’s F1 score is 50%
+higher than that of supervised techniques includ-
+ing Conditional Random Fields (CRFs) and Con-
+ditional Markov Models (CMMs) when applied
+to complex names. The method also outperforms
+CMMs and CRFs by 117% on entity classes ab-
+sent from the training data. Finally, our method
+outperforms a semi-supervised CRF by 73%.
+
+Introduction
+
+1
+Named Entity Recognition (NER) is the task of identifying
+and classifying names in text. In previous work, NER was
+carried out over a small number of pre-deﬁned classes of
+entities—for example, the named entity task deﬁnition from
+the Message Understanding Conference identiﬁed the three
+classes PERSON, ORGANIZATION, and LOCATION [Gr-
+ishman and Sundheim, 1996]. However, the Web contains a
+variety of named entities that fall outside these categories, in-
+cluding products (e.g., books, ﬁlms), diseases, programming
+languages, nationalities, and events, to name a few.
+
+NER requires ﬁrst locating entity names in text. Some
+named entities are easy to detect in English because each
+
+word in the name is capitalized (e.g., “United Kingdom”) but
+others are far more difﬁcult. Consider the two phrases:
+
+(i) ...companies such as Intel and Microsoft...
+(ii) ...companies such as Procter and Gamble...
+
+The ﬁrst phrase names two entities (“Intel” and “Mi-
+crosoft”), whereas the second names a single entity (“Procter
+and Gamble”). However, this distinction is not readily appar-
+ent from the text itself. Similar situations occur in ﬁlm titles
+(“Dumb and Dumber”), book titles (“Gone with the Wind”),
+and elsewhere (the “War of 1812”).1 The challenging prob-
+lem is to precisely determine the boundaries of the entity
+names in the text. We refer to this problem as the entity de-
+limitation problem. Since entity delimitation does not deter-
+mine the entity’s class, it is a subproblem whose solution is
+necessary but not sufﬁcient for successful NER.
+
+Another fundamental challenge for standard, supervised
+NER techniques is that the set of entity classes is not known
+in advance for many Web applications, including information
+extraction [Etzioni et al., 2005], question answering [Banko,
+2002], and search [Pasca, 2004]. Thus, it is impractical to
+hand tag elements of each entity class to train the supervised
+techniques. Instead, we are forced to create a training cor-
+pus where entities of any type are labeled “entity”, and non-
+entities are labeled as such. This solution is problematic be-
+cause NER techniques rely on orthographic and contextual
+features that can vary widely across entity classes. We refer
+to this problem as the unseen classes problem.
+
+This paper introduces the LEX method, which addresses
+both the delimitation and unseen classes problems by utiliz-
+ing n-gram statistics computed over a massive Web corpus.
+LEX does not address the entity classiﬁcation problem. LEX
+is based on the observation that complex names tend to be
+multi-word units (MWUs), that is, sequences of words whose
+meaning cannot be determined by examining their constituent
+parts [da Silva et al., 2004]; MWUs can be identiﬁed with
+high accuracy using lexical statistics, the frequency of words
+and phrases in a corpus [da Silva and Lopes, 1999].
+
+1While uncapitalized words within entities tend to come from a
+small set of terms (e.g. “of,” “and,” etc.), it is not sufﬁcient to simply
+ignore these terms as they often appear between distinct entities as
+well (as in “Microsoft and Intel” above).
+
+IJCAI-07
+
+2733
+
+LEX requires only a single threshold that is easily esti-
+mated using a small number of hand-tagged examples drawn
+from a few entity classes. However, LEX does require an un-
+tagged corpus that contains the relevant lexical items a hand-
+ful of times in order to compute accurate lexical statistics.
+Thus, LEX is well-suited to the Web where entity classes are
+not known in advance, many entity names are complex, but a
+massive untagged corpus is readily available.
+
+LEX is a semi-supervised learning method, so in addition
+to Conditional Random Fields (CRFs) [Lafferty et al., 2001]
+and Conditional Markov Models (CMMs) [McCallum et al.,
+2000], we compare it with CRFs augmented with untagged
+data using co-training and self-training. We ﬁnd that LEX
+outperforms these semi-supervised methods by more than
+70%.
+
+Our contributions are as follows:
+1. We introduce the insight that statistical techniques for
+ﬁnding MWUs can be employed to detect entity names
+of any class, even if the classes are unknown in advance.
+2. We demonstrate experimentally that LEX, a surpris-
+ingly simple technique based on the above insight, sub-
+stantially outperforms standard supervised and semi-
+supervised approaches on complex names rarely con-
+sidered in NER such as the titles of ﬁlms and books.2
+3. We show preliminary results demonstrating that LEX
+can be leveraged to improve Web applications, reducing
+the error rate of a Web information extraction system by
+60-70% in one case.
+
+4. Based on an analysis of the limitations of LEX, we pro-
+pose an enhanced algorithm (LEX++) which attaches
+common preﬁxes and sufﬁxes to names, and uses addi-
+tional lexical statistics to detect spurious collocations.
+LEX++ offers an additional 17% performance improve-
+ment over LEX.
+
+Section 2 describes LEX. Section 3 presents our experi-
+mental results comparing LEX with previous supervised and
+semi-supervised methods. Section 4 presents an analysis
+LEX’s limitations, along with an experimental evaluation of
+LEX++. Section 5 considers related work, and the paper con-
+cludes with a discussion of future work.
+
+2 The LEX Method for Locating Names
+The lexical statistics-based approach we use for locating
+names is based on the key intuition that names are a type of
+multi-word unit (MWU). Broadly, our algorithm assumes that
+contiguous capitalized words3 are part of the same name, and
+that a mixed case phrase beginning and ending with capital-
+ized words is a single name if and only if it is a MWU—that
+is, if it appears in the corpus sufﬁciently more frequently than
+chance. Capitalized words at the start of sentences are only
+considered names if they appear capitalized sufﬁciently often
+when not at the beginning of a sentence.
+
+2All of the above techniques achieve close to 100% accuracy on
+
+simple names.
+
+More formally, the lexical method, denoted by LEX, is de-
+ﬁned by two thresholds τ and δ, and a function f(s0, s1, s2)
+mapping three strings to a numerical value. The function
+f(s0, s1, s2) measures the degree to which the concatenated
+string s0s1s2 occurs “more than chance” – several such col-
+location identiﬁers exist in the MWU literature, and we detail
+the two measures we experiment with below. The threshold
+τ is the value f(s0, s1, s2) must exceed in order for the string
+s0s1s2 to be considered a single name. Lastly, if a capitalized
+word’s appearances come at the beginning of a sentence more
+than δ of the time, we assume it is not a name. We heuristi-
+cally set the value of δ to 0.5, and set τ using training data as
+described in Section 3.
+
+Given a sentence S, a function f(s0, s1, s2), and thresh-
+
+olds τ and δ, LEX proceeds as follows:
+
+1. Initialize a sequence of names N = (n0, n1, . . . , nM )
+equal to the maximal contiguous substrings of S that
+consist entirely of capitalized words, where elements of
+N are ordered from left to right in S. If when the ﬁrst
+word of S appears capitalized in the corpus, it is at the
+beginning of a sentence more than δ of the time, omit it
+from N.
+
+2. Until all consecutive name pairs in N have been evalu-
+
+with minimum i.
+
+ated:
+(a) Choose the unevaluated pair of names (ni, ni+1)
+(b) If f(ni, wi, ni+1) > τ, where wi is the uncapital-
+ized phrase separating ni and ni+1 in S, and wi is
+at most three words in length,
+• replace ni and ni+1 in N with the single name
+
+niwini+1.
+
+2.1 Measures of Collocation
+The function f(s0, s1, s2) is intended to measure whether a
+string s0s1s2 occurring in text is a single name, or if in-
+stead s0 and s2 are distinct names separated by the string
+s1. The functions f we consider are based on two standard
+collocation measures, Pointwise Mutual Information (PMI)
+and Symmetric Conditional Probability (SCP) [da Silva and
+Lopes, 1999]. Deﬁne the collocation function ck(a, b) for two
+strings a and b:
+
+ck(a, b) = p(ab)k
+p(a)p(b)
+
+(1)
+
+where p(s) is the probability of the string s occurring in
+
+the corpus.
+
+In the above, c2 gives the SCP between a and b, and c1
+is (for our purposes) equivalent to PMI.4 PMI and SCP are
+deﬁned for only two arguments; a variety of techniques have
+been employed to extend these binary collocation measures
+to the n-ary case, for example by averaging over all binary
+partitions [da Silva and Lopes, 1999] or by computing the
+measure for only the split of highest probability [Schone and
+Jurafsky, 2001]. Here, we generalize the measures in the fol-
+lowing simplistic fashion:
+
+3Here, “capitalized,” words are those beginning with a capital
+letter, and all other text (including punctuation and digits) is “un-
+capitalized.”
+
+4More precisely, P M I(a, b) = log2c1(a, b). But in MWU iden-
+tiﬁcation we consider only the ordering of the collocation measure,
+so the monotonic log function can be ignored.
+
+IJCAI-07
+
+2734
+
+gk(a, b, c) = p(abc)k
+
+p(a)p(b)p(c)
+
+(2)
+
+We take g1 as our PMI function for three variables, and g3
+
+as our SCP function for three variables.
+
+3 Experimental Results
+This section describes our experiments on Web text, which
+compare LEX’s performance with both supervised and semi-
+supervised learning methods. Experiments over the Web cor-
+pus can be tricky due to both scale and the diversity of entity
+classes encountered, so we begin by carefully describing the
+experimental methodology used to address these difﬁculties.
+3.1 Experimental Methodology
+Many classes of named entities are difﬁcult to delimit pre-
+cisely. For example, nested entities like the phrase “Director
+of Microsoft” could be considered a single entity (a job ti-
+tle), two entities (a job title and a company), or both. To
+make evaluation as objective as possible, we performed our
+experiments on entities from four classes where the bound-
+aries of names are relatively unambiguous: (Actor , Book,
+Company, and Film).
+
+The LEX method requires a massive corpus in order to ac-
+curately compute its n-gram statistics. To make our experi-
+ments tractable, we approximated this corpus with 183,726
+sentences automatically selected as likely to contain named
+entities from the above four classes.5
+
+We formed a training set containing a total of 200 sen-
+tences, evenly distributed among the four classes. In these
+training sets, we manually tagged all of the entities,6 result-
+ing in a total of 805 tagged examples. We formed a test set
+by hand-tagging a sample of 300 entities from each class; be-
+cause the lexical approach requires estimates of the probabili-
+ties of different phrases, we ignored any entities that appeared
+fewer than ﬁve times in our corpus. To ensure that this was a
+reasonable restriction, we queried Google and found that over
+98% of our original test entities appeared on at least 5 distinct
+Web pages. Thus, the requirement that entities appear at least
+ﬁve times in the corpus is a minor restriction. Given the mas-
+sive size of the Web corpus, a lexical statistics method like
+LEX is likely to be effective for most entities.
+
+We further separated our test set into “easy” and “difﬁ-
+cult” cases. Precisely, the easy cases are those that are cor-
+rectly identiﬁed by a baseline method that simply ﬁnds maxi-
+mal substrings of contiguous capitalized words. The difﬁcult
+cases are those on which this simple baseline fails. Our ﬁ-
+nal test set contained 100 difﬁcult cases, and 529 easy cases,
+suggesting that difﬁcult entity names are quite common on
+the Web.
+
+In the test phase, we ran each of our methods on the sen-
+tences from the test set. Recall is deﬁned as the fraction of test
+set entities for which an algorithm correctly identiﬁes both the
+
+5We downloaded sentences from the Web matching patterns like
+
+“actors such as...” or “...and other ﬁlms,” etc.
+
+6We also constructed training sets tagging only those entities of
+the target classes (Actor, Book, Company, and Film) – however, this
+approach decreased the performance of the supervised approaches.
+
+LEX-PMI
+LEX-SCP
+
+F1
+0.38
+0.63 (66%)
+
+Recall
+0.43
+0.66
+
+Precision
+0.34
+0.59
+
+Table 1: Performance of LEX using collocation measures
+PMI and SCP. SCP outperforms PMI by 66% in F1.
+
+left and right boundaries. Precision is deﬁned as the fraction
+of putative entities suggested by the algorithm that are indeed
+bona ﬁde entities. Because our test set contains only a proper
+subset of the entities contained in the test text, for the pur-
+pose of computing precision we ignore any entities identiﬁed
+by the algorithm that do not overlap with an element of the
+test set.
+3.2 PMI versus SCP
+Our ﬁrst experiment investigates which of the candidate col-
+location functions (PMI or SCP) is most effective for use in
+the LEX method. In these experiments and those that follow,
+the threshold τ is set to the value that maximizes performance
+over the training set, found using simple linear search.
+
+The performance of each metric on difﬁcult cases is shown
+in Table 1. The SCP metric outperforms PMI by a consider-
+able margin. This performance difference is not merely a con-
+sequence of our method for acquiring thresholds; the perfor-
+mance discrepancy is essentially unchanged if each threshold
+is chosen to maximize performance on the test set. Further,
+although we are focusing on difﬁcult cases, the SCP metric
+also outperforms PMI on the non-difﬁcult cases as well (0.97
+vs. 0.92 in F1).
+
+The large performance difference between LEX-PMI and
+LEX-SCP is a more extreme version of similar results exhib-
+ited for those measures in MWU identiﬁcation [Schone and
+Jurafsky, 2001].
+In our case, PMI performs poorly on our
+task due to its well-known property of returning dispropor-
+tionately low values for more frequent items [Manning and
+Sch¨utze, 1999]. PMI fails to correctly join together several of
+the more frequent names in the test set. In fact, of the names
+that PMI fails to join together, 53% appear in the corpus more
+than 15 times – versus 0% for SCP.
+
+In the remainder of our experiments the lexical method em-
+
+ploys the SCP function and is referred to simply as LEX.
+3.3 Comparison with NER approaches
+We experimented with the following NER methods:
+
+proach.
+
+trained with a probabilistic Support Vector Machine.
+
+• SVMCMM – a supervised Conditional Markov Model
+• CRF – a supervised Conditional Random Field ap-
+• CAPS – a baseline method that locates all maximal con-
+• MAN – an unsupervised name recognizer, based on
+manually-speciﬁed rules. This method is taken from the
+name location subcomponent of the KnowItAll Web in-
+formation extraction system [Etzioni et al., 2005].
+
+tiguous substrings of capitalized words.
+
+Both Conditional Random Fields (CRF) [Lafferty et al.,
+2001] and Conditional Markov Models (CMM) [McCallum
+et al., 2000] are state of the art supervised approaches for
+
+IJCAI-07
+
+2735
+
+F1
+
+SVMCMM 0.42
+CRF
+0.35
+0.18
+MAN
+0.63 (50%)
+LEX
+
+Recall
+0.48
+0.42
+0.22
+0.66
+
+Precision
+0.37
+0.31
+0.16
+0.59
+
+F1
+
+SVMCMM 0.29
+CRF
+0.25
+0.18
+MAN
+0.63 (117%)
+LEX
+
+Recall
+0.34
+0.31
+0.22
+0.66
+
+Precision
+0.25
+0.21
+0.16
+0.60
+
+Table 2: Performance on Difﬁcult Cases LEX’s F1 score is
+50% higher than the nearest competitor, SVMCMM.
+
+Table 4: Performance on Unseen Entity Classes (Difﬁcult
+Cases) LEX outperforms its nearest competitor (SVMCMM)
+by 117%.
+
+F1
+
+SVMCMM 0.96
+0.94
+CRF
+0.97
+MAN
+0.97
+LEX
+1.00 (3%)
+CAPS
+
+Recall
+0.96
+0.94
+0.96
+0.97
+1.00
+
+Precision
+0.96
+0.95
+0.98
+0.97
+1.00
+
+F1
+
+SVMCMM 0.93
+0.94
+CRF
+0.97
+MAN
+0.95
+LEX
+1.00 (3%)
+CAPS
+
+Recall
+0.92
+0.93
+0.96
+0.95
+1.00
+
+Precision
+0.94
+0.95
+0.98
+0.95
+1.00
+
+Table 3: Performance on Easy Cases All methods perform
+comparably near the perfect performance of the CAPS base-
+line; CAPS outperforms LEX and MAN by 3%.
+
+Table 5: Performance on Unseen Entity Classes (Easy
+Cases) CAPS outperforms all methods by a small margin,
+performing 3% better than its nearest competitor (MAN).
+
+text delimitation tasks. Our CRF and CMM implementations
+were taken from the MinorThird text classiﬁcation package
+[Cohen, 2004]. We obtained settings for each algorithm via
+cross-validation on the training set. We chose to train the
+CMM using a Support Vector Machine (SVMCMM) rather
+than with the maximum entropy approach in [McCallum et
+al., 2000] because the SVMCMM substantially outperformed
+the maximum-entropy classiﬁer in cross-validation. The su-
+pervised classiﬁers create feature vectors for each word; these
+features include the lower-case version of the word, the ortho-
+graphic pattern for the word (e.g. “Xx+” for “Bill” or “9+”
+for “1995”, etc), and analogous features for tokens in a small
+window around the word (of size selected by cross valida-
+tion).
+
+By deﬁnition, the CAPS baseline performs perfectly on
+easy entity names, but does not correctly delimit any difﬁcult
+entity names. CAPS is equivalent to Step 1 in the LEX algo-
+rithm in Section 2. Although LEX includes CAPS as an initial
+step to handle easy names, the two algorithms will differ on
+easy names when the lexical statistics, computed in Step 2 of
+LEX, indicate that two easy names delimited by CAPS ought
+to be concatenated. Consider, for example, the phrase “...as
+Intel and Microsoft have...”. CAPS will always delimit this
+phrase’s two names correctly, but LEX could potentially de-
+limit them incorrectly (by, for example, outputting the phrase
+“Intel and Microsoft” as a single name). In practice, this sit-
+uation occurs infrequently (see Table 3).
+
+The performance of the different methods on difﬁcult cases
+is shown in Table 2. Overall, LEX’s F1 score of 0.63 is
+50% higher than that of its nearest competitor (SVMCMM,
+at 0.42). The precision differences between LEX and SVM-
+CMM are signiﬁcant at p < 0.01, and the recall differences
+are signiﬁcant at p < 0.02 (Fisher Exact Test). Of course,
+performance on the easy cases is also important. As shown in
+Table 3, all methods perform comparably well on easy cases,
+with F1 scores in the 0.95 and higher range.
+
+The performance of LEX is fairly robust to parameter
+changes. A sensitivity analysis revealed that altering the
+
+learned value of τ by a factor of 2 in either direction resulted
+in LEX still outperforming SVMCMM by at least 40% on dif-
+ﬁcult cases. Also, altering the value of δ to either 0.4 or 0.6
+resulted in LEX outperforming SVMCMM by at least 48%
+on difﬁcult cases.
+3.4 Unseen Entity Classes
+As argued in the introduction, in many Web applications, the
+target entity classes are not known in advance. This poses
+particular problems for standard NER approaches, which rely
+on textual cues that can vary widely among entity classes. In
+this experiment, we simulate the performance of each of our
+entity delimitation methods on unseen entity classes. Specif-
+ically, when evaluating performance on an entity class, we
+remove from the training set any sentences containing enti-
+ties of that class. The results of these experiments on difﬁcult
+cases are shown in Table 4. LEX outperforms the other ap-
+proaches, with F1 performance more than 100% higher than
+the best competing method (SVMCMM). The precision and
+recall differences between LEX and SVMCMM on difﬁcult
+cases are each statistically signiﬁcant at p < 0.001 (Fisher
+Exact Test). As in the previous experiment, all methods per-
+form relatively well on easy cases (Table 5).
+3.5
+LEX outperforms supervised NER methods by leveraging
+lexical statistics computed over a large, untagged corpus.
+Augmenting tagged examples with untagged data is known as
+semi-supervised learning, an increasingly popular approach
+for text processing tasks, in which untagged data is plenti-
+In this section, we compare LEX with previous semi-
+ful.
+supervised algorithms.
+
+Semi-supervised Comparison
+
+To create a semi-supervised baseline for our task, we aug-
+mented the supervised classiﬁers from our previous experi-
+ments to employ untagged data. As in other recent work on
+semi-supervised text segmentation [Ando and Zhang, 2005],
+we experimented with two semi-supervised approaches: co-
+training and self-training.
+
+IJCAI-07
+
+2736
+
+One of the ﬁrst semi-supervised algorithms for named en-
+tity classiﬁcation [Collins and Singer, 1999] was based on
+semi-supervised co-training [Blum and Mitchell, 1998]. Co-
+training relies on a partition of the feature set to produce in-
+dependent “views” of each example to be classiﬁed, where it
+is assumed each individual view is sufﬁcient to build a rela-
+tively effective classiﬁer. In co-training, separate classiﬁers
+are trained for each view. Then each classiﬁer is applied to
+the untagged examples, and the examples whose classiﬁca-
+tions are most certain are added as new training examples.
+By iteratively bootstrapping information from distinct views,
+co-training algorithms are able to create new training exam-
+ples from untagged data.
+
+The co-training approach developed in [Collins and Singer,
+1999] does not actually perform entity delimitation. Instead,
+it assumes the entity delimitation problem is solved, and ad-
+dresses the task of classifying a given set of entities into cat-
+egories.
+In our attempts to utilize a similar co-training al-
+gorithm for our entity delimitation task, we found the algo-
+rithm’s partitioning of the feature set to be ill suited to our
+task. The approach in [Collins and Singer, 1999] employed
+two views to classify named entities: the context surround-
+ing a named entity, and the orthographic features of the en-
+tity itself. While the context surrounding a known entity is
+a good indicator of that entity’s class, in our experiments we
+found that context was not effective for determining an un-
+known entity’s boundaries. The co-training classiﬁer trained
+on our training set using only the “context” view achieved F1
+performance of 0.16 on difﬁcult cases, and 0.37 on easy cases
+(versus 0.35 and 0.94 for the classiﬁer trained on all features).
+This violates the central assumption in co-training, that each
+view be independently capable of producing a relatively ef-
+fective classiﬁer.
+
+Because co-training was unsuited to our task, we exper-
+imented with “single-view” co-training, also known as self-
+training. This approach involved training a supervised classi-
+ﬁer on the training set, and then iteratively applying the clas-
+siﬁer to the untagged data, adding to the training set the r
+sentences on which the classiﬁer is most conﬁdent.
+
+Our experimental results are shown in Table 6. Because
+only the CRF classiﬁer returned reliable probability esti-
+mates for sentences, it is the only classiﬁer tested in a semi-
+supervised conﬁguration. In these experiments, r = 20, and
+the algorithm was executed for a total of 40 self-training it-
+erations. As shown in the table, the bootstrapped training
+examples make positive but insigniﬁcant impacts on the per-
+formance of the baseline supervised classiﬁer. LEX’s F1 per-
+formance of 0.63 is 73% higher than that of the best semi-
+supervised CRF in Table 6 (0.37).
+3.6
+One important application of Web named entity delimitation
+is found in unsupervised information extraction systems, e.g.
+[Etzioni et al., 2005]. These systems use generic patterns
+(e.g. “ﬁlms such as”) to extract entities, but require some
+method to identify the boundaries of the entities to extract.
+Given a particular set of patterns, a more accurate name de-
+limitation system should result in better extraction accuracy.
+In this experiment, we tested a pattern-based information ex-
+
+Information Extraction Performance
+
+Self-tagged
+Sentences
+0
+400
+800
+
+F1
+0.35
+0.37
+0.36
+
+Recall
+0.42
+0.43
+0.42
+
+Precision
+0.31
+0.32
+0.31
+
+Table 6: Performance of semi-supervised CRF (Difﬁcult
+Cases) The additional training sentences generated by the
+semi-supervised algorithm (“Self-tagged Sentences”) do not
+signiﬁcantly improve performance over the original 200 sen-
+tences from the training set.
+
+i
+
+i
+
+n
+o
+s
+c
+e
+r
+P
+
+0.7
+
+0.6
+
+0.5
+
+0.4
+
+0.3
+
+0.2
+
+0.1
+
+0
+
+LEX
+SVMCMM
+CRF
+MAN
+
+0
+
+20
+
+40
+
+60
+
+Recall
+
+Figure 1: Information Extraction performance for the
+Film class (Difﬁcult Cases). LEX’s precision is 60-70%
+higher than its closest competitor (SVMCMM).
+
+traction system on our evaluation corpus, using each of our
+methods to delimit entities. We ranked all extracted entities
+in order of decreasing frequency to obtain precision/recall
+curves for each class. Figure 1 shows the precision/recall
+curves for the 100 most frequent extractions of difﬁcult cases
+in the Film class. As the graph shows, LEX enables sig-
+niﬁcantly higher precision than the other methods (as before,
+all methods perform comparably well on easy extractions).
+Additional experiments are necessary to assess information
+extraction performance on other classes.
+
+4 Error Analysis and Enhancements
+LEX is a simple algorithm, and there are ways in which its
+simplistic assumptions about the structure of names hinder its
+performance. In this section, we detail three of LEX’s primary
+error types, and we introduce LEX++, an enhanced algorithm
+which addresses LEX’s limitations. LEX++ follows the LEX
+algorithm given in Section 2, with modiﬁcations for each of
+LEX’s error types as detailed below.
+
+Numbers and Punctuation at Name Boundaries
+LEX’s assumption that names begin and end with capitalized
+words is violated by any names that begin or end with num-
+bers or punctuation—for example, the ﬁlm “8 Mile” or a com-
+pany name including trailing punctuation such as “Dell Inc.”
+This limitation of LEX accounted for 38% of its false nega-
+tives on difﬁcult cases in the experiments in Section 3.3.
+
+IJCAI-07
+
+2737
+
+LEX++ addresses this limitation of LEX by optionally ex-
+tending names to the left or right (or both) to include num-
+bers or punctuation. Formally, if a name ni (output by LEX)
+is immediately preceded by a single number or punctuation
+mark ti−1, LEX++ prepends ti−1 to ni whenever c2(ti−1, ni)
+exceeds a threshold γ. Similarly, a number or punctuation
+mark ti immediately following ni is appended to ni when-
+ever c2(ni, ti) > γ.
+Common Preﬁxes and Sufﬁxes
+LEX’s assumption that named entities correspond to lexical
+collocations does not always hold in practice. For example,
+LEX rarely attaches common preﬁxes and sufﬁxes to names.
+In an entity like “Cisco Systems, Inc.” the statistical associa-
+tion between the sufﬁx “Inc” and the company name “Cisco
+Systems” is relatively small, because “Inc” occurs so fre-
+quently in the corpus as a part of other entity names. The
+situation is further complicated by the fact that most preﬁxes
+and sufﬁxes should be considered part of the entity name (as
+in the “Inc.” example above), but others should not (e.g., hon-
+oriﬁcs like “Sir” or “Mr.”).7 Mis-applying preﬁxes and suf-
+ﬁxes is responsible for 27% of LEX’s false negatives.
+
+LEX++ attempts to attach common preﬁxes and sufﬁxes
+to names. To determine whether a given phrase is a preﬁx or
+a sufﬁx, we would like to measure how frequently the phrase
+appears as a constituent of other entity names. As an approxi-
+mation to this quantity, we use the fraction of times the phrase
+is followed or preceded by a capitalized word. Formally, we
+consider a phrase r = niwini+1 (where ni and ni+1 are dis-
+tinct names output by LEX) to be a single name including a
+preﬁx niwi if the phrase niwi is followed by a capitalized
+word in the corpus more than a threshold φ of the time. Sim-
+ilarly, r is a single name including a sufﬁx if wini+1 is pre-
+ceded by a capitalized word more than φ of the time.8
+Related Entities
+LEX also makes errors due to the high statistical association
+between distinct but related entities. Phrases containing mul-
+tiple related entities (e.g., conjunctions like “Intel and AMD”)
+occur frequently relative to their constituent parts, and there-
+fore appear to LEX to be MWUs. Thus, these phrases are
+often erroneously output as single names by LEX.
+
+LEX++ attempts to identify phrases containing distinct
+names which happen to be mentioned together frequently.
+Speciﬁcally, LEX++ exploits the fact a named entity requires
+a unique order for its constituent terms, whereas a phrase con-
+taining distinct entities often does not. For example, consider
+that the phrase “Intel and AMD” appears with similar fre-
+quency in its reversed form (“AMD and Intel”), whereas the
+same is not true for the single entity “Pride and Prejudice.”
+
+Formally, consider a phrase r = niwini+1 which
+would be concatenated into a single name by LEX, that is,
+g3(ni, wi, ni+1) > τ. LEX++ outputs r as a single name
+only if p(ni+1wini), the probability of the reverse of r, is
+sufﬁciently small. In our experiments, we use a heuristic of
+
+7These guidelines are taken from the MUC standard for named
+
+entity recognition, which we follow where applicable.
+
+8We also limit names nk within preﬁxes and sufﬁxes to be fewer
+
+than three words in length.
+
+LEX
+LEX++
+
+F1
+0.63
+0.74 (+17%)
+
+Recall
+0.66
+0.76
+
+Precision
+0.59
+0.72
+
+Table 7: Performance of LEX++ versus LEX (Difﬁcult
+Cases). LEX++ outperforms LEX by 17%.
+
+outputting r as a single name only when the reverse of r ap-
+pears at most once in our corpus.
+4.1 Experiments with LEX++
+We compared the performance of LEX++ to LEX under the
+experimental conﬁguration given in Section 3.3. The values
+of τ and δ were taken to be the same for both algorithms, and
+the thresholds φ and γ were set using linear search over the
+training set.
+
+The results of our experiments are shown in Table 7. For
+difﬁcult entity names, the enhancements in LEX++ offer a
+17% improvement in F1 over the original LEX. The perfor-
+mance of both algorithms on easy cases is similar—LEX++
+has a slightly lower F1 score (0.96) than that of LEX (0.97).
+
+5 Related Work
+The majority of named entity recognition (NER) research has
+focused on identifying and classifying entities for a small
+number of pre-deﬁned entity classes, in which many entities
+can be identiﬁed using capitalization. Our focus, by contrast,
+is on delimiting names in cases where entity classes may be
+unknown, and when names are complex (involving a mixture
+of case).
+
+Several supervised learning methods have been used previ-
+ously for NER, including Hidden Markov Models, and more
+recently Maximum Entropy Markov Models [McCallum et
+al., 2000] and Conditional Random Field (CRF) models [Laf-
+ferty et al., 2001; McCallum and Li, 2003]. Our experiments
+show that LEX outperforms these methods on our task. Semi-
+supervised methods for NER, which leverage untagged data,
+were investigated speciﬁcally in the NER component of the
+CoNLL 2003 shared task [Tjong Kim Sang and De Meulder,
+2003]. While this task was primarily aimed at typical NER
+categories (PERSON, LOCATION, and ORGANIZATION),
+it also encompassed other ”miscellaneous” entities, includ-
+ing nationalities and events. The evaluation corpus consisted
+of high quality newswire text, and offered a relatively small
+untagged corpus (roughly six times the size of the tagged cor-
+pus). Our focus is on leveraging the Web, a vastly larger
+(and lower quality) untagged corpus. Further, our experi-
+ments show that LEX outperforms canonical semi-supervised
+methods on our task. These two distinctions are likely re-
+sponsible for the fact that none of the top performing systems
+in the CoNLL task made proﬁtable use of untagged data, in
+sharp contrast to our experiments in which LEX outperforms
+supervised methods by making crucial use of untagged data.
+Our experiments compared LEX with previous semi-
+supervised methods for NER, including co-training [Collins
+and Singer, 1999; Blum and Mitchell, 1998] and single-view
+bootstrapping.
+In recent work, Li and McCallum used un-
+tagged data to devise context-based word clusters, which
+
+IJCAI-07
+
+2738
+
+were added as features to a supervised CRF algorithm. The
+untagged data was shown to improve performance in part of
+speech tagging and Chinese word segmentation [Li and Mc-
+Callum, 2005]. Also, recently Ando and Zhang developed a
+semi-supervised method for text chunking, based on training
+thousands of classiﬁers on untagged data, and using the com-
+monalities of the classiﬁers to devise relevant features for a
+particular task [Ando and Zhang, 2005]. This method was
+shown to improve performance in named entity delimitation
+on the CoNLL 2003 corpus mentioned above. In contrast to
+LEX, which is simple, the methods in [Li and McCallum,
+2005] and [Ando and Zhang, 2005] are complex. Further,
+neither of these methods have been evaluated on tasks such
+as ours, where entity names are difﬁcult and the target entity
+classes may not be known in advance. Comparing LEX with
+these semi-supervised techniques is an item of future work.
+
+Lastly, the basic insight used in LEX – that named enti-
+ties are a type of MWU – was also employed in [da Silva
+et al., 2004] for an unsupervised entity extraction and clus-
+tering task. In contrast to that work, LEX is a technique for
+semi-supervised named entity delimitation, and we provide
+experiments demonstrating its efﬁcacy over previous work.
+6 Conclusions
+This paper shows that LEX, a simple technique employing
+capitalization cues and lexical statistics, is capable of locat-
+ing names of a variety of classes in Web text. Our exper-
+iments showed that this simple technique outperforms stan-
+dard supervised and semi-supervised approaches for named
+entity recognition in cases where entity names are complex,
+and entity classes are not known in advance.
+
+Google’s recent release to the research community of a
+trillion-word n-gram model makes LEX practical at Web
+scale. Evaluating LEX in a large-scale experiment is an im-
+portant item of future work. Further, although the statisti-
+cal approach performed well in our experiments, it remains
+the case that textual features are valuable clues in identify-
+ing names—investigating ways to utilize both lexical statis-
+tics and textual features simultaneously is a natural next step.
+Finally, further investigation into leveraging improved Web
+entity location to enhance applications such as Web search,
+information extraction, and question answering is an impor-
+tant item of future work.
+Acknowledgments
+We thank Michele Banko, Charles Downey, Jonathan Pool,
+and Stephen Soderland for helpful comments. This re-
+search was supported in part by NSF grants IIS-0535284 and
+IIS-0312988, DARPA contract NBCHD030010, ONR grant
+N00014-02-1-0324 as well as gifts from Google, and carried
+out at the University of Washington’s Turing Center. The
+ﬁrst author was supported by a Microsoft Research Fellow-
+ship sponsored by Microsoft Live Labs.
+References
+[Ando and Zhang, 2005] R Ando and T Zhang. A high-
+performance semi-supervised learning method for text
+chunking. In Proc. of ACL, 2005.
+
+[Banko, 2002] M. Banko. Askmsr: Question answering us-
+
+ing the worldwide web. In Proc. of EMNLP, 2002.
+
+[Blum and Mitchell, 1998] A. Blum and T. Mitchell. Com-
+bining Labeled and Unlabeled Data with Co-Training. In
+Proc. of COLT, 1998.
+
+[Cohen, 2004] W. W. Cohen.
+
+Minorthird: Methods
+for identifying names and ontological relations in text
+using heuristics for
+inducing regularities from data,
+http://minorthird.sourceforge.net, 2004.
+
+[Collins and Singer, 1999] M. Collins and Y. Singer. Unsu-
+pervised Models for Named Entity Classiﬁcation. In Proc.
+of EMNLP/VLC, 1999.
+
+[da Silva and Lopes, 1999] J. Ferreira da Silva and G. P.
+Lopes. A local maxima method and a fair dispersion nor-
+malization for extracting multi-word units from corpora.
+In Sixth Meeting on Mathematics of Language, 1999.
+
+[da Silva et al., 2004] J. Ferreira da Silva, Z. Kozareva,
+V. Noncheva, and G. P. Lopes. Extracting named entities.
+a statistical approach. In TALN 2004, 2004.
+
+[Etzioni et al., 2005] O. Etzioni, M. Cafarella, D. Downey,
+S. Kok, A. Popescu, T. Shaked, S. Soderland, D. Weld,
+and A. Yates. Unsupervised named-entity extraction from
+the web: An experimental study. Artiﬁcial Intelligence,
+165(1), 2005.
+
+[Grishman and Sundheim, 1996] R. Grishman and B. Sund-
+heim. Message understanding conference- 6: A brief his-
+tory. In Proc. of COLING, 1996.
+
+[Lafferty et al., 2001] J. Lafferty, A. McCallum,
+
+and
+Conditional random ﬁelds: Probabilistic
+In
+
+F. Pereira.
+models for segmenting and labeling sequence data.
+Proc. of ICML, 2001.
+
+[Li and McCallum, 2005] W Li and A McCallum. Semi-
+supervised sequence modeling with syntactic topic mod-
+els. In Proc. of AAAI, 2005.
+
+[Manning and Sch¨utze, 1999] C.
+
+and
+Foundations of Statistical Natural Lan-
+
+D. Manning
+
+H. Sch¨utze.
+guage Processing. 1999.
+
+[McCallum and Li, 2003] A. McCallum and W. Li. Early re-
+sults for named entity recognition with conditional random
+ﬁelds. In Proc. of CoNLL, 2003.
+
+[McCallum et al., 2000] A. McCallum, D. Freitag, and
+F. Pereira. Maximum entropy Markov models for infor-
+mation extraction and segmentation.
+In Proc. of ICML,
+2000.
+
+[Pasca, 2004] M. Pasca. Acquisition of categorized named
+
+entities for web search. In Proc. of CIKM, 2004.
+
+[Schone and Jurafsky, 2001] P. Schone and D. Jurafsky.
+
+Is
+knowledge-free induction of multiword unit dictionary
+headwords a solved problem? In Proc. of EMNLP, 2001.
+Tjong
+Kim Sang and F. De Meulder.
+Introduction to the
+conll-2003 shared task: Language-independent named
+entity recognition. In Proc. of CoNLL, 2003.
+
+[Tjong Kim Sang and De Meulder, 2003] E.
+
+IJCAI-07
+
+2739
+
+
