@@ -1,0 +1,546 @@
+Point-based value iteration: An anytime algorithm for POMDPs 
+
+Joelle Pineau, Geoff Gordon and Sebastian Thrun 
+
+Carnegie Mellon University 
+
+Robotics Institute 
+5000 Forbes Avenue 
+Pittsburgh, PA 15213 
+
+{jpineau,ggordon,thrun}@cs.cmu.edu 
+
+Abstract 
+
+This paper introduces the Point-Based Value Iteration 
+(PBVI) algorithm for POMDP planning.  PBVI approx(cid:173)
+imates an exact value iteration solution by selecting a 
+small set of representative belief points and then tracking 
+the value and its derivative for those points only. By us(cid:173)
+ing stochastic trajectories to choose belief points, and by 
+maintaining only one value hyper-plane per point, PBVI 
+successfully solves large problems: we present results on 
+a robotic laser tag problem as well as three test domains 
+from the literature. 
+
+Introduction 
+
+1 
+The  value  iteration  algorithm  for planning  in  partially  ob(cid:173)
+servable  Markov decision  processes  (POMDPs)  was  intro(cid:173)
+duced in the  1970s [Sondik,  1971].  Since its  introduction 
+numerous authors have  refined  it  [Cassandra et al>  1997; 
+Kaelbling et a/., 1998; Zhang and Zhang, 2001] so that it can 
+solve harder problems. But, as the situation currently stands, 
+POMDP value iteration algorithms are widely believed not to 
+be able to scale to real-world-sized problems. 
+
+There are two distinct but interdependent reasons for the 
+limited scalability of POMDP value iteration algorithms. The 
+more widely-known reason is the so-called curse of dimen(cid:173)
+sionality [Kaelbling et al.% 1998]: in a problem with n phys(cid:173)
+ical states, POMDP planners must reason about belief states 
+in an (n - l)-dimensional continuous space.  So, naive ap(cid:173)
+proaches like discretizing the belief space scale exponentially 
+with the number of states. 
+
+The less-well-known reason for poor scaling behavior is 
+what we will call the curse of history:  POMDP value iter(cid:173)
+ation is in many ways like breadth-first search in the space 
+of belief states.  Starting  from  the empty history,  it grows 
+a set of histories (each corresponding to a reachable belief) 
+by simulating the POMDP. So, the number of distinct action-
+observation histories considered grows exponentially with the 
+planning horizon. Various clever pruning strategies [Littman 
+et al„  1995; Cassandra et al%  1997] have been proposed to 
+whittle down the set of histories considered, but the pruning 
+steps are usually expensive and seem to make a difference 
+only in the constant factors rather than the order of growth. 
+
+The two curses, history and dimensionality, are related: the 
+higher the dimension of a belief space, the more room it has 
+
+for distinct histories.  But, they can act independently: plan(cid:173)
+ning complexity can grow exponentially with horizon even 
+in  problems with  only  a  few  states,  and problems  with  a 
+large number of physical states may still only have a small 
+number of relevant histories. 
+In  most  domains,  the  curse 
+of history affects POMDP value iteration far more strongly 
+than  the  curse  of dimensionality  [Kaelbling  et  al.9  1998; 
+Zhou and Hansen, 2001]. That is, the number of distinct his(cid:173)
+tories which the algorithm maintains is a far better predictor 
+of running time than is the number of states. The main claim 
+of this paper is that, if we can avoid the curse of history, there 
+are many real-world POMDPs where the curse of dimension(cid:173)
+ality is not a problem. 
+
+Building on this insight, we present Point-Based Value It(cid:173)
+eration  (PBVI),  a new  approximate POMDP planning al(cid:173)
+gorithm.  PBVI  selects  a small  set of representative belief 
+points and iteratively applies value updates to those points. 
+The point-based update  is  significantly more efficient than 
+an exact update (quadratic vs. exponential), and because it 
+updates both value and value gradient, it generalizes better 
+to unexplored beliefs than interpolation-type grid-based ap(cid:173)
+proximations which only update the value [Lovejoy,  1991; 
+Brafman, 1997; Hauskrecht, 2000; Zhou and Hansen, 2001; 
+Bonet, 2002]). In addition, exploiting an insight from policy 
+search methods and MDP exploration [Ng and Jordan, 2000; 
+Thrun, 1992], PBVI uses explorative stochastic trajectories to 
+select belief points, thus reducing the number of belief points 
+necessary to  find  a good  solution  compared to earlier ap(cid:173)
+proaches.  Finally, the theoretical analysis of PBVI included 
+in this paper shows that it is guaranteed to have bounded error. 
+This  paper  presents  empirical  results  demonstrating  the 
+successful  performance  of the  algorithm  on  a  large  (870 
+states)  robot domain called  Tag,  inspired by  the game of 
+lasertag. This is an order of magnitude larger than other prob(cid:173)
+lems commonly used to test scalable POMDP algorithms. In 
+addition, we include results for three well-known POMDPs, 
+where PBVI  is able to match (in control quality,  but with 
+fewer belief points) the performance of earlier algorithms. 
+2  An overview of POMDPs 
+The POMDP  framework is  a  generalized model  for plan(cid:173)
+ning under uncertainty [Kaelbling etal, 1998; Sondik, 1971]. 
+A POMDP can be represented using the following n-tuple: 
+where 5 is a (finite) set of discrete 
+
+PROBABILISTIC  PLANNING 
+
+1025 
+
+In practice, many of the vectors in the final set V may be 
+completely dominated by another vector 
+or by a combination of other vectors.  Those vectors can be 
+pruned away without affecting the solution.  Finding dom(cid:173)
+inated vectors can be expensive (checking whether a single 
+vector is dominated requires solving a linear program), but is 
+usually worthwhile to avoid an explosion of the solution size. 
+To better understand the complexity of the exact update, let 
+
+tance of pruning away unnecessary vectors is clear.  It also 
+highlights the impetus for approximate solutions. 
+3  Point-based value iteration 
+It is a well understood fact that most POMDP problems, even 
+given arbitrary action and observation sequences of infinite 
+length, are unlikely to reach most of the points in the belief 
+simplex.  Thus it seems unnecessary to plan equally for all 
+beliefs, as exact algorithms do, and preferable to concentrate 
+planning on most probable beliefs. 
+
+The point-based value iteration (PBVI) algorithm solves a 
+
+POMDP for a finite set of belief points 
+It initializes a separate a-vector for each selected point, and 
+repeatedly updates (via value backups) the value of that a-
+vector. As shown in Figure 1, by maintaining a full a-vector 
+for each belief point, PBVI preserves the piece-wise linear(cid:173)
+ity and convexity of the value function, and defines a value 
+function over the entire belief simplex.  This is  in contrast 
+to grid-based approaches  [Lovejoy,  1991; Brafman,  1997; 
+Hauskrecht, 2000; Zhou and Hansen, 2001; Bonet, 2002], 
+which update only the value at each belief grid point. 
+
+A number of algorithms have been proposed to implement 
+this backup by directly manipulating a-vectors, using a com(cid:173)
+bination  of set  projection  and  pruning operations  fSondik, 
+1971;  Cassandra  et  ai,  1997;  Zhang  and  Zhang,  2001]. 
+We now describe the most straight-forward version of exact 
+POMDP value iteration. 
+
+Figure 1: POMDP value function representation using PBVI (on the 
+left) and a grid (on the right). 
+
+The complete PBVI algorithm is designed as an anytime 
+algorithm, interleaving steps of value iteration and steps of 
+belief set expansion. It starts with an initial set of belief points 
+for which it applies a first series of backup operations. It then 
+grows the set of belief points, and finds a new solution for the 
+expanded set.  By interleaving value backup iterations with 
+
+1026 
+
+PROBABILISTIC  PLANNING 
+
+expansions of the belief set, PB VI offers a range of solutions, 
+gradually trading off computation time and solution quality. 
+We now describe how we can efficiently perform point-based 
+value backups and how we select belief points. 
+
+3.1  Point-based value backup 
+To  plan  for a finite  set  of belief points 
+backup operator 
+lief point is maintained. For a point-based update 
+we start by creating projections (exactly as in Eqn 
+
+such that only one 
+
+we modify the 
+vector per be(cid:173)
+
+Next, the cross-sum operation (Eqn 6) is much simplified by 
+the fact that we are now operating over a finite set of points. 
+We construct 
+
+(9) 
+
+Finally, we find the best action for each belief point (Step 3): 
+(10) 
+
+is  limited  to containing only 
+
+When performing point-based updates, the backup creates 
+projections as in exact VI. However the final so(cid:173)
+components (in 
+lution 
+Thus a full point-based value up(cid:173)
+time 
+date takes only polynomial time, and even more crucial, the 
+size of the solution set 
+remains constant.  As a result, the 
+pruning of a vectors (and solving of linear programs), so cru(cid:173)
+cial in exact POMDP algorithms, is now unnecessary.  The 
+only pruning step is to refrain from adding to V any vector 
+already included, which arises when two nearby belief points 
+support the same vector 
+
+In problems with a finite horizon /i, we run h value backups 
+before expanding the set of belief points.  In infinite-horizon 
+problems, we select the horizon so that 
+
+3.2  Belief point set expansion 
+As explained above, PBVI focuses its planning on relevant 
+beliefs.  More specifically, our error bound below suggests 
+that PBVI performs best when its belief set is uniformly dense 
+in the set of reachable beliefs.  So, we initialize the set B to 
+and expand B by greedily choos(cid:173)
+contain the initial belief 
+ing new reachable beliefs that improve the worst-case density 
+as rapidly as possible. 
+
+The last inequality holds because each a-vector represents 
+the reward achievable starting from some state and following 
+some sequence of actions and observations. 
+
+2Thc actual choice of norm doesn't appear to matter in practice; 
+some of our experiments below used Euclidean distance (instead of 
+L\) and the results appear identical. 
+
+3We experimented with other strategies such as adding a fixed 
+number of new beliefs, but since value iteration is much more ex(cid:173)
+pensive than belief computation the above algorithm worked best. If 
+desired, we can impose a maximum size on B based on time con(cid:173)
+straints or performance requirements. 
+
+4If not all beliefs are reachable, we don't need to sample all of 
+densely,  but  replace  by the set of reachable beliefs  below. The 
+error bounds and convergence results hold on 
+
+PROBABILISTIC  PLANNING 
+
+1027 
+
+4  Experimental results 
+The domain of Tag is based on the popular game of lasertag. 
+The goal is to search for and tag a moving opponent [Rosen-
+crantz  et  al,  2003].  Figure  2a  shows  the  live  robot  as  it 
+moves  in  to capture an  opponent.  In  our POMDP formula(cid:173)
+tion,  the opponent moves stochastically according to a fixed 
+policy. The spatial configuration of the domain used for plan(cid:173)
+ning  is  illustrated  in  Figure  2b.  This domain  is an order of 
+magnitude larger (870 states) than mosr other POMDP prob(cid:173)
+lems considered thus far in the literature  [Cassandra,  1999], 
+and is proposed as a new challenge for fast, scalable, POMDP 
+algorithms.  A single iteration of optimal value iteration on a 
+problem of this size could produce over 1020 a-vectors before 
+pruning. 
+
+Figure 2: Tag domain (870 states, 5 actions, 30 observations) 
+
+The  state  space  is  described  by  the  cross-product  of 
+
+a
+
+nd  Opponent  — 
+
+two 
+
+features,  Robot  =
+
+Bom  agenis  siart  in  independently-
+selected  random  positions,  and  the  game  finishes  when 
+Opponent 
+The robot can select from five actions: 
+{North,  South,  East,  West,  lag}.  A reward of -1  is imposed 
+for each motion  action;  the  Tag  action results  in  a +10 re(cid:173)
+ward  if Robot  =  Opponent,  or  - 10  otherwise.  Throughout 
+the game, the Robot's position is fully observable, and the ef(cid:173)
+fect of a Move action has the predictable deterministic effect, 
+e.g.: 
+
+The position of the opponent is completely unobservable un(cid:173)
+less both agents are in  the same cell.  At each step,  the op(cid:173)
+ponent  (with  omniscient  knowledge)  moves  away  from  the 
+robot with  Pr  =  0.8 and stays  in place  with  Pr  =  0.2, e.g.: 
+
+Figure 3  shows the performance of PBV1 on  the Tag do(cid:173)
+main.  Results  are  averaged  over  10  runs  of the  algorithm, 
+times  100 different (randomly chosen) start positions for each 
+run. 
+It  shows  the  gradual  improvement  in  performance  as 
+samples are added (each shown data point represents a new 
+expansion of the belief set with value backups). In addition to 
+PBVI, we also apply the QMDP approximation as a baseline 
+
+domains.  In the Tag domain, however, it lacks the represen(cid:173)
+tational power to compute a good policy. 
+
+5  Additional experiments 
+5.1  Comparison  on  well-known  problems 
+To  further  analyze  the  performance of PBVI,  we  applied  it 
+to  three  well-known  problems  from  the  POMDP  literature. 
+We selected Maze33, Hallway and Hallway 2 because they arc 
+commonly used to test scalable POMDP algorithms [Littman 
+etal,  1995; Brafman,  1997; Poon, 2001 J.  Figure 3 presents 
+results for each domain.  Replicating earlier experiments, re(cid:173)
+sults for Maze33 arc averaged over 151  runs (reset after goal, 
+terminate after 500 steps);  results  for Hallway and Hallway2 
+are averaged over 251 runs (terminate at goal, max 251 steps). 
+In  all  cases,  PBVI  is  able  to  find  a  good  policy.  Table  1 
+compares PBVl's performance with previously published re(cid:173)
+sults, comparing goal completion rates, sum of rewards, pol(cid:173)
+icy  computation  time,  and  number of required  belief points. 
+In all domains, PBVI  achieves competitive performance, but 
+with fewer samples. 
+
+5.2  Validation  of the  belief set  expansion 
+To  further  investigate  the  validity  of our  approach  for  gen(cid:173)
+erating  new  belief  states  (Section  3.2),  we  compared  our 
+approach  with  three  other  techniques  which  might  appear 
+promising.  In  all  cases,  we  assume that the  initial  belief b0 
+(given as part of the model) is the sole point in the initial set, 
+and consider four expansion methods: 
+1.  Random  (RA) 
+2.  Stochastic Simulation with Random Action (SSRA) 
+3.  Stochastic Simulation with Greedy Action (SSGA) 
+4.  Stochastic Simulation with Explorative Action  (SSEA) 
+The  RA  method  consists  of sampling  a  belief point  from  a 
+uniform distribution over the entire belief simplex.  SSEA  is 
+the standard PBVI expansion heuristic (Section  3.2).  SSRA 
+similarly uses single-step forward simulation, but rather than 
+try all actions,  it randomly selects one and automatically ac(cid:173)
+cepts the posterior belief unless it was  already  in  B.  Finally, 
+SSGA uses the most recent value function solution to pick the 
+greedy action at the given belief 6, and performs a single-step 
+simulation to get a new belief 
+
+We  revisited  the  Hallway,  Hallway2,  and  Tag  problems 
+from sections 4 and 5.1  to compare the performance of these 
+
+1028 
+
+PROBABILISTIC  PLANNING 
+
+Figure 3: PBVI performance for four problems: Tag(left), Maze33(center-left), Hallway(center-right) and Hallway2(right) 
+
+restricting value updates to a finite set of (reachable) beliefs. 
+There are several approximate value iteration algorithms 
+which are related to PBVI. For example, there are many grid-
+based methods which iteratively update the values of discrete 
+belief points.  These methods differ in how they partition the 
+belief space into a grid [Brafman, 1997; Zhou and Hansen, 
+2001]. 
+
+More similar to PBVI are those approaches which update 
+both the value and gradient at each grid point [Lovejoy, 1991; 
+Hauskrecht, 2000; Poon, 2001]. While the actual point-based 
+update is essentially the same between all of these, the over(cid:173)
+all  algorithms differ  in  a  few  important  aspects.  Whereas 
+Poon only accepts updates that increase the value at a grid 
+point (requiring special initialization of the value function), 
+and Hauskrecht always keeps earlier a-vectors (causing the 
+set to grow too quickly), PBVI requires no such assumptions. 
+A more important benefit of PBVI is the theoretical guaran(cid:173)
+tees it provides:  our guarantees are more widely applicable 
+and provide stronger error bounds than those for other point-
+based updates. 
+
+In  addition,  PBVI  is  significantly  smarter than  previous 
+algorithms about how it selects belief points.  PBVI selects 
+only reachable beliefs; other algorithms use random beliefs, 
+or (like Poon's and Lovejoy's) require the inclusion of a large 
+number of fixed beliefs such as the corners of the probabil(cid:173)
+ity simplex. Moreover, PBVI selects belief points which im(cid:173)
+prove its error bounds as quickly as possible. In practice, our 
+experiments on the large domain of lasertag demonstrate that 
+PBVFs belief-selection rule handily outperforms several al(cid:173)
+ternate methods.  (Both Hauskrecht and Poon did consider 
+using stochastic simulation to generate new points, but nei(cid:173)
+ther found simulation to be superior to random point place(cid:173)
+ments. We attribute this result to the smaller size of their test 
+domains. We believe that as more POMDP research moves to 
+larger planning domains, newer and smarter belief selection 
+rules will become more and more important.) 
+
+Gradient-based policy search methods have also been used 
+to  optimize POMDP  solutions  [Baxter and  Bartlett,  2000; 
+Kearns et al, 1999; Ng and Jordan, 2000], successfully solv(cid:173)
+ing  multi-dimensional,  continuous-state  problems. 
+In  our 
+view, one of the strengths of these methods lies in the fact 
+that they restrict optimization to reachable beliefs (as does 
+PBVI). Unfortunately, policy search techniques can be ham(cid:173)
+pered by low-gradient plateaus and poor local minima, and 
+typically require the selection of a restricted policy class. 
+
+Table 1: Results for POMDP domains. Those marked were com(cid:173)
+puted by us; other results were likely computed on different plat(cid:173)
+forms, and therefore time comparisons may be approximate at best. 
+All results assume a standard (not lookahead) controller. 
+
+four heuristics. For each problem we apply PBVI using each 
+of the belief-point selection heuristics, and include the QMDP 
+approximation as a baseline comparison. Figure 4 shows the 
+computation time versus the reward performance for each do(cid:173)
+main. 
+
+The key result from Figure 4 is the rightmost panel, which 
+shows performance on the largest, most complicated domain. 
+In  this  domain  our  SSEA  rule  clearly  performs  best. 
+In 
+smaller domains (left two panels) the choice of heuristic mat(cid:173)
+ters less:  all heuristics except random exploration (RA) per(cid:173)
+form equivalently well. 
+
+6  Related work 
+Significant work has been done in recent years to improve 
+the tractability of POMDP solutions.  A number of increas(cid:173)
+ingly  efficient  exact  value  iteration  algorithms  have  been 
+proposed  [Cassandra et  al.,  1997;  Kaelbling  et  al.,  1998; 
+Zhang and Zhang, 2001]. They are successful in finding op(cid:173)
+timal solutions, however are generally limited to very small 
+problems (a dozen states) since they plan optimally for all 
+beliefs.  PBVI avoids the exponential growth in plan size by 
+
+PROBABILISTIC  PLANNING 
+
+1029 
+
+Figure 4:  Belief expansion results for three problems:  Hallway(left), Hallway2(center) and Tag(right) 
+
+7  Conclusion 
+This  paper  presents  P B V I,  a  scalable  anytime  algorithm  for 
+approximately  solving  POMDPs.  We  applied  PBVI  to  a 
+robotic  version  of  lasertag,  where  it  successfully  developed 
+a  policy  for  capturing  a  moving  opponent.  Other  POMDP 
+solvers had trouble computing useful policies for this domain. 
+PBVI  also  compared  favorably  with  other  solvers  on  three 
+well-known  smaller  test  problems.  We  attribute  PBVI's  suc(cid:173)
+cess  to  two  features,  both  of  which  directly  target  the  curse 
+of history.  First,  by  using  a  trajectory-based  approach  to  se(cid:173)
+lect  belief  points,  P B VI  focuses  planning  on  reachable  be(cid:173)
+liefs.  Second,  because  it  uses  a  fixed  set  of belief points,  it 
+can  perform fast value backups. 
+
+In  experiments,  P B VI  beats  back  the  curse  of  history  far 
+enough  that  we  can  solve  POMDPs  an  order  of  magnitude 
+larger  than  most  previous  algorithms.  With  this  success,  we 
+can  now  identify  the  next  hurdle  for  POMDP  research:  con(cid:173)
+trary  to  our  expectation,  it  turns  out  to  be  the  old-fashioned 
+M DP  problem  of  having  too  many  distinct  physical  states. 
+This  problem  hits  us  in  the  cost  of  updating  the  point-based 
+value  function  vectors. 
+(This  cost  is  quadratic  in  the  num(cid:173)
+ber  of physical  states.)  While  this  problem  is  not  necessar(cid:173)
+ily easy  to overcome, we  believe  that sparse  matrix  computa(cid:173)
+tions,  together  with  other  approaches  from  the  existing  liter(cid:173)
+ature  [Poupart  and  Boutilier,  2003;  Roy  and  Gordon,  2003], 
+will  allow  us  to  to  scale  P B VI  to  problems  which  are  at  least 
+another  order  of  magnitude  larger.  So,  P B VI  represents  a 
+considerable  step  towards  making  POMDPs  usable  for  real-
+world  problems. 
+
+References 
+[Baxter and Bartlett, 2000)  J. Baxter and P. L. Bartlett.  Reinforce(cid:173)
+ment  learning  on  POMDPs via direct  gradient  ascent.  In  ICML, 
+2000. 
+
+[Bonet, 2002]  B. Bonet.  An c-optimal grid-based algorithm for par(cid:173)
+
+tially obserable  Markov decision  processes.  In ICML, 2002. 
+
+[Brafman,  1997]  R.  I.  Brafman.  A  heuristic variable grid  solution 
+
+method for POMDPs.  In AAAI,  1997. 
+
+[Cassandra etai,  1997]  A.  Cassandra,  M.  Littman,  and  N.  Zhang. 
+Incremental  pruning:  A  simple,  fast,  exact  method  for partially 
+observable Markov decision processes.  In  UAI,  1997. 
+
+[Cassandra,  1999]  A.  Cassandra.  Tony's  POMDP  page,  http:// 
+
+www.cs.brown.edu/research/ai/pomdp/codc/index.html,  1999. 
+
+[Hauskrecht, 2000]  M. Hauskrccht.  Value-function approximations 
+for  partially  observable  Markov  decision  processes.  Journal  of 
+Artificial  Intelligence  Research,  13:33-94,  2000. 
+
+[Kaelblinge'/fl/.,  1998]  L.  P.  Kaclbling,  M.  L.  Littman,  and A.  R. 
+Cassandra.  Planning and acting in partially observable stochastic 
+domains.  Artificial Intelligence,  101:99-134,  1998. 
+
+[Kearns et al., 1999]  M.  Kearns,  Y.  Mansour,  and  A.  Y.  Ng.  Ap(cid:173)
+proximate  planning  in  large  POMDPs  via  reusable  trajectories. 
+NIPS 12, 1999. 
+
+[Littman et al,  1995]  M.  L.  Littman,  A.  R.  Cassandra,  and  L.  P. 
+Kaelbling.  Learning  policies  for  partially  obsevable  environ(cid:173)
+ments:  Scaling up.  In ICML,  1995. 
+
+[Lovejoy,  1991]  W.  S.  Lovejoy.  Computationally  feasible  bounds 
+for  partially  observed  Markov  decision  processes.  Operations 
+Research, 39(1): 162-175, 1991. 
+
+[Ng and Jordan, 2000]  A. Y. Ng and M. Jordan.  PEGASUS: A pol(cid:173)
+icy search method for large MDPs and POMDPs.  In  UAL 2000. 
+[Poon, 2001]  K.-M.  Poon.  A fast  heuristic  algorithm for decision-
+theoretic  planning.  Master's  thesis,  The Hong-Kong  University 
+of Science and Technology, 2001. 
+
+[Poupart and Boutilier, 2003]  P.  Poupart  and  C.  Boutilier.  Value-
+
+directed compression of POMDPs.  In NIPS 15, 2003. 
+
+[Rosencrantz etai, 2003]  M.  Rosencrantz,  G.  Gordon, 
+
+and 
+S.  Thrun.  Locating moving entities  in dynamic  indoor environ(cid:173)
+ments with teams of mobile robots.  In AAMAS, 2003. 
+
+[Roy and Gordon, 20031  N. Roy and G. Gordon.  Exponential fam(cid:173)
+ily PCA for belief compression  in POMDPs.  In NIPS 15, 2003. 
+[Sondik,  1971]  E.  J.  Sondik.  The  Optimal  Control of Partially  Ob(cid:173)
+servable  Markov  Processes.  PhD  thesis,  Stanford  University, 
+1971. 
+
+[Thrun,  1992]  S.  Thrun.  Handbook for Intelligent  Control:  Neural, 
+Fuzzy and Adaptive Approaches, chapter The Role of Exploration 
+in Learning Control.  Van Nostrand Reinhold,  1992. 
+
+[Zhang and Zhang, 2001]  N. L. Zhang and W. Zhang.  Speeding up 
+the convergence of value iteration in partially observable Markov 
+decision  processes.  Journal  of Artificial  Intelligence  Research, 
+14:29-51,2001. 
+
+[Zhou and Hansen, 2001]  R. Zhou and E. A. Hansen.  An improved 
+In  IJCAI, 
+
+grid-based  approximation  algorithm  for  POMDPs. 
+2001. 
+
+1030 
+
+PROBABILISTIC  PLANNING 
+
+

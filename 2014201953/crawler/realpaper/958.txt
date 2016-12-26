@@ -1,0 +1,1072 @@
+MB-DPOP: A New Memory-Bounded Algorithm for Distributed Optimization
+
+Ecole Polytechnique F´ed´erale de Lausanne (EPFL), CH-1015 Lausanne (Switzerland)
+
+email: {adrian.petcu, boi.faltings}@epﬂ.ch
+
+Adrian Petcu and Boi Faltings
+
+Abstract
+
+dynamic
+
+distributed
+
+combinatorial
+
+optimization
+In
+problems,
+programming algorithms
+like DPOP ([Petcu and Faltings, 2005]) require
+only a linear number of messages, thus generating
+low communication overheads. However, DPOP’s
+memory requirements are exponential
+in the
+induced width of the constraint graph, which may
+be prohibitive for problems with large width.
+We present MB-DPOP, a new hybrid algorithm that
+can operate with bounded memory.
+In areas of
+low width, MB-DPOP operates like standard DPOP
+(linear number of messages). Areas of high width
+are explored with bounded propagations using the
+idea of cycle-cuts [Dechter, 2003].
+We introduce novel DFS-based mechanisms for
+determining the cycle-cutset, and for grouping
+cycle-cut nodes into clusters. We use caching
+([Darwiche, 2001]) between clusters to reduce the
+complexity to exponential in the largest number of
+cycle cuts in a single cluster.
+We compare MB-DPOP with ADOPT [Modi
+et al., 2005],
+in
+distributed search with bounded memory. MB-
+DPOP consistently outperforms ADOPT on 3
+problem domains, with respect
+to 3 metrics,
+providing speedups of up to 5 orders of magnitude.
+
+the current state of the art
+
+1 Introduction
+
+control,
+
+planning,
+
+optimal process
+
+Constraint
+satisfaction and optimization are powerful
+paradigms that can model a wide range of tasks like
+scheduling,
+etc.
+Traditionally, such problems were gathered into a single
+place, and a centralized algorithm was applied to ﬁnd
+a solution. However, problems are sometimes naturally
+distributed, so Distributed Constraint Satisfaction (DisCSP)
+was formalized in [Yokoo et al., 1992]. These problems are
+divided between a set of agents, which have to communicate
+among themselves to solve them. Complete algorithms like
+ADOPT, DPOP and OptAPO have been introduced.
+
+ADOPT [Modi et al., 2005] is a backtracking based
+It operates completely
+
+bound propagation mechanism.
+
+decentralized, and asynchronously.
+It requires polynomial
+memory, but it may produce a very large number of small
+messages, resulting in large communication overheads.
+
+OptAPO [Mailler and Lesser, 2005] is a centralized-
+distributed hybrid that uses mediator nodes to centralize
+subproblems and solve them in dynamic and asynchronous
+mediation sessions. The authors show that its message
+complexity is signiﬁcantly smaller than ADOPT’s. However,
+it
+is possible that several mediators solve overlapping
+problems, thus needlessly duplicating effort. This has been
+shown in [Petcu and Faltings, 2006] to cause scalability
+problems for OptAPO, especially on dense problems.
+
+DPOP [Petcu and Faltings, 2005] is a complete algorithm
+based on dynamic programming which generates only a
+linear number of messages. However, DPOP is time and
+space exponential in the induced width of the problem.
+Therefore,
+the
+messages generated in high-width areas get large, therefore
+requiring exponential communication and memory.
+
+for problems with high induced width,
+
+This paper introduces MB-DPOP, a new hybrid algorithm
+that is controlled by a parameter k which characterizes the
+amount of available memory. MB-DPOP is a tradeoff of the
+linear number of messages of DPOP for polynomial memory.
+The rest of this paper is structured as follows: Section 2
+introduces the distributed optimization problem. Section 3
+presents the DPOP algorithm, which is extended to the MB-
+DPOP(k) hybrid in Section 4. Section 5 shows the efﬁciency
+of this approach with experiments on distributed meeting
+scheduling problems. Section 6 discusses related work, and
+Section 7 concludes.
+
+2 Deﬁnitions and Notation
+
+Deﬁnition 1 (DCOP) A discrete
+optimization problem (DCOP) is a tuple < X , D, R >:
+
+distributed
+
+constraint
+
+• X = {X1, ..., Xn} is a set of variables
+• D = {d1, ..., dn} is a set of ﬁnite variable domains
+• R = {r1, ..., rm} is a set of relations, where a relation
+), ri :
+ri is any function with the scope (Xi1
+→ R, which denotes how much utility is
+di1
+assigned to each possible combination of values of the
+involved variables. Negative utilities mean cost. 1
+
+× .. × dik
+
+, · · · , Xik
+
+1Hard constraints (that explicitly forbid/enforce certain value
+
+IJCAI-07
+
+1452
+
+instances of
+
+DCOPs are multiagent
+
+the valued CSP
+framework, where each variable and constraint is owned by
+an agent. The goal is to ﬁnd a complete instantiation X ∗
+for the variables Xi that maximizes the sum of utilities of
+individual relations.
+
+A simplifying assumption [Yokoo et al., 1992] is that each
+agent controls a virtual agent for each one of the variables Xi
+that it owns. To simplify the notation, we use Xi to denote
+either the variable itself, or its (virtual) agent.We also assume
+here only unary and binary relations 2
+
+2.1 Depth-First Search Trees (DFS)
+MB-DPOP works on a DFS traversal of the problem graph.
+
+Deﬁnition 2 (DFS tree) A DFS arrangement of a graph G is
+a rooted tree with the same nodes and edges as G and the
+property that adjacent nodes from the original graph fall in
+the same branch of the tree (e.g. X0 and X12 in Figure 1).
+
+DFS trees have already been investigated as a means to
+boost search [Freuder, 1985; Dechter, 2003]. Due to the
+relative independence of nodes lying in different branches of
+the DFS tree, it is possible to perform search in parallel on
+independent branches, and then combine the results.
+
+Figure 1 shows an example DFS tree that we shall refer to
+in the rest of this paper. We distinguish between tree edges,
+shown as solid lines (e.g. X1 − X2), and back edges, shown
+as dashed lines (e.g. 12 − 8, 4 − 0).
+Deﬁnition 3 (DFS concepts) Given a node Xi, we deﬁne:
+
+• parent Pi
+
+/ children Ci:
+
+deﬁnitions (e.g. P4 = X2, C0 = {X1, X8}).
+
+these are the obvious
+
+• pseudo-parents P Pi are Xi’s ancestors directly
+
+connected to Xi through back-edges (P P5 = {X0}).
+
+• pseudo-children P Ci are Xi’s descendants directly
+
+connected to Xi through back-edges (P C1 = {X4}).
+
+• Sepi is the separator of Xi: ancestors of Xi which are
+directly connected with Xi or with descendants of Xi
+(e.g. Sep15 = {X9} and Sep11 = {X0, X8, X9, X10}).
+Removing the nodes in Sepi completely disconnects the
+subtree rooted at Xi from the rest of the problem.
+
+3 DPOP: dynamic programming optimization
+
+The basic utility propagation scheme DPOP has been
+introduced in [Petcu and Faltings, 2005]. DPOP is an
+instance of the general bucket elimination scheme from
+[Dechter, 2003], which is adapted for the distributed case,
+and uses a DFS traversal of the problem graph as an ordering.
+
+DPOP has 3 phases:
+Phase 1 - a DFS traversal of the graph is done using
+a distributed DFS algorithm, like in [Petcu et al., 2006],
+which works for any graph requiring a linear number of
+messages. The outcome is that all nodes consistently label
+
+combinations) can be simulated with soft constraints by assigning
+−∞ to disallowed tuples, and 0 to allowed tuples. Maximizing
+utility thus avoids assigning such value combinations to variables.
+
+2However, all *-DPOP algorithms easily extend to non-binary
+
+constraints, as in [Petcu and Faltings, 2005; Petcu et al., 2006].
+
+each other as parent/child or pseudoparent/pseudochild, and
+edges are identiﬁed as tree/back edges. The DFS tree serves
+as a communication structure for the other 2 phases of the
+algorithm: UTIL messages (phase 2) travel bottom-up, and
+VALUE messages (phase 3) travel top down, only via tree-
+edges.
+
+Phase 2 - UTIL propagation: the agents (starting from the
+leaves) send UTIL messages to their parents. The subtree of a
+node Xi can inﬂuence the rest of the problem only through
+Xi’s separator, Sepi. Therefore, a message contains the
+optimal utility obtained in the subtree for each instantiation
+of Sepi. Thus, messages are size-exponential in the separator
+size (which is in turn bounded by the induced width).
+
+Phase 3 - VALUE propagation top-down, initiated by the
+root, when phase 2 has ﬁnished. Each node determines its
+optimal value based on the computation from phase 2 and
+the VALUE message it has received from its parent. Then, it
+sends this value to its children through VALUE messages.
+
+It has been proved in [Petcu and Faltings, 2005] that DPOP
+produces a linear number of messages.
+Its complexity lies
+in the size of the UTIL messages: the largest one is space-
+exponential in the width of the DFS ordering used.
+
+4 MB-DPOP(k) - bounded inference hybrid
+We introduce the control parameter k which speciﬁes
+the maximal amount of
+inference (maximal message
+dimensionality). This parameter is chosen s.t. the available
+memory at each node is greater than dk
+, (d is the domain
+size).
+
+The algorithm identiﬁes subgraphs of the problem that
+have width higher than k, where it is not possible to perform
+full inference as in DPOP. Each of these areas (clusters) are
+bounded at the top by the lowest node in the tree that has
+separator of size k or less. We call these nodes cluster roots
+(CR).
+
+In such areas, cycle-cut nodes (CC) are identiﬁed such that
+once these are removed, the remaining problem has width k
+or less. Subsequently, in each area all combinations of values
+of the CC nodes are explored using k-bounded DPOP utility
+propagation. Results are cached ([Darwiche, 2001]) by the
+respective cluster roots and then integrated as messages into
+the overall DPOP-type propagation.
+
+If k ≥ w (w is the induced width), full inference is done
+throughout the problem; MB-DPOP is equivalent with DPOP.
+If k = 1, only linear messages are used, and a full cycle
+cutset is determined. MB-DPOP is similar to the AND/OR
+cycle cutset scheme from [Mateescu and Dechter, 2005].
+
+If k < w, M B − DP OP (k) performs full inference in
+areas of width lower than k, and bounded inference in areas
+of width higher than k.
+
+In the following we explain how to determine high-width
+areas and the respective cycle-cuts (Section 4.1) and what
+changes we make to the UTIL and VALUE phases (Section 4.2
+and Section 4.3). The algorithm is described in Algorithm 1.
+
+4.1 MB-DPOP - Labeling Phase
+This is an intermediate phase between the DFS and UTIL
+phases.
+It has the goal to delimit high-width areas, and
+
+IJCAI-07
+
+1453
+
+Figure 1: A problem graph (a) and a DFS tree (b). In low-width areas the normal UTIL propagation is performed. In high width
+areas (shaded clusters C1, C2 and C3 in (b)) bounded UTIL propagation is used. All messages are of size at most dk
+. Cycle-cut
+nodes are in bold (X0, X9, X13), and cluster roots are shaded (X2, X9, X14). In (c) we show a 2-bounded propagation.
+
+identify CC nodes in these areas. We emphasize that this
+process is described as a separate phase only for the sake of
+clarity; these results can be derived with small modiﬁcations
+from either of the original DFS or UTIL phases.
+
+Labeling works bottom-up like the UTIL phase. Each
+j messages from its children Xj,
+, and sends it to its parent
+
+node Xi waits for LABELi
+computes its own label LABELPi
+Pi.
+
+i
+
+A LABELPi
+
+i message is composed of 2 parts:
+separator Sepi of the node, and a list CCi of CC nodes.
+
+the
+
+Each node Xi can easily determine its separator Sepi as
+the union of: (a) separators received from its children, and (b)
+its parent and pseudoparents, minus itself (see Deﬁnition 3).
+Formally, Sepi = ∪Xj ∈Ci
+
+Sepj ∪ Pi ∪ P Pi \ Xi.
+
+The second part of the LABEL message is the list CCi of
+the cycle-cut nodes to send to the parent. Each node computes
+this list through a heuristic function based on the separator
+of the node, and on the lists of cycle-cuts received from the
+children (see next section).
+
+Heuristic labeling of nodes as CC
+Let label(Sepi, CClists, k) be a heuristic function that takes
+as input the separator of a node,
+the lists of cycle-cuts
+received from the children, and an integer k, and it returns
+another list of cycle cutset nodes.
+
+It builds the set Ni = Sepi \ {∪CClists}: these are nodes
+in Xi’s separator that are not marked as CC nodes by Xi’s
+children. If |Ni| > k (too many nodes not marked as CC),
+then it uses any mechanism to select from Ni a set CCnew of
+|Ni|−k nodes, that will be labeled as CC nodes. The function
+returns the set of nodes CCi = ∪CClists ∪ CCnew.
+
+If the separator Sepi of Xi contains more than k nodes,
+then this ensures that enough of them will be labeled as cycle-
+
+cuts, either by the children of Xi or by Xi itself. If |Sepi| ≤
+k, the function simply returns an empty list.
+
+Mechanism 1: highest nodes as CC The nodes in Ni are
+sorted according to their tree-depth (known from the DFS
+phase). Then, the highest |Ni| − k nodes are marked as CC.
+For example, in Fig. 1, let k = 2. Then, Sep12 =
+{X0, X8, X11}, CClists12 = ∅ ⇒ N12 = Sep12 ⇒
+CC12 = {X0} (X0 is the highest among X0, X8, X11)
+
+Mechanism 2: lowest nodes as CC This is the inverse of
+Mechanism 1: the lowest |Ni| − k nodes are marked as CC.
+For example, in Fig. 1, let k = 2. Then, Sep12 =
+{X0, X8, X11}, CClists12 = ∅ ⇒ N12 = Sep12 ⇒
+CC12 = {X11} (X11 is the lowest among X0, X8, X11)
+
+4.2 MB-DPOP - UTIL Phase
+The labeling phase (Section 4.1) has determined the areas
+where the width is higher than k, and the corresponding
+CC nodes. We describe in the following how to perform
+bounded-memory exploration in these areas; anywhere else,
+the original UTIL propagation from DPOP applies.
+
+Memory-Bounded UTIL Propagation
+The labeling phase has identiﬁed the cluster root nodes
+for each high-width area, and furthermore, the roots have
+received the lists of cycle-cutset nodes, as designated by their
+children.
+
+Let Xi be the root of such a cluster. Just like in DPOP, Xi
+creates a U T ILPi
+table that stores the best utilities its subtree
+can achieve for each combination of values of the variables in
+Sepi. Xi’s children Xj that have separators smaller than k
+
+i
+
+IJCAI-07
+
+1454
+
+Algorithm 1: MB-DPOP - memory bounded DPOP.
+
+MB-DPOP(X , D, R, k): each agent Xi does:
+
+Labeling protocol:
+
+1 wait for all LABELi
+2 if |Sepi| ≤ k then
+3
+
+j msgs from children
+
+if ∪CClists (cid:8)= ∅ then label self as CR
+else label self as normal
+CCi ← ∅
+
+4
+
+5
+
+8
+
+9
+
+15
+
+16
+
+17
+
+6 else
+7
+
+let N = Sepi \ ∪CClists
+select a set CCnew of |N | − k nodes from N
+return CCi = CCnew ∪ CClists
+i = [Sepi, CCi] to Pi
+
+10 send LABELPi
+
+UTIL propagation protocol
+
+k messages from all children Xk ∈ C(i)
+11 wait for U T ILi
+12 if Xi = normal node then do UTIL / VALUE as DPOP
+13 else
+14
+
+do propagations for all instantiation of CClists
+if Xi is cluster root then
+
+update UTIL and CACHE for each propagation
+when propagations ﬁnish, send UTIL to parent
+
+VALUE propagation(Xi receives Sep∗
+
+i from Pi)
+
+18 if Xi is cluster root then
+ﬁnd in cache the CC∗
+19
+assign self according to cached value
+send CC∗
+
+20
+
+21
+
+corresponding to Sep∗
+
+i
+
+to nodes in CC via VALUE messages
+
+22 else
+23
+
+24
+
+perform last UTIL with CC nodes assigned to CC∗
+assign self accordingly
+
+25 Send VALUE(Xi ← v∗
+
+i ) to all C(i) and P C(i)
+
+(|Sepj| ≤ k) send Xi normal U T ILi
+Xi waits for these messages, and stores them.
+
+j messages, as in DPOP;
+
+For the children Xj that have a larger separator (|Sepj| >
+k), Xi creates a Cache table with one entry Cache(sepi)
+that corresponds to each particular instantiation of the
+separator, sepi ∈ (cid:11)Sepi(cid:12) (size of the Cache table is thus
+O(exp(|Sepi|))).
+
+Xi then starts exploring through k-bounded propagation
+all its subtrees that have sent non-empty CClists. It does
+this by cycling through all instantiations of the CC variables
+in the cluster. Each one is sent down to its children via a
+context message. Children propagate the context messages
+again to their children that have sent non-empty CClists.
+This propagates only to nodes that have separators larger than
+k, down to the lowest nodes in the cluster that have separators
+larger than k.
+
+The leaves of the cluster then start bounded propagation,
+with the nodes speciﬁed in the context message instantiated
+to their current value. These propagation are guaranteed to
+involve k dimensions or less, and they proceed as in normal
+DPOP, until they reach Xi. Xi then updates the best utility
+values found so far for each sepi ∈ (cid:11)Sepi(cid:12), and also updates
+the cache table with the current instantiation of the CC nodes
+
+in case a better utility was found.
+
+i
+
+When all the instantiations are explored, Xi simply sends
+to its parent the updated U T ILPi
+table that now contains the
+best utilities of Xi’s subtree for all instantiations of variables
+in Sepi, exactly as in DPOP. Pi then continues propagation
+as in normal DPOP; all the complexity of Xi’s processing is
+transparent to it.
+
+let k = 2;
+
+Example In Figure 1,
+
+then C2 =
+{X9, X10, X11, X12, X13} is an area of width higher than 2.
+X9 is the root of C2, as the ﬁrst node (lowest in the tree)
+that has Sepi ≤ k. Using the Mechanism 1 for selecting CC
+nodes, we have X9, X0 as CC in C2. X9 cycles through all
+the instantiations (cid:11)X9, X0(cid:12), and sends its child(ren) context
+messages of the form X9 = a, X0 = b. These messages
+travel to X10, X11, X12 and X13 (no other nodes in the cluster
+have sent non-empty CClists). Upon receiving the context
+messages, X12 and X13 start 2-bounded UTIL propagation
+(X12 with X11 and X8 as dimensions, and X13 with X11 and
+X10 as dimensions).
+
+It is easy to see that using this scheme,
+
+the memory
+requirements are still O(exp(k)) for the propagation, and
+O(exp(|Sep|)) for the cache tables. Since |Sep| ≤ k (see
+section 4.1), overall we observe the memory limit O(exp(k)).
+
+4.3 MB-DPOP - VALUE Phase
+The labeling phase has determined the areas where bounded
+inference must be applied due to excessive width. We will
+describe in the following the processing to be done in these
+areas; outside of these, the original VALUE propagation from
+DPOP applies.
+
+The VALUE message that the root Xi of a cluster receives
+from its parent contains the optimal assignment of all the
+variables in the separator Sepi of Xi (and its cluster).
+Xi retrieves from its cache table the optimal assignment
+corresponding to this particular instantiation of the separator.
+This assignment contains its own value, and the values of
+all the CC nodes in the cluster. Xi informs all the CC
+nodes in the cluster what their optimal values are (via VALUE
+messages).
+
+As the non-CC nodes in the cluster could not have cached
+their optimal values for all instantiations of the CC nodes,
+it follows that a ﬁnal UTIL propagation is required in order
+to re-derive the utilities that correspond to the particular
+instantiation of the CC nodes that was determined to be
+optimal. However, this is not an expensive process, since it
+is a single propagation, with dimensionality bounded by k
+(the CC nodes are instantiated now). Thus, it requires only a
+linear number of messages that are at most exp(k) in size.
+
+Subsequently, outside the clusters, the VALUE propagation
+
+proceeds as in DPOP.
+
+4.4 MB-DPOP(k) - Complexity
+In low-width areas of the problem, MB-DPOP behaves
+exactly as DPOP: it generates a linear number of messages
+that are at most dk
+in size. Clusters are formed where
+the width exceeds k. Let T be such a cluster, let |T | be
+the number of nodes in the cluster, and let |CC(T )| be
+the number of cycle cut nodes in that cluster. MB-DPOP
+executes d|CC(T )|
+k-bounded propagation in that cluster, each
+
+IJCAI-07
+
+1455
+
+ 1e+06
+
+ 100000
+
+)
+s
+m
+
+(
+ 
+
+e
+m
+
+i
+t
+
+n
+u
+R
+
+ 10000
+
+ 1000
+
+ 100
+
+ 10
+
+ADOPT
+MB-DPOP(1)
+MB-DPOP(2)
+MB-DPOP(3)
+MB-DPOP(4)
+MB-DPOP(5)=DPOP
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+ 120
+
+ 140
+
+ 160
+
+ 180
+
+Number of variables
+
+Figure 2: MB-DPOP(k) vs ADOPT - runtime
+
+requiring |T | − 1 messages. The size of these messages is
+bounded by dk
+
+.
+
+Therefore, it is easy to see that the overall time/message
+complexity is O(exp(|CC(Tmax)|)) where Tmax is the
+cluster that has the maximal number of CC nodes.
+Memory requirements are O(exp(k)) by design.
+
+5 Experimental evaluation
+
+We performed experiments on 3 different problem domains3:
+distributed sensor networks (DSN), graph coloring (GC), and
+meeting scheduling (MS).
+
+Meeting scheduling we generated a set of relatively large
+distributed meeting scheduling problems. The model is as
+in [Maheswaran et al., 2004]. Brieﬂy, an optimal schedule
+has to be found for a set of meetings between a set of agents.
+The problems were large: 10 to 100 agents, and 5 to 60
+meetings, yielding large problems with 16 to 196 variables.
+The larger problems were also denser, therefore even more
+difﬁcult (induced width from 2 to 5).
+
+The experimental results are presented in Figure 3 (number
+information exchanged - sum of
+of messages and total
+all message sizes,
+in bytes), and Figure 2 (runtime in
+milliseconds)4. Please notice the logarithmic scale! ADOPT
+did not scale on these problems, and we had to cut its
+execution after a threshold of 2 hours or 5 million messages.
+The largest problems that ADOPT could solve had 20 agents
+(36 variables).
+
+We also executed MB-DPOP with increasing bounds k.
+As expected, the larger the bound k, the less nodes will be
+designated as CC, and the less messages will be required5.
+However, message size and memory requirements increase.
+It is interesting to note that even M B − DP OP (1) (which
+uses linear-size messages, just like ADOPT) performs much
+better than ADOPT: it can solve larger problems, with a
+smaller number of messages. For example, for the largest
+problems ADOPT could solve, M B − DP OP (1) produced
+improvements of 3 orders of magnitude. M B − DP OP (2)
+
+3All experiments are run on a P4 machine with 1GB RAM
+4Each data point is an average over 10 instances
+5Mechanism 1 for CC selection was used.
+
+ 1e+06
+
+ 100000
+
+s
+e
+g
+a
+s
+s
+e
+m
+
+ 
+f
+
+o
+
+ 
+
+#
+
+ 10000
+
+ 1000
+
+ 100
+
+ 10
+
+ 1e+08
+
+ 1e+07
+
+ 1e+06
+
+ 100000
+
+ 10000
+
+ 1000
+
+ 100
+
+)
+s
+e
+
+t
+y
+b
+
+ 
+
+n
+
+i
+ 
+s
+e
+z
+s
+ 
+f
+
+i
+
+ 
+
+o
+m
+u
+s
+(
+ 
+
+e
+z
+s
+ 
+
+i
+
+e
+g
+a
+s
+s
+e
+m
+
+ 
+l
+
+t
+
+a
+o
+T
+
+ADOPT
+MB-DPOP(1)
+MB-DPOP(2)
+MB-DPOP(3)
+MB-DPOP(4)
+MB-DPOP(5)=DPOP
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+ 120
+
+ 140
+
+ 160
+
+ 180
+
+Number of variables
+
+ADOPT
+MB-DPOP(1)
+MB-DPOP(2)
+MB-DPOP(3)
+MB-DPOP(4)
+MB-DPOP(5)=DPOP
+
+ 20
+
+ 40
+
+ 60
+
+ 80
+
+ 100
+
+ 120
+
+ 140
+
+ 160
+
+ 180
+
+Number of variables
+
+Figure 3: MB-DPOP(k) vs ADOPT - message exchange
+
+improved over ADOPT on some instances for 5 orders of
+magnitude.
+
+Also, notice that even though M B −DP OP (k > 1) sends
+larger messages than ADOPT, overall, it exchanges much less
+information (Fig 3, low). We believe there are 2 reasons for
+this: ADOPT sends many more messages, and because of
+its asynchrony, it has to attach the full context to all of them
+(which produces extreme overheads).
+
+The DSN and GC problems are the same as the ones used
+in [Maheswaran et al., 2004]. For lack of space, we do not
+present detailed results here, but they align well with the
+meeting scheduling ones.
+
+DSN The DSN instances are very sparse, and the induced
+width is 2, so M B − DP OP (k ≥ 2) always runs with a
+linear number of messages (from 100 to 200 messages) of
+size at most 25. Runtime varies from 52 ms to 2700 ms.
+In contrast, ADOPT sends anywhere from 6000 to 40.000
+messages, and requires from 6.5 sec to 108 sec to solve
+the problems. Overall, these problems were very easy for
+MB-DPOP, and we have experienced around 2 orders of
+magnitude improvements in terms of CPU time and number
+of messages.
+
+Graph Coloring The GC instances are also small (9 to 12
+variables), but they are more tightly connected, and are even
+more challenging for ADOPT. ADOPT terminated on all of
+them, but required up to 1 hour computation time, and 4.8
+million messages for a problem with 12 variables.
+
+All
+
+showed
+
+strong
+
+performance
+improvements of MB-DPOP over the previous state of
+
+domains
+
+three
+
+IJCAI-07
+
+1456
+
+the art algorithm, ADOPT. On these problems, we noticed
+up to 5 orders of magnitude less computation time, number
+of messages, and overall communication.
+
+6 Related Work
+
+The w-cutset idea was introduced in [Rish and Dechter,
+2000]. A w-cutset is a set CC of nodes that once removed,
+leave a problem of induced width w or less. One can perform
+search on the w-cutset, and exact inference on the rest of the
+nodes. The scheme is thus time exponential in d|CC|
+and
+space exponential in k.
+
+If separators smaller than k exist, M B − DP OP (k)
+isolates the cutset nodes into different clusters, and thus it
+is time exponential in |CC(Tmax)| as opposed to exponential
+in |CC|. Since |CC(Tmax)| ≤ |CC|, M B − DP OP (w) can
+produce exponential speedups over the w-cutset scheme.
+
+AND/OR w-cutset is an extension of the w-cutset idea,
+introduced in [Mateescu and Dechter, 2005]. The w-cutset
+nodes are identiﬁed and then arranged as a start-pseudotree.
+The lower parts of the pseudotree are areas of width bounded
+by w. Then AND/OR search is performed on the w-cutset
+nodes, and inference on the lower parts of bounded width.
+The algorithm is time exponential in the depth of the start
+pseudotree, and space exponential in w.
+
+It is unclear how to apply their technique to a distributed
+setting, particularly as far as the identiﬁcation of the w-
+cutset nodes and their arrangement as a start pseudotree are
+concerned. MB-DPOP solves this problem elegantly, by
+using the DFS tree to easily delimit clusters and identify
+w-cutsets. Furthermore, the identiﬁed w-cutsets are already
+placed in a DFS structure.
+
+That aside, when operating on the same DFS tree, MB-
+DPOP is superior to the AND/OR w-cutset scheme without
+caching on the start pseudotree. The reason is that MB-
+DPOP can exploit situations where cutset nodes along the
+same branch can be grouped into different clusters. Thus
+MB-DPOP’s complexity is exponential in the largest number
+of CC nodes in a single cluster, whereas AND/OR w-cutset
+is exponential in the total number of CC nodes along that
+branch. MB-DPOP has the same asymptotic complexity as
+the AND/OR w-cutset with w-bounded caching.
+
+Finally, tree clustering methods (e.g. [Kask et al., 2005])
+have been proposed for time-space tradeoffs. MB-DPOP uses
+the concept loosely, only in high-width parts of the problem.
+For a given DFS tree, optimal clusters are identiﬁed based on
+the bound k and on node separator size.
+
+7 Conclusions and future work
+
+We have presented a hybrid algorithm that uses a
+customizable amount of memory and guarantees optimality.
+The algorithm uses cycle cuts to guarantee memory-
+boundedness and caching between clusters to reduce the
+complexity. The algorithm is particularly efﬁcient on loose
+problems, where most areas are explored with a linear
+number of messages (like in DPOP), and only small, tightly
+connected components are explored using the less efﬁcient
+bounded inference. This means that the large overheads
+
+associated with the sequential exploration can be avoided in
+most parts of the problem.
+
+Experimental results on three problem domains show that
+this approach gives good results for low width, practically
+sized optimization problems.
+MB-DPOP consistently
+outperforms the previous state of the art in DCOP (ADOPT)
+with respect to 3 metrics.
+In our experiments, we have
+observed speedups of up to 5 orders of magnitude.
+
+References
+[Darwiche, 2001] Adnan Darwiche. Recursive conditioning. Artif.
+
+Intell., 126(1-2):5–41, 2001.
+
+[Dechter, 2003] Rina Dechter. Constraint Processing. Morgan
+
+Kaufmann, 2003.
+
+[Freuder, 1985] Eugene C. Freuder. A sufﬁcient condition for
+backtrack-bounded search. Journal of the ACM, 32(14):755–761,
+1985.
+
+[Kask et al., 2005] Kalev Kask, Rina Dechter, and Javier Larrosa.
+Unifying cluster-tree decompositions for automated reasoning in
+graphical models. Artiﬁcial Intelligence, 2005.
+
+[Maheswaran et al., 2004] Rajiv T. Maheswaran, Milind Tambe,
+Emma Bowring, Jonathan P. Pearce, and Pradeep Varakantham.
+Taking DCOP to the real world: Efﬁcient complete solutions for
+distributed multi-event scheduling. In AAMAS-04, 2004.
+
+[Mailler and Lesser, 2005] Roger Mailler
+
+and Victor Lesser.
+Asynchronous partial overlay: A new algorithm for solving
+distributed constraint satisfaction problems. Journal of Artiﬁcial
+Intelligence Research (JAIR), 2005. to appear.
+
+[Mateescu and Dechter, 2005] Robert Mateescu and Rina Dechter.
+AND/OR cutset conditioning.
+the 19th
+International Joint Conference on Artiﬁcial Intelligence, IJCAI-
+05, Edinburgh, Scotland, Aug 2005.
+
+In Proceedings of
+
+[Modi et al., 2005] Pragnesh Jay Modi, Wei-Min Shen, Milind
+Tambe, and Makoto Yokoo. ADOPT: Asynchronous distributed
+constraint optimization with quality guarantees. AI Journal,
+161:149–180, 2005.
+
+[Petcu and Faltings, 2005] Adrian Petcu and Boi Faltings. DPOP:
+A scalable method for multiagent constraint optimization.
+In
+Proceedings of
+the 19th International Joint Conference on
+Artiﬁcial Intelligence, IJCAI-05, Edinburgh, Scotland, Aug 2005.
+
+[Petcu and Faltings, 2006] Adrian Petcu and Boi Faltings.
+PC-
+In
+DPOP: A partial centralization extension of DPOP.
+the Second International Workshop on
+In Proceedings of
+Distributed Constraint Satisfaction Problems, ECAI’06, Riva del
+Garda, Italy, August 2006.
+
+[Petcu et al., 2006] Adrian Petcu, Boi Faltings, and David Parkes.
+M-DPOP: Faithful Distributed Implementation of Efﬁcient
+Social Choice Problems.
+In Proceedings of the International
+Joint Conference on Autonomous Agents and Multi Agent
+Systems (AAMAS-06), Hakodate, Japan, May 2006.
+
+[Rish and Dechter, 2000] Irina Rish and Rina Dechter. Resolution
+versus search: Two strategies for SAT. Journal of Automated
+Reasoning, 24(1/2):225–275, 2000.
+
+and Kazuhiro Kuwabara.
+
+[Yokoo et al., 1992] Makoto Yokoo, Edmund H. Durfee, Toru
+Distributed constraint
+Ishida,
+satisfaction for formalizing distributed problem solving.
+In
+International Conference on Distributed Computing Systems,
+pages 614–621, 1992.
+
+IJCAI-07
+
+1457
+
+

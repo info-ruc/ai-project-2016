@@ -1,0 +1,1563 @@
+Forward Search Value Iteration For POMDPs
+
+Guy Shani and Ronen I. Brafman and Solomon E. Shimony∗
+
+Department of Computer Science, Ben-Gurion University, Beer-Sheva, Israel
+
+Abstract
+
+Recent scaling up of POMDP solvers towards re-
+alistic applications is largely due to point-based
+methods which quickly converge to an approximate
+solution for medium-sized problems. Of this family
+HSVI, which uses trial-based asynchronous value
+iteration, can handle the largest domains. In this
+paper we suggest a new algorithm, FSVI, that uses
+the underlying MDP to traverse the belief space to-
+wards rewards, ﬁnding sequences of useful back-
+ups, and show how it scales up better than HSVI on
+larger benchmarks.
+
+1 Introduction
+
+Many interesting reinforcement learning (RL) problems can
+be modeled as partially observable Markov decision problems
+(POMDPs), yet POMDPs are frequently avoided due to the
+difﬁculty of computing an optimal policy. Research has fo-
+cused on approximate methods for computing a policy (see
+e.g. [Pineau et al., 2003]). A standard way to deﬁne a policy
+is through a value function that assigns a value to each be-
+lief state, thereby also deﬁning a policy over the same belief
+space. Smallwood and Sondik [1973] show that a value func-
+tion can be represented by a set of vectors and is therefore
+piecewise linear and convex.
+
+A promising approach for computing value functions is the
+point-based method. A value function is computed over a
+ﬁnite set of reachable belief points, using a backup operation
+over single belief points - point-based backups, generating
+α-vectors. The assumption is that the value function would
+generalize well to the entire belief space.
+
+Two of the key issues in point-based methods are the
+choice of the set of belief points and the order of backups. A
+successful approach for addressing both of these issues uses
+trial-based value iteration — simulating trajectories and exe-
+cuting backups over the encountered belief-states in reversed
+order (see e.g. [Bonet and Gefner, 1998]). Such methods use
+some type of heuristic to ﬁnd useful trajectories.
+
+∗Partially supported by the Lynn and William Frankel Center for
+Computer Sciences, and by the Paul Ivanier Center for Robotics and
+Production Management at BGU.
+
+Heuristic Search Value Iteration (HSVI - [Smith and Sim-
+mons, 2005]) is currently the most successful point-based al-
+gorithm for larger domains. HSVI maintains both a lower
+) and an upper bound ( ¯V ) over the optimal value
+bound (V
+¯
+function. It traverses the belief space using a heuristic based
+on both bounds and performs backups over the observed be-
+lief points in reversed order. Unfortunately, using ¯V slows
+down the algorithm considerably as updating ¯V and comput-
+ing upper bound projections ( ¯V (b)) are computationally in-
+tensive. However, this heuristic pays off, as the overall per-
+formance of HSVI is better than other methods.
+
+In this paper we suggest a new method for belief point se-
+lection, and for ordering backups which does not use an upper
+bound. Rather, our algorithm uses a search heuristic based on
+the underlying MDP. Using MDP information is a well known
+technique, especially as an initial guess for the value function
+(starting with the QM DP method of [Littman et al., 1995]),
+but did not lead so far to very successful algorithms. Our
+novel algorithm — Forward Search Value Iteration (FSVI)
+— traverses together both the belief space and the underlying
+MDP space. Actions are selected based on the optimal policy
+for the MDP, and are applied to the belief space as well, thus
+directing the simulation towards the rewards of the domain.
+In this sense, our approach strongly utilizes the underlying
+MDP policy.
+
+We tested our algorithm on all the domains on which HSVI
+was tested, and it both converges faster than HSVI and scales
+up better, allowing us to solve certain problems for which
+HSVI fails to converge within reasonable time.
+
+2 Background and Related Work
+We review the POMDP model and the associated notation,
+and provide a short overview of relevant methods.
+
+2.1 MDPs, POMDPs and the belief-space MDP
+A Markov Decision Process (MDP) is a tuple (cid:2)S, A, tr, R(cid:3)
+where S is a set of world states, A is a set of actions,
+(cid:2)) is the probability of transitioning from state s to
+tr(s, a, s
+using action a, and R(s, a) deﬁnes the reward for ex-
+state s
+ecuting action a in state s.
+
+(cid:2)
+
+A Partially Observable Markov Decision Process
+(POMDP) is a tuple (cid:2)S, A, tr, R, Ω, O, b0(cid:3) where S, A, tr, R
+are the same as in an MDP, Ω is a set of observations and
+O(a, s, o) is the probability of observing o after executing a
+
+IJCAI-07
+
+2619
+
+and reaching state s. The agent maintains a belief-state — a
+vector b of probabilities such that b(s) is the probability that
+the agent is currently at state s. b0 deﬁnes the initial belief
+state — the agent belief over its initial state.
+
+The transition from belief state b to belief state b
+
+using
+action a is deterministic given an observation o and deﬁnes
+the τ transition function. We denote b
+
+(cid:2) = τ (b, a, o) where:
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+b
+
+(s
+
+) =
+
+pr(o|b, a) =
+
+(cid:3)
+
+(cid:2)
+O(a, s
+
+, o)
+
+s b(s)tr(s, a, s
+
+(cid:2))
+
+(cid:2)
+
+pr(o|b, a)
+(cid:3)
+
+b(s)
+
+s
+
+s(cid:2)
+
+(cid:2)
+tr(s, a, s
+
+(cid:2)
+)O(a, s
+
+, o)
+
+(1)
+
+(2)
+
+While the agent is unable to observe the true state of the
+world, the world itself still behaves as an MDP, which we call
+the underlying MDP.
+
+In many MDP and POMDP examples the agent should ei-
+ther reach some state (called the goal state) where it receives
+a reward, or collect rewards that can be found in a very small
+subset of the state space. Other problems provide varying re-
+wards in each state.
+
+2.2 Value Functions for POMDPs
+It is well known that the value function V for the belief-
+space MDP can be represented as a ﬁnite collection of |S|-
+dimensional vectors known as α vectors. Thus, V is both
+piecewise linear and convex [Smallwood and Sondik, 1973].
+A policy over the belief space is deﬁned by associating an ac-
+tion a to each vector α, so that α·b =
+s α(s)b(s) represents
+the value of taking a in belief state b and following the pol-
+icy afterwards. It is therefore standard practice to compute
+a value function — a set V of α vectors. The policy πV is
+immediately derivable using: πV (b) = argmaxa:αa∈V αa · b.
+V can be iteratively computed using point-based backup
+
+(cid:2)
+
+steps, efﬁciently implemented [Pineau et al., 2003] as:
+
+(cid:3)
+
+backup(b) = argmaxgb
+gb
+a = ra + γ
+(cid:3)
+
+o
+
+gα
+a,o(s) =
+
+s(cid:2)
+
+a:a∈A b · gb
+
+a
+
+argmaxgα
+
+a,o:α∈V b · gα
+
+a,o
+
+(cid:2)
+O(a, s
+
+(cid:2)
+, o)tr(s, a, s
+
+)αi(s
+
+(cid:2)
+
+)
+
+The vector representation is suitable only for lower bounds.
+An upper bound can be represented as a direct mapping be-
+tween belief states and values. The H operator, known as the
+Bellman update, updates such a value function:
+
+(cid:2)
+
+QV (b, a) = b · ra + γ
+
+o pr(o|a, b)Vn(τ (b, a, o))
+
+HV (b) = maxa QV (b, a)
+
+2.3 Trial-Based Value Iteration
+Synchronous value iteration assumes that the entire state
+space is updated over each iteration. Asynchronous value it-
+eration allows some states to be updated more than others,
+based on the assumption that value function accuracy is more
+crucial in these states. A well known form of asynchronous
+value iteration is trial-based updates, where simulation trials
+are executed, creating trajectories of states (for MDPs) or be-
+lief states (for POMDPs). Only the states in the trajectory are
+
+Algorithm 1 RTDP
+1: Initialize Q(s, a) ← 0
+2: while true do
+3:
+4:
+5:
+6:
+7:
+8:
+
+s ← s0
+while s is not a goal state do
+(cid:2)
+
+for each a ∈ A do
+
+Q(s, a) ← R(s, a) +
+(cid:2))
+a ← argmaxa(cid:2) Q(s, a
+s ← sample from tr(s, a, ∗)
+
+(cid:2)
+s(cid:2) tr(s, a
+
+(cid:2))V (s
+
+(cid:2))
+
+, s
+
+updated and then a new trial is executed. RTDP [Barto et al.,
+1995] is a trial-based algorithm for MDPs (Algorithm 1).
+
+RTDP-BEL — an adaptation of RTDP to POMDPs was
+suggested by Bonet and Geffner [Bonet and Gefner, 1998].
+RTDP-BEL discretizes belief states and maintains Q-values
+for the discretized belief states only. Trials are executed over
+the POMDP mapping the real belief state into the closest dis-
+cretized belief state which is then updated.
+
+An important aspect for the convergence speed of trial-
+based algorithms is a good heuristic that leads towards im-
+portant states and updates. Unfocused heuristics may cause
+the algorithm to spend much time updating useless states.
+
+2.4 Heuristic Search Value Iteration (HSVI)
+
+Computing an optimal value function over the entire belief
+space does not seem to be a feasible approach. A possible
+approximation is to compute an optimal value function over
+a subset of the belief space. An optimal value function for a
+subset of the belief space is no more than an approximation
+of a full solution. We hope, however, that the computed value
+function will generalize well for unobserved belief states.
+
+Point-based algorithms [Pineau et al., 2003; Spaan and
+Vlassis, 2005; Smith and Simmons, 2005] compute a value
+function only over a reachable subset of the belief space us-
+ing point-based backups (Equations 3- 5).
+
+Of this family of algorithms, HSVI (Algorithm 2) has
+shown the best performance over large scale problems. HSVI
+[Smith and Simmons, 2005] maintains both an upper bound
+( ¯V ) and lower bound (V
+) over the value function. It traverses
+¯
+the belief space following the upper bound heuristic, greedily
+selecting successor belief points where ¯V (b) − V
+(b) is max-
+¯
+imal, until some stopping criteria have been reached. It then
+executes backup and H operator updates over the observed
+belief points on the explored path in reversed order.
+
+HSVI can be viewed as a trial-based value iteration for
+POMDPs, even though the next belief state is not sampled
+but selected using the upper and lower bounds.
+
+Even though HSVI is able to handle large problems, the
+H operator update and the interpolations used to ﬁnd the
+value ¯V (b) are computationally intensive, becoming more
+time consuming with each explored belief state. As such,
+HSVI spends much time maintaining the upper bound that
+is used only as a heuristic directing the belief space traversal.
+We note, however, that Smith and Simmons also present
+theoretical results for the convergence of HSVI, relying on
+the existence of the upper bound. As we suggest to remove
+the upper bound, these theoretical results no longer apply.
+
+(3)
+
+(4)
+
+(5)
+
+(6)
+
+(7)
+
+IJCAI-07
+
+2620
+
+Algorithm 2 HSVI
+
+Algorithm 3 FSVI
+
+Function HSVI
+and ¯V
+1: Initialize V
+¯
+2: while ¯V (b0) − V
+(b0) >  do
+¯
+, ¯V )
+Explore(b0, V
+3:
+¯
+
+, ¯V )
+
+Function Explore(b, V
+¯
+1: if Stopping criteria have not been reached then
+(cid:2)) (see Equation 6)
+2:
+3:
+4:
+5:
+6:
+
+∗ ← argmaxa Q ¯
+a
+∗ ← argmaxo( ¯V (τ (b, a, o)) − V
+o
+¯
+Explore(τ (b, a
+add(V
+¯
+¯V ← HV (b)
+
+, backup(b, V
+¯
+
+∗), V
+¯
+))
+
+V (b, a
+
+(τ (b, a, o))
+
+∗
+
+, o
+
+, ¯V )
+
+Function FSVI
+1: Initialize V
+2: while V has not converged do
+3:
+4: MDPExplore(b0, s0)
+
+Sample s0 from the b0 distribution
+
+Function MDPExplore(b, s)
+1: if s is not a goal state then
+∗ ← argmaxa Q(s, a)
+a
+2:
+∗
+, ∗)
+from tr(s, a
+Sample s
+3:
+, ∗)
+Sample o from O(a
+, s
+4:
+(cid:2)
+∗
+5: MDPExplore(τ (b, a
+, o), s
+6: add(V, backup(b, V ))
+
+∗
+
+(cid:2)
+
+(cid:2)
+
+)
+
+2.5 Using the underlying MDP
+Using the underlying MDP optimal policy for the POMDP is
+a very well known idea and has been explored from many as-
+pects in the past. Littman et al. [Littman et al., 1995] suggest
+to use the optimal Q-values of the underlying MDP to create
+the QM DP value function for a POMDP:
+
+QM DP (b) = max
+
+a
+
+Q(s, a)b(s)
+
+(8)
+
+Many grid-based techniques (e.g. [Zhou and Hansen, 2001])
+initialize the upper bound over the value function using the
+underlying MDP. RTDP-BEL initializes a Q function for the
+POMDP using the optimal Q function for the MDP.
+
+An important drawback of using the underlying MDP is
+the inability of the MDP to assess actions that gather informa-
+tion. Agents in a partially observable environment occasion-
+ally need to execute actions that do not move them towards a
+reward, but only improve their state of information about the
+current world state, such as activating a sensor. In an MDP
+the world state is always known and therefore information
+gathering actions produce no additional value. Agents rely-
+ing on the QM DP heuristic, for example, will therefore never
+execute any such actions.
+
+3 Forward Search Value Iteration
+We propose a new algorithm, Forward Search Value Itera-
+tion (FSVI), using trial-based updates over the belief space of
+the POMDP. FSVI maintains a value function using α-vectors
+and updates it using point-based backups.
+
+The heuristic FSVI uses to traverse the belief space is based
+on the optimal solution to the underlying MDP. We assume
+that such a solution is given as input to FSVI in the form of
+a Q-function over MDP states. This assumption is reason-
+able, as a solution to the underlying MDP is always simpler
+to compute than a solution to the POMDP.
+
+FSVI (Algorithm 3) simulates an interaction of the agent
+with the environment, maintaining both the POMDP belief
+state b and the underlying MDP state s — the true state of the
+environment the agent is at within the simulation. While at
+policy execution time the agent is unaware of s, in simulation
+we may use s to guide exploration through the environment.
+FSVI uses the MDP state to decide which action to apply
+next based on the optimal value function for the underlying
+MDP, thus providing a path in belief space from the initial
+
+belief state b0 to the goal (or towards rewards). As we assume
+that the value function of the underlying MDP is optimal, this
+heuristic will lead the agent towards states where rewards can
+be obtained.
+
+The trial is ended when the state of the underlying MDP is
+a goal state. When the MDP does not have a goal state we
+can use other criteria such as reaching a predeﬁned sum of
+rewards or number of actions. If the goal is unreachable from
+some states we may also add a maximal number of steps after
+which the trial ends.
+
+FSVI (Algorithm 3) is apparently very simple. Its simplic-
+ity translates into increased speed and efﬁciency in generating
+belief points and updating the values associated with belief
+points. FSVI’s method for selecting the next action is very
+fast, requiring to check only O(|A|) values (MDP Q-values)
+as opposed to any action selection method based on the cur-
+rent belief state. For example, RTDP-BEL takes O(|S|) op-
+erations for discretizing the belief state before it can select
+the next action and HSVI needs O(|A||O||S|| ¯V |) operations,
+where | ¯V | is the number of points in the upper bound, to com-
+pute the values of all the successors of the current belief state.
+As FSVI generates trajectories using forward projection, it is
+easy to determine good sequences of backups, simply going
+in reversed order. This ability is shared by HSVI, but not
+by other point-based algorithms such as Perseus [Spaan and
+Vlassis, 2005] and PBVI [Pineau et al., 2003].
+
+Other algorithms, such as HSVI and RTDP-BEL, use a
+heuristic that is initialized based on the MDP Q-function and
+use some form of interpolation over these Q-values. These al-
+gorithms also improve the heuristic by updating the Q-values
+to ﬁt the POMDP values. Such algorithms therefore work ini-
+tially much like the QM DP heuristic which is known to pre-
+form badly for many POMDP problems and in many cases
+gets stuck in local optima. These algorithms can potentially
+need many updates to improve the heuristic to be able to reach
+rewards or goal states.
+
+As noted earlier, a major drawback of MDP based ap-
+proaches is their inability to perform in information gather-
+ing tasks. FSVI is slightly different in that respect. FSVI
+uses point-based backups in which information gathering ac-
+tions are also evaluated and considered. It is therefore able
+to perform single step information gathering actions such as
+the activation of a sensor. For example, in the RockSample
+
+IJCAI-07
+
+2621
+
+domain [Smith and Simmons, 2005], the robot should acti-
+vate a sensor to discover whether a rock is worthwhile, and
+indeed FSVI performs very well in the RockSample domain,
+executing such actions. However, when the information gath-
+ering requires a lengthy sequence of operations, such as in
+the heaven-hell problem [Bonet and Gefner, 1998] where the
+agent is required to pass a corridor to read a map and then
+return to take a reward, FSVI’s heuristic will fail to lead it
+through the corridor, and therefore it cannot learn of the ex-
+istence of the map. FSVI can learn to read the map (using
+an information gathering action) if it is on the path from an
+initial state to the goal.
+
+This limitation can be removed by adding an exploration
+factor causing FSVI to occasionally choose a non-optimal ac-
+tion. In practice, however, it is unlikely that random explo-
+ration will rapidly lead towards meaningful trajectories.
+
+4 Empirical Evaluations
+
+4.1 Evaluation Metrics
+
+We evaluate the following criteria:
+
+Value function evaluation — Average discounted reward
+
+P#trials
+
+P#steps
+
+j
+
+i=0
+
+(ADR):
+order ﬁlter to reduce the noise in ADR.
+
+j=0
+#trials
+
+γ
+
+rj
+
+. ADR is ﬁltered using a ﬁrst
+
+Execution time — we report the CPU time but as this is
+an implementation speciﬁc measurement, we also report the
+amount of basic operations such as backup, τ function, dot
+product (α · b) and gα
+
+a,o (Equation 5) computations .
+
+Memory — we show the size of the computed value func-
+
+tion and the number of maintained belief points.
+
+4.2 Experimental Setup
+
+As HSVI is known to perform better than other point-based
+algorithms such as Perseus [Spaan and Vlassis, 2005] and
+PBVI [Pineau et al., 2003], we compare FSVI only to
+HSVI. Comparison is done on a number of benchmarks
+from the point-based literature: Hallway, Hallway2 [Littman
+et al., 1995], TagAvoid [Pineau et al., 2003], RockSample
+[Smith and Simmons, 2005] and Network Ring [Poupart and
+Boutilier, 2003]. These include all the scalability domains on
+which HSVI was tested in [Smith and Simmons, 2005], ex-
+cept for Rock Sample 10,10 which could not be loaded on our
+system due to insufﬁcient memory. Table 1 contains the prob-
+lem measurements for the benchmarks including the size of
+the state space, action space and observation space, the num-
+ber of trials used to evaluate the solutions, and the error in
+measuring the ADR for each problem.
+
+The Rock Sample domain provides an opportunity for test-
+ing the scalability of different algorithms. However, these
+problems are somewhat limited: they assume deterministic
+state transitions as well as full observability for the robot loca-
+tion, making the problems easier to solve. To overcome these
+limitations we added a new domain — Noisy Rock Sample,
+in which agent movements are stochastic and it receives noisy
+observations as to its current location.
+
+We implemented in Java a standard framework that incor-
+porated all the basic operators used by all algorithms such
+as vector dot products, backup operations, τ function and so
+
+0
+
+50
+
+100
+
+150
+
+200
+
+250
+
+FSVI
+
+HSVI
+
+(a)
+
+0
+
+100
+
+200
+
+300
+
+400
+
+FSVI
+
+HSVI
+
+(b)
+
+11
+
+10
+
+9
+
+8
+
+7
+
+6
+
+5
+
+21
+
+19
+
+17
+
+15
+
+13
+
+11
+
+19
+17
+15
+13
+11
+9
+7
+5
+
+0
+
+100
+
+200
+
+300
+
+400
+
+FSVI
+
+HSVI
+
+(c)
+
+Figure 1: Convergence on the Noisy Rock Sample 5,5 prob-
+lem (a), the Rock Sample 7,8 problem (b) and the Rock Sam-
+ple 8,8 problem (c). The X axis shows CPU time and the Y
+axis shows ADR.
+
+20
+
+15
+
+10
+
+5
+
+0
+
+4,4
+
+5,5
+
+5,7
+
+7,8
+
+8,8
+
+FSVI
+
+HSVI
+
+Figure 2: Normalized comparison of CPU time for the Rock
+Sample problems.
+
+forth. All experiments were executed on identical machines:
+x86 64-bit machines, dual-proc, 2.6Ghz CPU, 4Gb memory,
+2Mb cache, running linux and JRE 1.5.
+
+We focus our attention on convergence speed of the value
+function to previously reported ADR. We executed HSVI and
+FSVI, interrupting them from time to time to compute the ef-
+ﬁciency of the current value function using ADR. Once the
+ﬁltered ADR has reached the same level as reported in past
+publications, execution was stopped. The reported ADR was
+then measured over additional trials (number of trials and er-
+ror in measurement is reported in Table 1).
+
+IJCAI-07
+
+2622
+
+Method
+
+ADR
+
+Hallway
+HSVI
+FSVI
+
+Hallway2
+HSVI
+FSVI
+
+Tag Avoid
+HSVI
+FSVI
+
+0.516
+0.517
+±0.0024
+
+0.341
+0.345
+±0.0027
+
+-6.418
+-6.612
+±0.15
+
+Rock Sample 4,4
+HSVI
+FSVI
+
+18.036
+18.029
+±0.024
+
+Rock Sample 5,5
+HSVI
+FSVI
+
+18.74
+19.206
+±0.063
+Noisy Rock Sample 5,5
+HSVI
+FSVI
+
+10.318
+10.382
+±0.069
+
+|V |
+
+182
+233
+±71
+
+172
+296
+±22
+
+100
+174
+±25
+
+123
+84
+±76
+
+348
+272.5
+±75
+
+2639
+924
+±170
+
+Time
+(secs)
+
+314
+50
+±15
+
+99
+49
+±8
+
+52
+45
+±8
+
+4
+1
+±1
+
+85
+11.1
+±5
+
+1586
+210
+±52
+
+Rock Sample 5,7
+HSVI
+FSVI
+
+22.67
+22.82
+±0.63
+
+274
+306.9
+
+205
+34.3
+±91.5 ±13.6
+
+Rock Sample 7,8
+HSVI
+FSVI
+
+20.029
+20.369
+
+3045
+239
+±0.265 ±146.6 ±78.7
+
+533
+343.1
+
+Rock Sample 8,8
+HSVI
+FSVI
+
+19.474
+19.646
+±0.337
+
+Network Ring 8
+HSVI
+FSVI
+
+42.27
+42.39
+±0.18
+
+Network Ring 10
+HSVI
+FSVI
+
+51.43
+51.44
+±0.03
+
+762
+261.4
+±76.9
+
+80
+40.5
+±16
+
+13917
+783
+±295
+
+19
+6.75
+±6.1
+
+69
+33.25
+
+141
+47
+±6.14 ±14.3
+
+| ¯
+V |
+103
+
+0.42
+
+0.23
+
+¯
+V (b)
+103
+
+0.5μs
+106.1
+
+¯
+V
+
+#H
+
+65ms
+1268
+
+1μs
+37.2
+
+126ms
+434
+
+0.6μs
+29.3
+
+24.1ms
+1635
+
+1.1
+
+0.34
+
+0.2μs
+6.06
+
+4.67ms
+414
+
+0.64μs
+101.1
+
+24.1ms
+1883
+
+0.8
+
+0.69μs
+264.9
+
+44.5ms
+9294
+
+0.88
+
+3.44
+
+3.42
+
+17.3
+
+0.39
+
+3.0μs
+14.09
+
+256.6ms
+702
+
+15μs
+9.53
+
+3.4sec
+628
+
+18μs
+58.38
+
+2.7sec
+2638
+
+11μs
+8.46
+
+31.8ms
+307
+
+99.4μs
+6.9
+
+369ms
+206
+
+1.11
+
+# Backups
+
+α
+a,o
+
+|B|
+x 104
+
+0.1
+0
+±0
+
+0.26
+0.02
+±0
+
+2.11
+0.03
+±0
+
+0.29
+0.01
+±0
+
+187ms
+634
+655
+±100
+
+222ms
+217
+355
+±33
+
+311ms
+304
+182
+±27
+
+92ms
+207
+204
+±122
+
+3.4
+0.05
+±0.01
+
+114ms
+2309
+626.2
+±247
+
+#τ
+#g
+x 103
+x 106
+0.37μs
+0.13μs
+34.52
+5.85
+0.51
+7.71
+±0.08
+±2.46
+1μs
+0.17μs
+11.07
+1.56
+0.3
+4.28
+±0.03
+±0.73
+0.56μs
+0.92μs
+1.74
+0.5
+0.14
+0.37
+±0.02
+±0.1
+0.46μs
+0.2μs
+1.17
+1.08
+0.04
+0.24
+±0.01
+±0.41
+2.5μs
+1.1μs
+2.34
+10.39
+0.1
+1.47
+±0.02
+±0.88
+1.9μs
+0.86μs
+23.05
+129.11
+0.53
+11.93
+±0.14
+±4.79
+26.6μs
+3.7μs
+4.3
+0.65
+39684
+0.4
+±0.02 ±0.014 ±0.001
+0.25ms
+4.1
+0.024
+
+# α · b
+x 106
+33ns
+6.67
+7.78
+±2.49
+36ns
+1.81
+4.33
+±0.74
+8.3ns
+0.53
+0.39
+±0.11
+0.031μs
+1.09
+0.25
+±0.42
+0.033μs
+10.5
+1.49
+±0.89
+0.035μs
+132.4
+12.09
+±4.8
+0.11μs
+0.99
+2.1
+±2.9
+1.1μs
+14.66
+2.457
+±2.32 ±0.059 ±0.013 ±2.357
+2.6μs
+11.43
+1.183
+±0.06 ±0.661
+4.5ns
+2.6ms
+8.44
+0.31
+0.19
+0.24
+±0.19
+±0.14
+23.3ns
+13.3ms
+0.144
+6.9
+0.255
+0.19
+±85.78 ±0.0004 ±0.008 ±0.081 ±0.086
+
+143ms
+350
+500
+±400.1
+567ms
+2089
+512.1
+±284.8
+570ms
+1317
+367.8
+±125.1
+164ms
+153
+252
+±146
+
+0.25
+0.022
+±0.002 ±0.012
+
+4.01
+0.816
+±0.02 ±0.013
+
+314ms
+3528
+1153
+±224
+
+0.35ms
+58.09
+0.176
+
+20μs
+14.51
+2.389
+
+25μs
+10.83
+0.042
+
+1μs
+0.004
+0.004
+
+2.01
+0.48
+±0.12
+
+1.0
+3722
+
+1.5
+0.049
+
+553ms
+103
+267.7
+
+10.6μs
+0.0036
+0.002
+
+0.29
+0.025
+
+Table 2: Performance measurements. Model rows show rough estimates of basic operations execution time.
+
+Problem
+
+Hallway
+Hallway2
+Tag Avoid
+Rock Sample 4,4
+Rock Sample 5,5
+Noisy RS 5,5
+Rock Sample 5,7
+Rock Sample 7,8
+Rock Sample 8,8
+Network Ring 8
+Network Ring 10
+
+|S|
+
+61
+93
+870
+257
+801
+801
+3,201
+12,545
+16,385
+256
+1024
+
+|A|
+
+|O|
+
+5
+5
+5
+9
+10
+10
+12
+13
+13
+17
+21
+
+21
+17
+30
+2
+10
+27
+2
+2
+2
+2
+2
+
+#trials
+ADR Error
+10,000 ±0.0015
+10,000 ±0.004
+10,000 ±0.045
+10,000 ±0.075
+10,000 ±0.3
+10,000 ±0.3
+10,000 ±0.25
+±0.25
+1,000
+±0.25
+1,000
+±1.1
+2,000
+±0.98
+2,000
+
+Table 1: Benchmark problem parameters
+
+4.3 Results
+
+Table 2 presents our experimental results. For each problem
+and method we report:
+
+1. Resulting ADR.
+2. Size of the ﬁnal value function (|V |).
+3. CPU time until convergence.
+4. Backups count.
+5. gα
+
+a,o operations count.
+
+6. Number of computed belief states.
+7. τ function computations count.
+8. Dot product operations count.
+9. Number of points in the upper bound (| ¯V |).
+10. Upper bound projection computations count ( ¯V (b)).
+11. Upper bound value updates count (H ¯V (b)).
+
+The last 3 items refer only to HSVI as FSVI does not main-
+tain an upper bound. The reported numbers do not include
+the repeated expensive computation of the ADR, or the ini-
+tialization time (identical for both algorithms).
+
+To illustrate the convergence rate of each algorithm, we
+also plotted the ADR as a function of CPU time in Figure 1.
+These graphs contain data collected over separate executions
+with fewer trials, so Table 2 is more accurate.
+
+4.4 Discussion
+Our results clearly indicate that FSVI converges faster than
+HSVI and scales up better. The convergence rate shown in
+Figure 1 is always faster, the time required to reach optimal
+ADR is also always faster, and this difference become more
+pronounced as problem size increases. Figure 2 presents a
+
+IJCAI-07
+
+2623
+
+more focused comparison of the relative ability of the two
+solvers to scale up. Overall, it appears that HSVI is slowed
+down considerably by its upper bound computation and its
+updates. While it is possible that HSVI’s heuristic leads to a
+more informed selection of belief points, FSVI is able to han-
+dle more belief points, and faster. In fact, in the Rock Sam-
+ple domains, we can see that FSVI is able to converge with
+fewer belief points and even slightly improved ADR. Thus,
+on these domains, the heuristic guidance in point selection
+offered by the MDP policy is superior to the bounds-based
+choice of HSVI. Indeed, we can also see that the number of
+backups FSVI executes is in most cases less than HSVI, hint-
+ing that the chosen trajectories (and hence backups) are also
+better than those selected by HSVI.
+
+Observe that the upper bound of HSVI allows the deﬁnition
+of additional properties such as a stopping criterion based on
+the gap between bounds over the initial belief point b0, and an
+upper bound over the number of trials required to close that
+gap.
+In practice, however, HSVI never manages to reduce
+this gap considerably (as also noted in [Smith and Simmons,
+2005]) and reaches maximal performance when the gap is still
+very large. This is to be expected, as the the convergence
+guarantees for HSVI relies on the eventual exploration of the
+entire And-Or search graph for the domain until an appropri-
+ate depth that grows as γ approaches 1.
+
+Given that different
+
+approximation algorithms
+
+As noted above, FSVI is not able to deal adequately with
+longer information-gathering sequences, such as those re-
+quired in the heaven-hell domain. HSVI performs better than
+FSVI on these domains, although it, too, does not do too
+well. We tested both algorithms on a deterministic version
+of heaven-hell. HSVI took 52ms to converge and required 71
+backups, while FSVI needed 137ms and 937 backups using
+an exploration factor of 0.5. When only the activation of sin-
+gle step information gathering actions is needed, such as all
+the Rock Sample and Network domains, FSVI performs well.
+for
+POMDPs are likely to perform well on different classes
+of domains, it is desirable to be able to determine prior to
+execution of an algorithm whether it will work well on a
+given problem. FSVI appears to be the best current candidate
+for domains in which long information seeking plans are
+not required. Thus, it is interesting to ask whether such
+domains are easy to recognize. We believe that the following
+initial schema we are currently exploring might work well.
+Roughly, we start by deﬁning informative states as states
+where observations are available that result
+in radically
+reduced belief state entropy.
+If all such states are visited
+with reasonably high probability by following the underlying
+MDP optimal policy, then FSVI should perform well.
+In
+comparison to the cost of solving the POMDP, this test is
+relatively cheap to perform.
+
+5 Conclusions
+
+This paper presents a new point-based algorithm — Forward
+Search Value Iteration (FSVI) — that executes asynchronous
+value iteration. FSVI simulates trajectories through the belief
+space choosing actions based on the underlying MDP optimal
+action. Once the trajectory has reached a goal state, FSVI
+
+performs backups on the belief states in reversed order.
+
+FSVI is a simple algorithm that is easy to implement and
+leads to good quality solutions rapidly. This was demon-
+strated by comparing FSVI to a state-of-the-art algorithm,
+HSVI, a closely related point-based algorithm that uses a dif-
+ferent heuristic for belief space traversals. Our experiments
+show that FSVI is much faster and scales up better on almost
+all benchmark domains from the literature.
+
+The underlying MDP provides a heuristic that is both fast
+to compute and use and also always directs the agent towards
+rewards. This heuristic, however, limits the ability of the
+agent to recognize traversals that will improve its state in-
+formation. Namely, information gathering tasks that require
+lengthy traversals to gather information cannot be solved by
+FSVI. This deﬁciency was demonstrated on the heaven-hell
+problem which requires a detour in order to collect impor-
+tant information. Thus, it is apparent that future work should
+consider how to revise FSVI so that its generated trajectories
+will visit such states. This can perhaps be done by executing
+simulations that try to reduce the entropy of the current be-
+lief space, using information visible to the underlying MDP,
+or by examining some augmented state space. Given FSVI’s
+performance and simplicity, we believe that such useful mod-
+iﬁcations are possible.
+
+References
+[Barto et al., 1995] A. G. Barto, S. J. Bradtke, and S. P.
+Singh. Learning to act using real-time dynamic program-
+ming. Journal of AI, 72(1):81–138, 1995.
+
+[Bonet and Gefner, 1998] B. Bonet and H. Gefner. Solving
+large POMDPs using real time dynamic programming. In
+AAAI Fall Symposium on POMDPs, 1998.
+
+[Littman et al., 1995] M. L. Littman, A. R. Cassandra, and
+L. P. Kaelbling. Learning policies for partially observable
+environments: Scaling up. In ICML’95, 1995.
+
+[Pineau et al., 2003] J. Pineau, G. Gordon, and S. Thrun.
+Point-based value iteration: An anytime algorithm for
+POMDPs. In IJCAI, August 2003.
+
+[Poupart and Boutilier, 2003] P. Poupart and C. Boutilier.
+
+Bounded ﬁnite state controllers. In NIPS 16, 2003.
+
+[Smallwood and Sondik, 1973] R.
+
+E. Sondik.
+able processes over a ﬁnite horizon. OR, 21, 1973.
+
+and
+The optimal control of partially observ-
+
+Smallwood
+
+[Smith and Simmons, 2005] T. Smith and R. Simmons.
+Point-based pomdp algorithms: Improved analysis and im-
+plementation. In UAI 2005, 2005.
+
+[Spaan and Vlassis, 2005] M. T. J. Spaan and N. Vlassis.
+Perseus: Randomized point-based value iteration for
+POMDPs. JAIR, 24:195–220, 2005.
+
+[Zhou and Hansen, 2001] R. Zhou and E. A. Hansen. An im-
+proved grid-based approximation algorithm for POMDPs.
+In IJCAI, pages 707–716, 2001.
+
+IJCAI-07
+
+2624
+
+

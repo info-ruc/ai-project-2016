@@ -1,0 +1,1625 @@
+A Fast Analytical Algorithm for Solving
+
+Markov Decision Processes with Real-Valued Resources∗
+
+Janusz Marecki Sven Koenig Milind Tambe
+
+Computer Science Department
+University of Southern California
+{marecki, skoenig, tambe}@usc.edu
+
+941 W 37th Place, Los Angeles, CA 90089
+
+Abstract
+
+Agents often have to construct plans that obey deadlines
+or, more generally, resource limits for real-valued re-
+sources whose consumption can only be characterized
+by probability distributions, such as execution time or
+battery power. These planning problems can be mod-
+eled with continuous state Markov decision processes
+(MDPs) but existing solution methods are either inefﬁ-
+cient or provide no guarantee on the quality of the re-
+sulting policy. We therefore present CPH, a novel so-
+lution method that solves the planning problems by ﬁrst
+approximating with any desired accuracy the probability
+distributions over the resource consumptions with phase-
+type distributions, which use exponential distributions as
+building blocks. It then uses value iteration to solve the
+resulting MDPs by exploiting properties of exponential
+distributions to calculate the necessary convolutions ac-
+curately and efﬁciently while providing strong guaran-
+tees on the quality of the resulting policy. Our experi-
+mental feasibility study in a Mars rover domain demon-
+strates a substantial speedup over Lazy Approximation,
+which is currently the leading algorithm for solving con-
+tinuous state MDPs with quality guarantees.
+Introduction
+
+1
+
+Recent advances in robotics have made aerial, underwater
+and terrestrial unmanned autonomous vehicles possible. In
+many domains for which such unmanned vehicles are con-
+structed, the vehicles have to construct plans that obey dead-
+lines or, more generally, resource limits for real-valued re-
+sources whose consumption can only be characterized by
+probability distributions, such as execution time or battery
+power.
+It is a major challenge for AI research to con-
+struct good plans for these domains efﬁciently [Bresina et al.,
+2002]. One cannot model the resulting planning problems
+with generalized semi-Markov decision processes [Younes
+and Simmons, 2004] since they can model actions that con-
+sume real-valued amounts of resources but not resource lim-
+is based upon work supported by the
+DARPA/IPTO COORDINATORS program and the Air Force Re-
+search Laboratory under Contract No. FA875005C0030. The views
+and conclusions contained in this document are those of the au-
+thors and should not be interpreted as representing the ofﬁcial poli-
+cies, either expressed or implied, of the Defense Advanced Research
+Projects Agency or the U.S. Government.
+
+This material
+
+∗
+
+its. One could model them with Markov decision processes
+(MDPs) by encoding the available amounts of resources in
+the states. The resulting continuous state MDP can then be
+solved approximately by discretizing the state space (for ex-
+ample, by discretizing the probability distributions) and then
+applying standard dynamic programming algorithms, such as
+value iteration [Boyan and Littman, 2000]. A major draw-
+back of this approach is that discretizing the state space re-
+sults in a combinatorial explosion of the number of states
+as the discretization becomes more and more ﬁne-grained.
+In response, discretization-free approaches have been devel-
+oped, some of which do not provide strong guarantees on the
+quality of the resulting policy [Lagoudakis and Parr, 2003;
+Nikovski and Brand, 2003; Hauskrecht and Kveton, 2003].
+Lazy Approximation [Li and Littman, 2005] is currently the
+leading discretization-free algorithm for solving continuous
+state MDPs with quality guarantees. It solves the planning
+problems by approximating the probability distributions over
+the resource consumptions with piecewise constant functions.
+It then uses value iteration to solve the resulting MDPs by re-
+peatedly approximating the value functions with piecewise
+constant value functions. Lazy Approximation has two prob-
+lems that increase its runtime: First, complex piecewise con-
+stant functions are often necessary to approximate probabil-
+ity distributions closely. Second, the value functions need
+to be reapproximated after every iteration. We thus present
+CPH (Continuous state MDPs through PHase-type proba-
+bility distributions), a novel solution method that solves the
+planning problems by ﬁrst approximating the probability dis-
+tributions over the resource consumptions with phase-type
+distributions, which use exponential distributions as building
+blocks [Neuts, 1981].
+It then uses value iteration to solve
+the resulting MDPs by exploiting properties of exponential
+distributions to calculate the value functions after every itera-
+tion accurately (= without reapproximations) and efﬁciently.
+CPH shares with Lazy Approximation that it provides strong
+guarantees on the quality of the resulting policy but runs sub-
+stantially faster than Lazy Approximation in our experimental
+feasibility study in a Mars rover domain.
+
+2 The Planning Problem
+We use time as an example of a real-values resource and solve
+planning problems that are similar to the ones studied in [Li
+
+IJCAI-07
+
+2536
+
+start
+
+return
+to base
+
+base
+
+return
+to base
+
+site 3
+
+move
+to site 1
+
+return
+to base
+
+return
+to base
+
+move
+to site 3
+
+site 1
+
+move
+to site 2
+
+site 2
+
+Figure 1: Mars rover domain.
+
+and Littman, 2005]. They are modeled as MDPs with two
+sources of uncertainty: action durations and action outcomes.
+S denotes the ﬁnite set of states of the MDP and A(s) the
+ﬁnite set of actions that can be executed in state s ∈ S.
+Assume that an agent is in state s ∈ S with a deadline be-
+ing t > 0 time units away (= with time-to-deadline t), after
+It executes an action a ∈ A(s) of
+which execution stops.
+its choice. The execution of the action cannot be interrupted,
+and the action duration t(cid:2) is distributed according to a given
+probability distribution ps,a(t(cid:2)) that can depend on both the
+state s and the action a. If t(cid:2) ≥ t, then the time-to-deadline
+t − t(cid:2) ≤ 0 after the action execution is non-positive, which
+means that the deadline is reached and execution stops. Oth-
+erwise, with probability P (s(cid:2)|s, a), the agent obtains reward
+R(s, a, s(cid:2)) ≥ 0 and transitions to state s(cid:2) ∈ S with time-to-
+deadline t − t(cid:2) and repeats the process. The time-to-deadline
+at the beginning of execution is Δ > 0. The objective of the
+agent is to maximize its expected total reward until execution
+stops.
+We use a Mars rover domain (Figure 1) that is similar to one
+used in [Bresina et al., 2002] as an example of our planning
+problems. A rover has to maximize its expected total reward
+with time-to-deadline Δ = 4. The states of the MDP cor-
+respond to the locations of the rover: its start location, site
+1, site 2, site 3 and its base station. The rover can perform
+two actions with deterministic action outcomes outside of its
+base station: (1) It can move to the next site and collect a
+rock probe from there. It receives rewards 4, 2 and 1 for col-
+lecting rock probes from sites 1, 2 and 3, respectively. (2)
+It can also move back to its base station to perform a com-
+munication task, which drains its energy completely and thus
+makes it impossible for the rover to perform additional ac-
+tions. It receives reward 6 for performing the communication
+task. All action durations are characterized by the exponen-
+tial distribution ps,a(t(cid:2)) = e−t(cid:2)
+= E(1). We also consider
+the case where all action durations are characterized by ei-
+ther Weibull or Normal distributions. The Mars rover domain
+might appear small with only 5 discrete states. However, if
+one discretizes the time-to-deadline into 1/100 time units and
+encodes it in the states, then there are already 5∗ 400 = 2000
+states.
+
+3 General Approach
+
+We can solve our planning problems by encoding the time-
+to-deadline in the states, resulting in a continuous state MDP
+that can be solved with a version of value iteration [Boyan and
+Littman, 2000] as follows: Let V ∗(s)(t) denote the largest
+
+expected total reward that the agent can obtain until execution
+stops if it starts in state s ∈ S with time-to-deadline 0 ≤
+t ≤ Δ. The agent can maximize its expected total reward by
+executing the action
+
+arg max
+a∈A(s)
+
+X
+P (s(cid:4)|s, a)
+Z t
+
+(
+s(cid:2)∈S
+
+0
+
+V n+1
+
+(s(cid:4)
+
+)
+
+R t
+
+0
+
+8<: 0
+
+(s(cid:4)
+
+)(t − t(cid:4)
+
+ps,a(t(cid:4)
+
+) + V ∗
+
+)(R(s, a, s(cid:4)
+
+)) dt(cid:4)
+in state s ∈ S with time-to-deadline 0 ≤ t ≤ Δ, which can
+be explained as follows: When it executes action a ∈ A(s)
+in state s ∈ S, it incurs action duration t(cid:2) with probability
+ps,a(t(cid:2)). If 0 ≤ t(cid:2) ≤ t, then it transitions to state s(cid:2) ∈ S with
+probability P (s(cid:2)|s, a) and obtains an expected total future re-
+ward of R(s, a, s(cid:2)) + V ∗(s(cid:2))(t − t(cid:2)).
+Value iteration calculates the values V n(s)(t) using the fol-
+lowing Bellman updates for all states s ∈ S,
+time-to-
+deadlines 0 ≤ t ≤ Δ, and iterations n ≥ 0
+V 0
+
+(s)(t) := 0
+
+P
+s(cid:2)∈S P (s(cid:4)|s, a)
+) + V n
+
+(s)(t) :=
+
+)(t − t(cid:4)
+
+)(R(s, a, s(cid:4)
+
+maxa∈A(s)(
+ps,a(t(cid:4)
+
+if t ≤ 0
+otherwise
+)) dt(cid:4)
+).
+It then holds that limn→∞ V n(s)(t) = V ∗(s)(t) for all
+states s ∈ S and times-to-deadline 0 ≤ t ≤ Δ. Unfortu-
+nately, value iteration cannot be implemented as stated since
+the number of values V n(s)(t) is inﬁnite for each iteration
+n since the time-to-deadline t is a real-valued variable. We
+remedy this situation by viewing the V n(s) as value func-
+tions that map times-to-deadline t to the corresponding values
+V n(s)(t), similar to [Liu and Koenig, 2005]. In this context,
+we make the following contributions: First, we show after
+how many iterations n value iteration can stop so that the ap-
+proximation error maxs∈S,0≤t≤Δ |V ∗(s)(t)−V n(s)(t)| is no
+larger than a given constant  > 0. Second, we show that each
+value function V n(s) can be represented exactly with a vec-
+tor of a small number of real values each. Finally, we show
+how the Bellman updates can efﬁciently transform the vec-
+tors of the value functions V n(s) to the vectors of the value
+functions V n+1(s). We present these three contributions in
+the following as three steps of CPH.
+
+4 CPH: Step 1
+
+CPH ﬁrst approximates the probability distributions of ac-
+tion durations that are not exponential with phase-type dis-
+tributions, resulting in chains of exponential distributions
+λe−λt(cid:2)
+= E(λ) with potentially different constants λ > 0
+[Neuts, 1981]. CPH then uses uniformization (i.e., creates
+self-transitions) to make all constants λ identical without
+changing the underlying stochastic process. We do not give
+details on how to implement these two well-known steps (see
+[Neuts, 1981; Younes and Simmons, 2004] for details) but
+rather provide an example. Figure 2 shows how an action with
+a deterministic action outcome and an action duration that is
+characterized by a Normal distribution N(μ = 2, σ = 1) is
+ﬁrst approximated with a phase-type distribution with three
+
+IJCAI-07
+
+2537
+
+Initial probability distribution
+
+start
+
+p=N(2,1)
+
+P=1
+
+base
+
+After transformation to phase-type distribution
+
+start
+
+p=E(1.45)
+
+P=1
+
+p=E(1.42)
+
+P=0.97
+
+p=E(1.43)
+
+P=1
+
+base
+
+After uniformization
+
+p=E(1.45)
+
+P=0.02
+
+p=E(1.42)
+
+P=0.03
+
+p=E(1.45)
+
+P=0.01
+
+start
+
+p=E(1.45)
+
+P=1
+
+p=E(1.45)
+
+P=0.95
+
+p=E(1.45)
+
+P=0.99
+
+base
+
+p=E(1.45)
+
+P=0.03
+
+Figure 2: Transformation of a Normal distribution to a chain
+of exponential distributions E(1.45). p and P denote the ac-
+tion duration and action outcome probabilities, respectively.
+
+phases and then uniformized to yield the exponential distri-
+butions E(1.45). From now on, we can therefore assume
+without loss of generality that the action durations t(cid:2) of all
+actions are distributed according to exponential distributions
+ps,a(t(cid:2)) = p(t(cid:2)) = E(λ) with the same constant λ > 0. Value
+iteration cannot determine the value functions V ∗(s) with a
+ﬁnite number of iterations since the uniformized MDPs have
+self-transitions. However, Theorem 1 in the appendix shows
+that the approximation error is no larger than a given constant
+ > 0 if value iteration stops after at least
+Rmax(eλΔ − 1)
+
+log eλΔ−1
+eλΔ
+
+
+
+iterations, where Rmax := maxs∈S,a∈A(s),s(cid:2)∈S R(s, a, s(cid:2)).
+Running time of Step 1 of CPH is negligible since analytic
+phase-type approximation methods run in time O(1).
+
+5 CPH: Step 2
+
+«
+
+„
+
+n−1
+(λt)
+(n − 1)!
+
+cs,i,2 + . . . + cs,i,n+1
+
+It follows directly from the considerations in the next section
+that there exist times-to-deadline 0 = ts,0 < ts,1 < . . . <
+i (s)(t) for all t ∈
+ts,ms+1 = Δ such that V n(s)(t) = V n
+[ts,i, ts,i+1), where
+i (s)(t) = cs,i,1 − e−λt
+V n
+(1)
+for the parameters cs,i,j for all s ∈ S, 0 ≤ i ≤ ms and
+1 ≤ j ≤ n + 1. We refer to the times-to-deadline ts,i as
+breakpoints, the [ts,i, ts,i+1) as intervals, the expressions for
+the value functions V n
+i (s) as gamma functions (which is a
+simpliﬁcation since they are actually linear combinations of
+Euler’s incomplete gamma functions), and the expressions
+for the value functions V n(s) as piecewise gamma func-
+tions. We represent each gamma function V n
+i (s) as a vector
+[cs,i,1, . . . , cs,i,n+1] = [cs,i,j]n+1
+j=1 and each piecewise gamma
+function V n(s) as a vector of vectors [ts,i:V n
+i=0 =
+[ts,i:[cs,i,j]n+1
+i=0. Figure 3, for example, shows the value
+function V ∗(start) for our Mars rover domain.
+
+i (s)]ms
+
+j=1 ]ms
+
+of
+
+3:
+four
+
+Figure
+sists
+[0:V ∗
+[0:[6, 6],
+3.2:[13, 27.1,−1.92, 7, 6]].
+
+0 (start), 0.8:V ∗
+
+Value
+gamma
+1 (start), 1.8:V ∗
+0.8:[10, 10, 6],
+
+function
+functions:
+
+V ∗(start)
+V ∗(start)
+2 (start), 3.2:V ∗
+
+con-
+=
+3 (start)] =
+1.8:[12, 8.73, 8, 6],
+
+(cid:2)
+
+(cid:3) t
+
+0
+
+6 CPH: Step 3
+We now explain how CPH uses value iteration. For n = 0,
+the value functions V n(s) = 0 satisfy V n(s) = [0:[0]] and
+thus are (piecewise) gamma. We show by induction that all
+value functions V n+1(s) are piecewise gamma if all value
+functions V n(s) are piecewise gamma. We also show how
+the Bellman updates can efﬁciently transform the vectors of
+the value functions V n(s) to the vectors of the value functions
+V n+1(s). Value iteration calculates
+
+)
+
+0
+
+:=
+
+p(t(cid:2)
+
+)(R(s, a, s(cid:2)
+
+P (s(cid:2)|s, a)
+)(t − t(cid:2)
+
+V n+1(s)(t)
+
+)) dt(cid:2).
+
+We break this calculation down into four stages: First,
+V n
+Sec-
+Third,
+Finally,
+
+ond, (cid:4)V n(s(cid:2))(t)
+(s(cid:2))(t − t(cid:2))
+(cid:6)V n(s, a)(t)
+
+:= max
+a∈A(s)
+s(cid:2)∈S
++ V n(s(cid:2)
+(cid:5) t
+:= R(s, a, s(cid:2)) + V n(s(cid:2))(t − t(cid:2)).
+(cid:7)
+s(cid:2)∈S P (s(cid:2)|s, a)(cid:4)V n(s(cid:2))(t).
+(s(cid:2))(t − t(cid:2)) dt(cid:2).
+p(t(cid:2))V n
+:=
+(cid:6)V n(s, a)(t).1
+(s(cid:2))(t − t(cid:2))
+
+i=0. In Stage 1, CPH calculates V n
+
+V n+1(s)(t) := maxa∈A(s)
+:= R(s, a, s(cid:2)) +
+Stage 1: Calculate V n
+V n(s(cid:2))(t − t(cid:2)). Our induction assumption is that all value
+functions V n(s(cid:2)) are piecewise gamma,
+i.e., V n(s(cid:2)) =
+(s(cid:2))(t −
+[ts(cid:2),i:[cs(cid:2),i,j]n+1
+t(cid:2)) := R(s, a, s(cid:2))+V n(s(cid:2))(t−t(cid:2)), which is the same as calcu-
+(s(cid:2))(t) := R(s, a, s(cid:2)) + V n(s(cid:2))(t) since R(s, a, s(cid:2))
+lating V n
+is constant. Then,
+) = R(s, a, s(cid:2)
+(s(cid:2)
+= R(s, a, s(cid:2)
+= [ts(cid:2),i : [c(cid:2)
+
+) + V n(s(cid:2)
+) + [ts(cid:2),i : [cs(cid:2),i,j]n+1
+s(cid:2),i,j]n+1
+
+j=1 ]ms(cid:2)
+
+j=1 ]ms(cid:2)
+
+V n
+
+i=0
+
+)
+
+.
+
+i=0
+
+j=1 ]ms(cid:2)
+s(cid:2),i,1 = R(s, a, s(cid:2)) + cs(cid:2),i,1 and c(cid:2)
+)(t − t(cid:4)
+
+where c(cid:2)
+0 ≤ i ≤ ms(cid:2) and 2 ≤ j ≤ n + 1.
+) andeV n
+(s, a, s(cid:4)
+
+instead of V n
+make our notation rather cumbersome.
+
+1We should really use V n
+
+)(t−t(cid:4)
+
+(s(cid:4)
+
+(s(cid:4)
+
+s(cid:2),i,j = cs(cid:2),i,j for all
+
+) and eV n
+
+)(t)
+)(t), respectively, but this would
+
+(s, a, s(cid:4)
+
+IJCAI-07
+
+2538
+
+Stage 2: Calculate (cid:4)V n(s(cid:2))(t) :=
+
+which is a convolution of p and V n
+Consider the value functions V n
+now show by induction that
+
+(cid:5) t
+(s(cid:2))(t − t(cid:2)) dt(cid:2),
+(s(cid:2)) denoted as p∗V n
+(s(cid:2)).
+(s(cid:2)) deﬁned in Stage 1. We
+
+p(t(cid:2))V n
+
+0
+
+(cid:4)V n
+i (s(cid:2)
+)(t)
+= (p ∗ V n
+− i−1(cid:2)
+
+i(cid:2)
+
+=0
+
+i(cid:2)
+
+i (s(cid:2)
+
+))(t) − e−λt(
+i(cid:2)
+eλts(cid:2) ,i(cid:2)+1(p ∗ V n
+i(cid:2)(s(cid:2)
+
+=1
+
+eλts(cid:2) ,i(cid:2) (p ∗ V n
+
+i(cid:2)(s(cid:2)
+
+))(ts(cid:2),i(cid:2))
+
+))(ts(cid:2),i(cid:2)
+
++1))
+
+(2)
+
+(cid:4)V n(s(cid:2))(t) = (p ∗ V n
+for all t ∈ [ts(cid:2),i, ts(cid:2),i+1). Equation (2) holds for i = 0 since
+0 (s(cid:2)))(t) for all t ∈ [ts(cid:2),0, ts(cid:2),1). Assume
+now that Equation (2) holds for some i. It then also holds for
+show that (cid:4)V n
+i + 1 as shown in Figure 4. We use the following lemma to
+i (s(cid:2)) is a gamma function and convert it to vector
+notation.
+Lemma 1. Let p(t) = E(λ). Then, p ∗ [k1, k2, . . . , kn] =
+[k1, k1, k2, . . . , kn].
+
+Proof. By symbolic integration, p ∗ [k]n
+(cid:7)n−1
+(cid:7)n−1
+j=1 = [k]n+1
+Then, p ∗ [k1, . . . , kn] = p ∗
+j=1
+for any constant k.
+(cid:7)n−1
+i=1 (p ∗ [ki −
+i=1 [ki − ki+1]i
+(
+j=1) =
+i=1 [ki − ki+1]i+1
+j=1) + p∗ [kn]n
+j=1 + [kn]n+1
+ki+1]i
+j=1 =
+[k1, k1, . . . , kn].
+
+j=1 + [kn]n
+j=1 =
+
+We now transform Equation (2) to vector notation.
+
+(cid:4)V n
+i (s(cid:2)
+where
+
+with
+
+) = [c(cid:2)(cid:2)
+s(cid:2),i,j]n+2
+j=1
+c(cid:2)(cid:2)
+s(cid:2),i,1 := c(cid:2)
+s(cid:2),i,2 := c(cid:2)
+c(cid:2)(cid:2)
+s(cid:2),i,1
+s(cid:2),i,j ∀j=2,3,...,n+1
+c(cid:2)(cid:2)
+s(cid:2),i,j+1 := c(cid:2)
+i(cid:2)
+eλts(cid:2) ,i(cid:2) (p ∗ V n
+− i−1(cid:2)
+
+eλts(cid:2) ,i(cid:2)+1(p ∗ V n
+
+zs(cid:2),i :=
+
+i(cid:2)(s(cid:2)
+
+i(cid:2)(s(cid:2)
+
+=1
+
+i(cid:2)
+
+s(cid:2),i,1 + zs(cid:2),i
+
+))(ts(cid:2),i(cid:2))
+
+))(ts(cid:2),i(cid:2)
+
++1).
+
+i(cid:2)
+
+=0
+
+3:
+
+Stage
+
+Calculate
+
+s(cid:2),i,j]n+2
+
+j=1 ]ms(cid:2)
+i=0.
+(cid:6)V n(s, a)(t)
+
+Consequently, (cid:4)V n(s(cid:2)) = [ts(cid:2),i:[c(cid:2)(cid:2)
+(cid:7)
+s(cid:2)∈S P (s(cid:2)|s, a)(cid:4)V n(s(cid:2))(t).
+:=
+tions (cid:4)V n(s(cid:2)) deﬁned in Stage 2.
+the value func-
+Since they might
+have different breakpoints {ts(cid:2),i}ms(cid:2)
+(cid:8)
+i=0 for different states
+s(cid:2) ∈ S with P (s(cid:2)|s, a) > 0, CPH introduces the common
+breakpoints {ts,a,i}ms,a
+{ts(cid:2),i}m(cid:2)
+without changing the value functions (cid:4)V n(s(cid:2)). Afterwards,
+(cid:4)V n(s(cid:2)) = [ts,a,i:[c(cid:2)(cid:2)(cid:2)
+s(cid:2),i,j = c(cid:2)(cid:2)
+for the unique i(cid:2) with [ts,a,i, ts,a,i+1) ⊆ [ts(cid:2),i(cid:2) , ts(cid:2),i(cid:2)
+
+i=0 where c(cid:2)(cid:2)(cid:2)
+
+s(cid:2)∈S:P (s(cid:2)|s,a)>0
+
+j=1 ]ms,a
+
+s(cid:2),i,j]n+2
+
+s(cid:2),i(cid:2),j
++1).
+
+Consider
+
+s
+i=0
+
+i=0
+
+=
+
+Then,(cid:6)V n(s, a) =
+
+=
+
+(cid:2)
+(cid:2)
+
+s(cid:2)∈S
+
+s(cid:2)∈S
+
+)
+
+P (s(cid:2)|s, a)(cid:4)V n(s(cid:2)
+P (s(cid:2)|s, a)[ts,a,i : [c(cid:2)(cid:2)(cid:2)
+(cid:2)
+P (s(cid:2)|s, a)c(cid:2)(cid:2)(cid:2)
+
+= [ts,a,i : [
+s(cid:2)∈S
+= [ts,a,i : [c(cid:2)(cid:2)(cid:2)(cid:2)
+s,a,i,j]n+2
+
+j=1 ]ms,a
+i=0
+
+.
+
+s(cid:2),i,j]n+2
+
+j=1 ]ms,a
+i=0
+
+s(cid:2),i,j]n+2
+
+j=1 ]ms,a
+i=0
+
+s
+
+s
+i=0
+
+(cid:8)
+
+s,i,j]n+2
+
+s,i}m(cid:2)
+
+s,i:[c(cid:2)(cid:2)(cid:2)(cid:2)(cid:2)
+
+a∈A(s){ts,a,i}ms,a
+
+s,i+1) ⊆ [ts,as,i,i(cid:2) , ts,as,i,i(cid:2)
+
+(cid:6)V n(s, a)(t).
+Consider the value functions (cid:6)V n(s, a) deﬁned in Stage 3.
+Stage 4: Calculate V n+1(s)(t) := maxa∈A(s)
+Since they might have different breakpoints {ts,a,i}ms,a
+i=0 for
+different actions a ∈ A(s), CPH introduces common break-
+tions (cid:6)V n(s, a). CPH then introduces additional dominance
+i=0 without changing the value func-
+points
+breakpoints at the intersections of the value functions to en-
+sure that, over each interval, one of the value functions dom-
+inates the other ones. Let {t(cid:2)
+i=0 be the set of break-
+j=1 ]m(cid:2)
+points afterwards. Then, V n+1(s) = [t(cid:2)
+s,as,i,i(cid:2),j for actions as,i ∈ A(s) and the
+s,i,j = c(cid:2)(cid:2)(cid:2)(cid:2)
+where c(cid:2)(cid:2)(cid:2)(cid:2)(cid:2)
+s,i+1), (cid:6)V n(s, a)(t) ≤ (cid:6)V n(s, as,i)(t). Further-
+unique i(cid:2) with [t(cid:2)
+s,i, t(cid:2)
++1) and, for
+all t ∈ [t(cid:2)
+s,i, t(cid:2)
+more, action as,i should be executed according to the value
+function V n+1(s) if the current state is s and the time-to-
+deadline is t ∈ [t(cid:2)
+s,i, t(cid:2)
+To summarize, the value functions V n+1(s) are piecewise
+gamma, and the vectors of the value functions V n(s) can be
+transformed automatically to the vectors of the value func-
+tions V n+1(s). The lengths of the vectors increase linearly in
+the number of iterations and, although the number of break-
+points (that are placed automatically during the transforma-
+tions) can increase exponentially, in practice it stays small
+since one can merge small intervals after each iteration of
+value iteration to reduce the number of breakpoints The trans-
+formations require only simple vector manipulations and a
+numerical method that determines the dominance breakpoints
+approximately, for which CPH uses a bisection method. We
+now show experimentally that the transformations are both
+efﬁcient and accurate.
+
+s,i+1).
+
+7 Experiments
+
+We performed an experimental feasibility study in our Mars
+rover domain that compares CPH and Lazy Approxima-
+tion (LA) [Li and Littman, 2005], currently the leading
+algorithm for solving continuous state MDPs with qual-
+ity guarantees (Figure 5). We always plot
+the error
+max0≤t≤Δ |V ∗(start)(t) − V (start)(t)| of the calculated
+value function V (start) on the x-axis and the correspond-
+ing runtime (measured in milliseconds) in log scale on the
+y-axis.
+Experiment 1: We determined how CPH and Lazy Approx-
+imation trade off between runtime and error for our Mars
+
+IJCAI-07
+
+2539
+
+)(t) =
+
+) dt(cid:4)
+We split the integral into two ranges. For ts(cid:2),i+1 ≤ t(cid:4) ≤ t < ts(cid:2),i+2 we know that V n
+
+i+1(s(cid:4)
+
+)(t) =
+
+p(t − t(cid:4)
+
+)(t − t(cid:4)
+
+)V n
+
+)V n
+
+)(t(cid:4)
+
+(s(cid:4)
+
+(s(cid:4)
+
+0
+
+0
+
+(s(cid:4)
+
+)(t(cid:4)
+
+) = V n
+
+i+1(s(cid:4)
+
+)(t(cid:4)
+
+).
+
+Z t
+
+) dt(cid:4)
+
+= eV n
+Z ts(cid:2) ,i+1
+Z ts(cid:2),i+1
+
+0
+
+i+1(s(cid:4)
+
+)(t(cid:4)
+
+) dt(cid:4)
+
++
+) = λe−λ(t−t(cid:2))
+)(t(cid:4)
+
+p(t − t(cid:4)
+
+)V n
+
+(s(cid:4)
+
+)(t(cid:4)
+
+) dt(cid:4)
+
+= e−λ(t−ts(cid:2) ,i+1)λe−λ(ts(cid:2) ,i+1−t(cid:2))
+
+= e−λ(t−ts(cid:2) ,i+1)p(ts(cid:2),i+1 − t(cid:4)
+
+0
+
+)(t(cid:4)
+
+)V n
+
+p(t − t(cid:4)
+
+) dt(cid:4) −
+) dt(cid:4) − e−λ(t−ts(cid:2) ,i+1)
+i+1(s(cid:4)
+
+(p ∗ V n
+
+) dt(cid:4)
+
+i+1(s(cid:4)
+
+Z ts(cid:2) ,i+1
+))(ts(cid:2),i+1) + e−λ(t−ts(cid:2),i+1)eV n
+
+p(ts(cid:2),i+1 − t(cid:4)
+
+i+1(s(cid:4)
+
+)V n
+
+0
+
++ e−λ(t−ts(cid:2),i+1)
+
+)(t(cid:4)
+i (s(cid:4)
+
+)
+
+Z ts(cid:2) ,i+1
++ e−λ(t−ts(cid:2),i+1)eV n
+
+p(ts(cid:2),i+1 − t(cid:4)
+
+0
+
+) dt(cid:4)
+
+)V n
+
+(s(cid:4)
+
+)(t(cid:4)
+
+) dt(cid:4)
+
+i (s(cid:4)
+
+)(ts(cid:2),i+1)
+
+Z t
+
+=
+
+p(t(cid:4)
+
+i+1(s(cid:4)
+
+p(t − t(cid:4)
+
+eV n
+Z t
+)V n
+Z t
+ts(cid:2) ,i+1
+It holds that p(t − t(cid:4)
+Z t
+p(t − t(cid:4)
+i+1(s(cid:4)
+p(t − t(cid:4)
+=
+= (p ∗ V n
+i+1(s(cid:4)
+
+)V n
+
+=
+
+0
+
+0
+
+= (p ∗ V n
+
+i+1(s(cid:4)
+− e−λts(cid:2),i+1
+
+We ﬁnally unroll the recursion by using the induction assumption.
+
+)(t(cid:4)
+
+i+1(s(cid:4)
+)V n
+))(t) − e−λ(t−ts(cid:2),i+1)
+ 
+iX
+))(t) − e−λ(t−ts(cid:2),i+1)
+(p ∗ V n
+i+1X
+
+eλts(cid:2) ,i(cid:2)
+
+ 
+
+i(cid:2)=1
+
+i(cid:2)=1
+
+i+1(s(cid:4)
+
+(p ∗ V n
+i(cid:2) (s(cid:4)
+
+))(ts(cid:2),i(cid:2) ) − i−1X
+
+))(ts(cid:2),i+1) + e−λ(t−ts(cid:2),i+1)
+eλts(cid:2) ,i(cid:2)+1 (p ∗ V n
+i(cid:2) (s(cid:4)
+
+i(cid:2)=0
+
+))(ts(cid:2),i(cid:2) ) − iX
+
+i(cid:2)=0
+
+)(ts(cid:2),i+1)
+
+!
+
+((p ∗ V n
+
+i (s(cid:4)
+
+))(ts(cid:2),i+1)
+
+))(ts(cid:2),i(cid:2)+1)
+
+)
+
+!
+
+= (p ∗ V n
+
+i+1(s(cid:4)
+
+))(t) − e−λt
+
+eλts(cid:2),i(cid:2)
+
+(p ∗ V n
+
+i(cid:2) (s(cid:4)
+
+eλts(cid:2) ,i(cid:2)+1 (p ∗ V n
+
+i(cid:2) (s(cid:4)
+
+))(ts(cid:2),i(cid:2)+1)
+
+Figure 4: Proof by induction of Equation (2).
+
+Figure 5: Empirical evaluation of CPH and Lazy Approximation (Experiments 1,2,3) and the tightness of the theoretical
+planning horizon calculated from Theorem 1.
+
+rover domain. Since the action durations in the Mars rover
+domain are already distributed exponentially and thus phase-
+type with one phase, there are no errors introduced by approx-
+imating the probability distributions over the action durations
+with phase-type distributions. Also, since these distributions
+are equal, uniformization will not introduce self-transitions
+and value iteration can run for a ﬁnite number of iterations.
+We therefore varied for CPH the accuracy of the bisection
+method that determines the dominance breakpoints and for
+Lazy Approximation the accuracy of the piecewise constant
+approximations of the probability distributions over the ac-
+tion durations and value functions. Our results show that
+CPH is faster than Lazy Approximation with the same error,
+by three orders of magnitude for small errors. For example,
+CPH needed 2ms and Lazy Approximation needed 1000ms to
+compute a policy that is less than 1% off optimal, which cor-
+responds to an error of 0.13 in the Mars rover domain.
+
+Experiments 2 and 3: We then determined how CPH and Lazy
+Approximation trade off between runtime and error when all
+action durations in our Mars rover domain are characterized
+
+by either Weibull distributions W eibull(α = 1, β = 2) (Ex-
+periment 2) or Normal distributions N(μ = 2, σ = 1) (Ex-
+periment 3), and both methods thus need to approximate the
+value functions. We ﬁxed for CPH the accuracy of the bisec-
+tion method but varied the the number of phases used to ap-
+proximate the probability distributions. Our results show that
+CPH is still faster than Lazy Approximation with the same
+error, by more than one order of magnitude for small errors.
+For example, CPH needed 149ms (with ﬁve phases) and Lazy
+Approximation needed 4471ms to compute a policy that is
+less than 1% off optimal for the Weibull distributions. In ad-
+dition, we observed that CPH converged much faster than the
+theoretical planning horizon calculated from Theorem 1 sug-
+gests.
+
+8 Conclusions
+Planning with real-valued and limited resources can be mod-
+eled with continuous state MDPs. Despite recent advances
+in solving continuous state MDPs, state-of-the art solution
+methods are still either inefﬁcient [Li and Littman, 2005]
+
+IJCAI-07
+
+2540
+
+[Hauskrecht and Kveton, 2003] M. Hauskrecht and B. Kveton. Lin-
+ear programm approximations for factored continuous-state
+MDPs. In NIPS, pages 895–902, 2003.
+
+Thus
+
+bi <
+
+bi−1
+bi−2
+
+αj
+
+j=i
+
+(s)(t)| ≤ , where
+maxs∈S,0≤t≤Δ |V ∗(s)(t) − V n∗
+Rmax := maxs∈S,a∈A(s),s(cid:2)∈S R(s, a, s(cid:2)).
+(cid:7)∞
+
+j! for all i ≥ 0.
+Proof. Let α := λΔ > 0 and bi :=
+It holds that b0 = eα and b1 = b0 − 1 = eα − 1. We now
+provide a bound on the probability pi(t) that the sum of the
+action durations of a sequence of i ≥ 1 actions is no more
+than 0 ≤ t ≤ Δ.
+|
+}
+(p ∗ p ∗ . . . ∗ p
+pi(t) ≤ pi(Δ) =
+0
+0
+@eα − i−1X
+@ ∞X
+∞X
+
+−λt(cid:2) t(cid:2)i−1λi
+1
+A
+
+{z
+1
+A =
+
+− i−1X
+
+Z Δ
+
+Z Δ
+
+(cid:2)
+) dt
+
+αj
+j!
+
+αj
+j!
+
+αj
+j!
+
+(cid:2)
+)(t
+
+1
+eα
+
+1
+eα
+
+j=0
+
+j=0
+
+j=0
+
+i!
+
+=
+
+=
+
+e
+
+0
+
+0
+
+i
+
+(cid:2)
+dt
+
+=
+
+1
+eα
+
+j=i
+
+αj
+j!
+
+bi
+eα
+
+.
+
+=
+
+The values
+1
+αi
+monotonically in i because the values
+
+bi+1
+bi =
+
+αi
+i! +bi+1
+
+bi+1
+
+=
+
+i! bi+1
+
+decrease strictly
+
++1
+
+αi
+
+=
+
+αi
+
+P∞
+
+i!
+
+i! bi+1
+increase strictly monotonically in i. Consequently,
+
+(i+2)(i+1) +
+
+α
+i+1 +
+
+j=i+1
+
+αj
+j!
+
+α2
+
+=
+
+1
+(i+3)(i+2)(i+1) + . . .
+
+α3
+
+eα − 1
+
+eα =
+
+1 >
+
+b1
+b0
+
+>
+
+b2
+b1
+
+>
+
+b3
+b2
+
+> . . . > 0.
+
+bi−1 <
+
+b1
+b0
+
+bi−2
+bi−3
+
+bi−2 <
+
+bi−1 <
+
+„
+
+b1
+b0
+
+«i−1
+
+b1
+b0
+
+< . . . <
+
+b1.
+
+«2
+
+„
+
+b1
+b0
+
+bi−2
+
+We now use these results to bound |V ∗(s)(t) − V n(s)(t)|
+for all s ∈ S and 0 ≤ t ≤ Δ. Assume that the agent starts
+in state s ∈ S with time-to-deadline 0 ≤ t ≤ Δ. Value
+iteration with n iterations determines the highest expected to-
+tal reward V n(s)(t) under the restriction that execution stops
+when the deadline is reached or n actions have been executed.
+The largest expected total reward V ∗(s)(t) does not have the
+second restriction and can thus be larger than V n(s)(t). In
+particular, only V ∗(s)(t) takes into account that the agent
+can execute the (n + 1)st action with probability pn+1(t),
+the (n + 2)nd action with probability pn+2(t), and so on, re-
+ceiving a reward of at most Rmax for each action execution.
+Additionally, V n(s)(t) is locally greedy, i.e., the reward for
+its ﬁrst n actions exceeds the reward for the ﬁrst n actions of
+V ∗(s)(t). Thus,
+
+∞X
+∞X
+
+i=n+1
+
+i=n+1
+
+Rmaxpi(t)
+
+„
+
+«i−1
+„
+«n ∞X
+
+b1
+
+b1
+b0
+
+Rmaxb1
+
+eα
+
+=
+
+b1
+b0
+
+«i
+
+„
+
+b1
+b0
+
+i=0
+
+0 ≤ V
+
+∗
+
+(s)(t) − V n
+
+(s)(t) ≤
+
+≤ Rmax
+eα
+
+=
+
+=
+
+Rmaxb1
+
+eα
+
+Rmaxb1
+
+eα
+
+i=n+1
+
+∞X
+∞X
+„
+
+i=0
+b1
+b0
+
+bi <
+
+„
+«n
+
+b1
+b0
+
+Rmax
+
+eα
+
+«i+n
+
+1
+
+1 − b1
+
+b0
+
+.
+
+We now bound this expression by .
+
+„
+
+«n
+
+Rmaxb1
+
+eα
+
+b1
+b0
+
+≤ 
+
+1
+
+1 − b1
+
+b0
+
+n ≥ log eλΔ−1
+eλΔ
+
+
+
+Rmax(eλΔ − 1)
+
+.
+
+or cannot provide guarantees on the quality of the resulting
+policy [Lagoudakis and Parr, 2003]. In this paper, we pre-
+sented a solution method, called CPH, that avoids both of
+these shortcomings. The aim of this paper was to establish
+a sound theoretical framework for CPH and provide a ﬁrst
+experimental feasibility study to demonstrate its potential. It
+is future work to study the theoretical properties of CPH in
+more depth (for example, analyze its complexity or extend
+its error analysis), evaluate CPH and its three approximations
+more thoroughly (for example, in larger domains, additional
+domains and against additional solution methods) and extend
+CPH (for example, to handle more than one resource, handle
+replenishable resources or, similarly to Lazy Approximation,
+approximate its value functions to be able to reduce its num-
+ber of breakpoints).
+
+References
+
+[Boyan and Littman, 2000] J. Boyan and M. Littman. Exact solu-
+tions to time-dependent MDPs. In NIPS, pages 1026–1032, 2000.
+[Bresina et al., 2002] J. Bresina, R. Dearden, N. Meuleau,
+D. Smith, and R. Washington. Planning under continuous time
+and resource uncertainty: A challenge for AI.
+In UAI, pages
+77–84, 2002.
+
+[Lagoudakis and Parr, 2003] M. Lagoudakis and R. Parr. Least-
+
+squares policy iteration. JMLR, 4(6):1107–1149, 2003.
+
+[Li and Littman, 2005] L. Li and M. Littman. Lazy approxima-
+tion for solving continuous ﬁnite-horizon MDPs. In AAAI, pages
+1175–1180, 2005.
+
+[Liu and Koenig, 2005] Y. Liu and S. Koenig. Risk-sensitive plan-
+ning with one-switch utility functions: Value iteration. In AAAI,
+pages 993–999, 2005.
+
+[Neuts, 1981] M. Neuts. Matrix-Geometric Solutions in Stochas-
+tic Models: An Algorithmic Approach. John Hopkins University
+Press, Baltimore, 1981.
+
+[Nikovski and Brand, 2003] D. Nikovski and M. Brand. Non-linear
+stochastic control in continuous state spaces by exact integration
+in Bellman’s equations. In ICAPS-WS2, pages 91–95, 2003.
+
+[Younes and Simmons, 2004] H. Younes and R. Simmons. Solv-
+ing generalized semi-MDPs using continuous phase-type distri-
+butions. In AAAI, pages 742–747, 2004.
+
+Appendix
+
+The following theorem is a shortened version that does not
+take into account the errors introduced by approximating the
+probability distributions over the action durations with phase-
+type distributions and the dominance breakpoints with a nu-
+merical method.
+It takes only into account the error intro-
+duced by approximating the value functions due to running
+value iteration for only a ﬁnite number of iterations.
+Theorem 1. Let
+≥
+stant and n
+
+ > 0 be any positive
+
+con-
+Then,
+
+Rmax(eλΔ−1) .
+
+
+
+log eλΔ−1
+eλΔ
+
+IJCAI-07
+
+2541
+
+

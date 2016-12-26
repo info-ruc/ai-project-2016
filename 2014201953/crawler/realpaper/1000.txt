@@ -1,0 +1,1028 @@
+A Dual-layer CRFs Based Joint Decoding Method for Cascaded Segmentation and
+
+Labeling Tasks
+
+Yanxin Shi
+
+Mengqiu Wang
+
+Language Technologies Institute
+
+Language Technologies Institute
+
+School of Computer Science
+Carnegie Mellon University
+
+yanxins@cs.cmu.edu
+
+School of Computer Science
+Carnegie Mellon University
+
+mengqiu@cs.cmu.edu
+
+Abstract
+
+Many problems in NLP require solving a cas-
+cade of subtasks. Traditional pipeline approaches
+yield to error propagation and prohibit joint train-
+ing/decoding between subtasks. Existing solutions
+to this problem do not guarantee non-violation
+of hard-constraints imposed by subtasks and thus
+give rise to inconsistent results, especially in cases
+where segmentation task precedes labeling task.
+We present a method that performs joint decod-
+ing of separately trained Conditional Random Field
+(CRF) models, while guarding against violations of
+hard-constraints. Evaluated on Chinese word seg-
+mentation and part-of-speech (POS) tagging tasks,
+our proposed method achieved state-of-the-art per-
+formance on both the Penn Chinese Treebank and
+First SIGHAN Bakeoff datasets. On both segmen-
+tation and POS tagging tasks, the proposed method
+consistently improves over baseline methods that
+do not perform joint decoding.
+
+1 Introduction
+There exists a class of problems which involves solving a cas-
+cade of segmentation and labeling subtasks in Natural Lan-
+guage Processing (NLP) and Computational Biology. For in-
+stance, a semantic role labeling (SRL) system relies heavily
+on syntactic parsing or noun-phrase chunking (NP-chunking)
+to segment (or group) words into constituents. Based on
+the constituent structure, it then identiﬁes semantic argu-
+ments and assigns labels to them [Xue and Palmer, 2004;
+Pradhan et al., 2004]. And for Asian languages such as
+Japanese and Chinese that do not delimit words by space,
+solving word segmentation problem is prerequisite for solv-
+ing part-of-speech (POS) labeling problem. Another exam-
+ple in the Computational Biology ﬁeld is the DNA coding
+region detection task followed by sequence similarity based
+gene function annotation [Burge and Karlin, 1997].
+
+Most previous approaches treat cascaded tasks as processes
+chained in a pipeline. A common shortcoming of those ap-
+proaches is that errors introduced in upstream tasks prop-
+agate through the pipeline and cannot be easily recovered.
+Moreover, the pipeline structure prohibits the use of predic-
+tions of tasks later in the chain to help making better pre-
+
+diction of earlier tasks [Sutton and McCallum, 2005a]. Sev-
+eral new techniques have been proposed recently to address
+these problems. Sutton et al. [2004] introduced the Dynamic
+Conditional Random Fields (DCRFs) to perform joint train-
+ing/decoding of subtasks. One disadvantage of this model
+is that exact inference is generally intractable and can be-
+come prohibitively expensive for large datasets. Sutton and
+McCallum [2005a] presented an alternative model by decou-
+pling the joint training and only performing joint decoding.
+Kudo et al. [2004] presented another Conditional Random
+Field (CRF) [Lafferty et al., 2001] based model that per-
+forms Japanese word segmentation and POS tagging jointly.
+Another popular approach of joint decoding for cascaded
+tasks is to combine multiple predicting tasks into a single
+tagging or labeling task [Luo, 2003; Ng and Low, 2004;
+Yi and Palmer, 2005; Miller et al., 2000].
+
+However, all aforementioned approaches do not work well
+for cases where a segmentation task comes before a labeling
+task. That is because in such cases, the segmentation task
+imposes hard-constraints that cannot be violated in succes-
+sive tasks. For example, if a Chinese POS tagger assigns
+different POS labels to characters within the same word, as
+deﬁned by a word segmenter, the word will not get a single
+consistent POS labels. Similarly, the constituent constraints
+imposed by syntactic parsing and NP-chunking tasks disallow
+argument overlaps in semantic role labeling [Pradhan et al.,
+2004]. From a graphical modeling’s perspective, those mod-
+els all assign nodes to the smallest units in the base segmen-
+tation task (e.g., in the case of Chinese word segmentation,
+the smallest unit is one Chinese character). As a result, those
+models cannot ensure consistency between the segmentation
+and labeling tasks. For instance, [Ng and Low, 2004] can only
+evaluate POS tagging results on a per-character basis, instead
+of a per-word basis. Hindered by the same problem, [Kudo
+et al., 2004] only considered words predeﬁned in a lexicon
+for constructing possible Japanese word segmentation paths,
+which puts limit on the generality of their model.
+
+To tackle this problem, we propose a dual-layer CRFs
+based method that exploits joint decoding of cascaded se-
+quence segmentation and labeling tasks that guards against
+violations of those hard-constraints imposed by segmentation
+task. In this method, we model the segmentation and labeling
+tasks by dual-layer CRFs. At decoding time, we ﬁrst perform
+individual decoding in each layer. Upon these individual de-
+
+IJCAI-07
+
+1707
+
+codings, a probabilistic framework is constructed in order to
+ﬁnd the most probable joint decodings for both subtasks. At
+training time, we trained a cascade of individual CRFs for the
+subtasks, for given our application’s scale, joint training is
+much more expensive [Sutton and McCallum, 2005a]. Evalu-
+ated on Chinese word segmentation and part-of-speech (POS)
+tagging tasks, our proposed method achieved state-of-the-art
+performance on both the Penn Chinese Treebank [Xue et al.,
+2002] and First SIGHAN Bakeoff datasets [Sproat and Emer-
+son, 2003]. On both segmentation and POS tagging tasks, the
+proposed method consistently improves over baseline meth-
+ods that do not perform joint decoding. In particular, we re-
+port the best published performance on the AS open track of
+the First SIGHAN Bakeoff dataset and also the best average
+performance on the four open tracks.
+
+To facilitate our discussion, in later sections we will use
+Chinese segmentation and POS tagging as a working exam-
+ple to illustrate the proposed approach, though it should be
+clear that the model is applicable to any cascaded sequence
+labeling problem.
+
+2 Joint Decoding for Cascaded Sequence
+
+Segmentation and Labeling Tasks
+
+In this section, using Chinese sentence segmentation and POS
+tagging as an example, we present a joint decoding method
+applicable for cascaded segmentation and labeling tasks.
+
+2.1 A Uniﬁed Framework to Combine Chinese
+
+Sentence Segmentation and POS Tagging
+
+Let C = {C1, C2, ..., Cn} denote the observed Chinese
+sentence where Ci is the ith Chinese character in the sen-
+tence, S = {S1, S2, ..., Sn} denote a segmentation sequence
+over C where Si ∈ {B, I} represents segmentation tags
+(Begin and Inside of a word), T = {T1, T2, ..., Tm} de-
+note a POS tagging sequence where m ≤ n and Tj ∈
+{the set of possible P OS labels}. Our goal is to ﬁnd a seg-
+mentation sequence and a POS tagging sequence that max-
+imize the joint probability P (S, T|C)1. Let ˆS and ˆT denote
+the most likely segmentation and POS tagging sequences for
+a given Chinese sentence, respectively. By applying chain
+rule, ˆS and ˆT can be obtained as follows:
+
+< ˆS, ˆT > = arg max
+
+P (S, T|C)
+
+S,T
+
+= arg max
+
+P (T|S, C)P (S|C)
+
+S,T
+
+= arg max
+
+P (T|W(C,S))P (S|C)
+
+(1)
+
+(2)
+
+S,T
+
+Equation 1 can be rewritten as Equation 2, since given a se-
+quence of characters C = {C1, C2, ..., Cn} and a segmenta-
+tion S over it, a sentence can be interpreted as a sequence of
+words W(C,S) = {W1, W2, ..., Wm}.
+
+1Note that a segmentation-POS tagging sequence pair is mean-
+ingful only when the POS tagging sequence T is labeled on the basis
+of the segmentation result S, or the pair of S and T is consistent. In
+our proposed method, the joint probabilities P (S, T|C) of inconsis-
+tent pairs of S and T are deﬁned to be 0.
+
+Note that the joint probability P (S, T|C) is factorized into
+two terms, P (T|W(C,S)) and P (S|C). The ﬁrst term repre-
+sents the probability of a POS tagging sequence T built upon
+the segmentation S over sentence C, while the second term
+represents the probability of the segmentation sequence S.
+Maximizing the product of these two terms can be viewed as
+a reranking process. For a particular sentence C, we maintain
+a list of all possible segmentations over this sentence sorted
+by the their probability P (S|C). For each segmentation S in
+this list, we can ﬁnd a POS tagging sequence T over S that
+maximizes the probability P (T|W(C,S)). Using the product
+of these two probabilities, we can then rerank the segmenta-
+tion sequences. The segmentation sequence S that is reranked
+to be the top of the list of all possible segmentations is the
+ﬁnal segmentation sequence output, and the most probable
+POS tagging sequence along with this segmentation is our ﬁ-
+nal POS tagging output. Such a ﬁnal pair always maximizes
+the joint probability P (S, T|C).
+
+Intuitively, given a segmentation over a sentence, if the
+maximum of probabilities of all POS tagging sequences built
+upon this segmentation is very small, it can be a signal that
+tells us there is high chance that the segmentation is incorrect.
+In this case, we may be able to ﬁnd another segmentation that
+does not have a probability as high as the ﬁrst one, but the
+best POS tagging sequence built upon this segmentation has
+a much more reasonable probability, so that the joint proba-
+bility P (S, T|C) is increased.
+2.2 N-Best List Approximation for Decoding
+To ﬁnd the most probable segmentation and POS tagging se-
+quence pair, exact inference by enumerating over all possi-
+ble segmentation is generally intractable, since the number of
+possible segmentations over a sentence is exponential to the
+number of characters in the sentence.
+
+To overcome this problem, we propose a N-best list ap-
+proximation method. Instead of exhaustively computing the
+list of all possible segmentations, we restrict our rerank-
+ing targets to the N-best list S = {S1, S2, ..., SN}, where
+{S1, S2, ..., SN} is ranked by the probability P (S|C). Then,
+the approximated solution that maximizes the joint probabil-
+ity P (S, T|C) can be formally described as:
+P (S, T|C)
+
+< ˆS, ˆT > = arg max
+S∈S,T
+
+= arg max
+
+P (T|W(C,S))P (S|C)
+
+(3)
+
+S∈S,T
+
+Comparing to other similar work that uses N-best lists
+and SVM for reranking [Daume and Marcu, 2004; Asa-
+hara et al., 2003], or perform rule-based post-processing for
+error correction [Xue and Shen, 2003; Gao et al., 2004;
+Ng and Low, 2004], our method has a unique advantage that
+it outputs not just the best segmentation and POS sequence
+but also a joint probability estimate. This probability esti-
+mate allows more natural integration with higher level NLP
+applications that are also based on probabilistic models, and
+even reserves room for further joint inference.
+
+3 Dual-layer Conditional Random Fields
+In Section 2, we have already factorized the joint probabil-
+ity into two terms P (S|C) and P (T|W(C,S)). Notice that
+
+IJCAI-07
+
+1708
+
+both terms are probabilities of a whole label sequence given
+some observed sequences. Thus, we use Conditional Ran-
+dom Fields (CRFs) [Lafferty et al., 2001] to deﬁne these two
+probability terms.
+
+CRFs deﬁne conditional probability, P (Z|X), by Markov
+random ﬁelds. In the case of Chinese segmentation and POS
+tagging, the Markov random ﬁelds in CRFs are chain struc-
+ture, where X is the sequence of characters or words, and Z is
+the segmentation tags for characters (B or I, used to indicate
+word boundaries) or the POS labels for words (NN, VV, JJ,
+etc.). The conditional probability is deﬁned as:
+
+P (Z|X) =
+
+1
+
+N (X)
+
+T(cid:2)
+
+K(cid:2)
+
+exp (
+
+λkfk(Z, X, t))
+
+(4)
+
+t=1
+
+k=1
+
+where N (X) is a normalization term to guarantee that the
+summation of the probability of all label sequences is one.
+fk(Z, X, t) is the kth localf eaturef unction at sequence po-
+sition t. It maps a pair of X and Z and an index t to {0,1}.
+(λ1, ..., λK) is a weight vector to be learned from training set.
+We model separately the two probability terms deﬁned in
+our model (P (S|C) and P (T|W(C,S))) using the dual-layer
+CRFs (Figure 1). The probability P (S, T|C) that we want to
+maximize can be written as:
+
+P (S, T|C) = P (T|W(C,S))P (S|C)
+× 1
+
+1
+
+=
+
+NS(C)
+
+(5)
+
+NT (W(C,S))
+KT(cid:2)
+
+m(cid:2)
+
+× exp (
+
+j=1
+n(cid:2)
+
+× exp (
+
+k=1
+KS(cid:2)
+
+i=1
+
+k=1
+
+λkfk(T, W(C,S), j))
+
+μkgk(S, C, i))
+
+(6)
+
+where m and n are the number of words and characters in the
+sentence, respectively, NT (W(C,S)) and NS(C) are the nor-
+malizing terms to ensure the sum of the probabilities over all
+possible S and T is one. {λk} and {μk} are the parameters
+for the ﬁrst and the second layer CRFs, respectively, fk and
+gk are the localf eaturef unctions for the ﬁrst and the sec-
+ond layer CRFs, respectively. Their properties and functions
+are the same as common CRFs described before.
+
+The N-best list of segmentation sequences S and the
+value of their corresponding probabilities P (S|C) (S ∈ S)
+can be obtained using modiﬁed Viterbi algorithm and A*
+search [Schwartz and Chow, 1990] in the ﬁrst layer CRF.
+Given a particular sentence segmentation S, the most proba-
+ble POS tagging sequence T and its probability P (T|W(C,S))
+can be inferred by the Viterbi algorithm [Lafferty et al., 2001]
+in the second layer CRF. Having the N-best list of segmen-
+tation sequences and their corresponding most probable POS
+tagging sequences, we can use the joint decoding method pro-
+posed in Section 2 to ﬁnd the optimal pair of segmentation
+and its POS tagging deﬁned by Equation 3.
+
+We divide the learning process into two: one for learning
+the ﬁrst layer segmentation CRF, and one for learning the sec-
+ond layer POS tagging CRF. First we learn the parameters μ
+} using algorithm based on improved iterative
+= {μ1, ..., μKS
+
+Tj-1
+
+CD
+
+Tj
+
+JJ
+
+Wj-1
+Si-1
+
+B
+
+Ci-1
+
+Wj
+
+B
+
+Si
+
+Ci
+
+Tj 1
+
+NN
+
+Wj 1
+Si 1
+
+Si 2
+
+I
+
+B
+
+Second
+Layer
+
+Ci 1
+
+Ci 2
+
+First
+Layer
+
+Figure 1: Dual-layer CRFs. P (S, T|C), the joint probability
+of a segmentation sequence S and a POS tagging sequence T
+given sentence C is modeled by the dual-layer CRFs. In the
+ﬁrst layer CRF, the observed nodes are the characters in the
+sentence and the hidden nodes are segmentation tags for these
+characters. In the second layer CRF, given the segmentation
+results from the ﬁrst layer, characters combine to form ”su-
+pernodes” (words). These words are the observed variables,
+and POS tagging labels for them are the hidden variables.
+
+scaling algorithm (IIS) [Della Pietra et al., 1997] to maxi-
+mize the log-likelihood of the ﬁrst layer CRF. Then we learn
+the parameters λ = {λ1, ..., λKT
+} also using IIS, to maximize
+the log-likelihood of the second layer CRF. A detailed deriva-
+tion of this learning algorithm for each learning step can be
+found in [Lafferty et al., 2001].
+
+4 Features for CRFs
+
+Features for Word Segmentation
+The features we used for word segmentation are listed in the
+top half of Table 1. Feature (1.1)-(1.5) are the basic segmenta-
+tion features we adopted from [Ng and Low, 2004]. In (1.6),
+LBegin(C0), LEnd(C0) and LM id(C0) represent the maxi-
+mum length of words found in a lexicon that contain the cur-
+rent character as either the ﬁrst, last or middle character, re-
+spectively. In (1.7), Single(C0) indicates whether the current
+character can be found as a single word in the lexicon.
+
+Besides the adopted basic features mentioned above, we
+also experimented with additional semantic features (Table
+1, (1.8)-(1.9)). In these features, Sem(C0) refers to the se-
+mantic class of current character, and Sem(C−1), Sem(C1)
+represent the semantic class of characters one position to the
+left and right of the current character, respectively. We ob-
+tained a character’s semantic class from HowNet [Dong and
+Dong, 2006]. Since many characters have multiple semantic
+classes deﬁned by HowNet, it is a non-trivial task to choose
+among the different semantic classes. We performed contex-
+tual disambiguation of characters’ semantic classes by calcu-
+lating semantic class similarities. For example, let us assume
+the current character is
+
+(look,read) in a word context of
+
+(read newspaper). The character
+
+(look) has two seman-
+
+tic classes in HowNet, i.e. (read) and (doctor). To
+determine which class is more appropriate, we check the ex-
+ample words illustrating the meanings of the two semantic
+classes given by HowNet. For (read), the example word
+is
+
+(read book); for (doctor), the example word is
+
+(see a doctor). We then calculated the semantic class
+
+IJCAI-07
+
+1709
+
+Segmentation features
+(1.1) Cn, n ∈ [−2, 2]
+(1.2) CnCn+1, n ∈ [−2, 1]
+(1.3) C−1C1
+(1.4) P u(C0)
+(1.5) T (C−2)T (C−1)T (C0)T (C1)T (C2)
+(1.6) LBegin(C0), LEnd(C0)
+(1.7) Single(C0)
+(1.8) Sem(C0)
+(1.9) Sem(Cn)Sem(Cn+1), n ∈ −1, 0
+POS tagging features
+(2.1) Wn, n ∈ [−2, 2]
+(2.2) WnWn+1, n ∈ [−2, 1]
+(2.3) W−1W1
+(2.4) Wn−1WnWn+1, n ∈ [−1, 1]
+(2.5) Cn(W0), n ∈ [−2, 2]
+(2.6) Len(W0)
+(2.7) Other morphological features
+
+The second best segmentation which has probability 0.36 is:
+
+(foreign owned) (company)
+(situation)
+
+(situation)
+
+(production)
+(relatively) (good)
+
+The only difference from the ﬁrst
+
+sequence is
+
+that
+
+(relatively good) was segmented into two words
+(relatively) (good). Despite the lower probability, the
+
+second segmentation is more appropriate, since the two char-
+acters that compose the word
+their own meanings as individual words.
+
+(relatively good) carry
+
+The traditional methods would have stopped here and use
+the ﬁrst segmentation as the ﬁnal output, though it is actually
+incorrect according to the gold-standard. Our joint decoding
+method further performs POS tagging based on each of the
+segmentation sequences. The POS tagging sequence with the
+highest probability (0.23) assigned to the ﬁrst segmentation
+is:
+
+Table 1: Feature templates list
+
+(NN ) (NN ) (NN ) (NN ) (NN )
+
+similarity scores between
+
+(newspaper) and (book), and
+(newspaper) and (illness), using HowNet’s built-in sim-
+(newspaper) and (book)
+
+ilarity measure function. Since
+both have semantic class (document), their maximum
+similarity score is 0.95, where the maximum similarity score
+between
+Sem(C0)Sem(C1) = (read)(document). Similarly,
+we can ﬁgure out Sem(C−1)Sem(C0). For Sem(C0), we
+simply picked the top four frequent semantic classes ranked
+by HowNet, and used ”NONE” for absent values.
+
+(newspaper) and (illness) is 0.03. Therefore,
+
+Features for POS Tagging
+The bottom half of Table 1 summarizes the feature templates
+we employed for POS tagging. W0 denotes the current word.
+W−n and Wn refer to the words n positions to the left and
+right of the current word, respectively. Cn(W0) is the nth
+character in current word. If the number of characters in the
+word is less than 5, we use ”NONE” for absent characters.
+Len(W0) is the number of characters in the current word.
+We also used a group of binary features for each word, which
+are used to represent the morphological properties of current
+word, e.g. whether the current word is punctuation, number,
+foreign name, etc.
+
+5 An Illustrating Example of the Joint
+
+Decoding Method
+
+In this section, we use an illustrating example to motivate our
+proposed method. This example found in the real output of
+our system gives suggestive evidences that POS tagging helps
+predicting the right segmentation, and the right segmentation
+is more likely to get a better POS tagging sequence. We are
+only showing a snippet of the full sentence due to space limit:
+
+The production and sales situation of foreign owned
+
+companies is relatively good.
+
+The segmentation that has the highest probability (0.52) is:
+
+(foreign owned) (company)
+
+(situation)
+
+(situation)
+
+(production)
+(relatively good)
+
+(VV ) (PU )
+
+where NN represents noun, VV represents other verb, and
+PU represents punctuation. The second segmentation was
+assigned the following POS label sequence with the highest
+probability 0.45:
+
+(NN ) (NN ) (NN ) (NN ) (NN )
+
+(AD ) (VA ) (PU )
+
+where AD represents adverb, VA represents predicative ad-
+jective.
+
+The best POS sequence arising from the second segmen-
+tation is more discriminative than the best sequence based
+on the ﬁrst segmentation, which indicates the second seg-
+mentation is more informative for POS tagging. The joint
+probability of the second segmentation and POS tagging se-
+quence (0.16) is higher than the joint probability of the ﬁrst
+one (0.12), and therefore our method reranks the second one
+as the best output. According to the gold-standard, the sec-
+ond segmentation and POS tagging sequences are indeed the
+correct sequences.
+
+6 Results
+
+We evaluate our model using the Penn Chinese Treebank
+(CTB) [Xue et al., 2002] and open tracks from the First In-
+ternational SIGHAN Chinese Word Segmentation Bakeoff
+datasets [Sproat and Emerson, 2003].
+
+Using a linear-cascade of CRFs with the same set of fea-
+tures listed in Table 1 as baseline, we compared the perfor-
+mance of our proposed method. The accuracies of both word
+segmentation and POS tagging are measured by recall (R),
+2RP
+R+P . For seg-
+precision (P), and F-measure which equals to
+mentation, recall is the percentage of correct words that were
+produced by the segmenter, and precision is the percentage of
+automatically segmented words that are correct. For POS tag-
+ging, recall is the percentage of all gold-standard words that
+are correctly segmented and labeled by our system, and pre-
+cision is percentage of words returned by our system that are
+correctly segmented and labeled. We chose a N value of 20
+for using in the N-best list, based on cross-validation results.
+
+IJCAI-07
+
+1710
+
+6.1 Results of Segmentation
+For segmentation, we ﬁrst evaluated our joint decoding
+method on the CTB corpus. 10-fold cross-validation was per-
+formed on this corpus. Results are summarized in Table 2.
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+97.3% 97.2% 95.4% 96.7% 96.2% 93.1%
+Baseline
+Joint decoding 97.4% 97.3% 95.7% 96.9% 96.4% 93.4%
+
+Baseline
+Joint decoding 96.0% 95.2% 95.9% 96.3%
+
+average
+95.9% 94.8% 95.7% 96.2 % 95.85%
+96.05%
+
+10
+
+7
+
+8
+
+9
+
+Table 2: Comparison of 10-fold cross-validation segmenta-
+tion results on CTB corpus. Each column represents one out
+of the 10-fold cross-validation results. The last column is the
+average result over the 10 folds.
+
+As can been seen in Table 2, the results in all of the 10-
+fold tests improved with our joint decoding method. We
+conducted pairwise t-test and our joint decoding method was
+found to be statistically signiﬁcantly better than the baseline
+method under conﬁdence level 5.0−4 (p-values).
+
+We also evaluated our proposed method on the open tracks
+of the SIGHAN Bakeoff datasets. These datasets are designed
+only for evaluation of segmentation results, and no POS tag-
+ging information were provided in the training corpus. How-
+ever, since the learning of the POS tagging model and the seg-
+mentation model is decoupled, we can use a separate training
+corpus to learn the second layer POS tagging CRF model, and
+still be able to take advantage of the proposed joint decoding
+method. The results comparing to the baseline method are
+summarized in Table 3.
+
+AS
+R
+
+P
+
+F1
+
+P
+
+CTB
+
+R
+
+F1
+
+Baseline
+96.7% 96.8% 96.7% 88.5% 88.3% 88.4%
+Joint Decoding 96.9% 96.7% 96.8% 89.4% 88.7% 89.1%
+
+PK
+R
+
+P
+
+F1
+
+P
+
+HK
+R
+
+F1
+
+94.9% 94.9% 94.9% 94.9% 95.5% 95.2%
+Baseline
+Joint Decoding 95.3% 95.0% 95.2% 95.0% 95.4% 95.2%
+
+Table 3: Overall results on First SIGHAN Bakeoff open
+tracks. P stands for precision, R stands for recall, F1 stands
+for the F1 measure.
+
+For comparison of our results against previous work and
+other systems, we summarize the results on the four open
+tracks in Table 4. We adopted the table used in [Peng et al.,
+2004] for consistency and ease of comparison. There were 12
+participating teams (sites) in the ofﬁcial runs of the First In-
+ternational SIGHAN Bakeoff, here we only show the 8 teams
+that participated in at least one of the four open tracks. Each
+row represents a site, and each cell gives the F1 score of a
+site on one of the open tracks. The second to ﬁfth columns
+contain results on the 4 open tracks, where a bold entry in-
+dicates the best performance on that track. Column S-Avg
+contains the average performance of the site over the tracks it
+participated, where a bold entry indicates that this site on av-
+erage performs better than our system; column O-Avg is the
+
+average of our system over the same runs, where a bolded en-
+try indicates our system performs better on average than the
+other site. Our results are shown in the last row of the table.
+
+In the ofﬁcial runs, no team achieved best results on more
+than one open track. We achieved the best runs on AS open
+(ASo) track with a F1 score of 96.8%, 1.1% higher than the
+second best system [Peng et al., 2004]. Comparing to Peng et
+al. [2004], whose CRFs based Chinese segmenter were also
+evaluated on all four open tracks, we achieved higher perfor-
+mance on three out of the four tracks. Our average F1 score
+over all four tracks is 94.1%, 0.5% higher than that of Peng
+et al.’s system. Comparing with other sites using the average
+measures in the right-most two columns, we outperformed
+seven out of the nine sites. And the two sites that have higher
+average performance than us both did signiﬁcantly better on
+the CTB open (CTBo) track. The ofﬁcial results showed
+that almost all systems obtained the worst performance on
+the CTBo track, due to inconsistent segmentation style in the
+training and testing sets [Sproat and Emerson, 2003].
+
+ASo CTBo HKo PKo S-Avg O-Avg
+
+88.1%
+91.2%
+
+95.3% 91.7% 92.2%
+S01
+91.2% 89.1%
+S02
+87.2% 82.9% 88.6% 92.5% 87.8% 94.1%
+S03
+93.7% 93.7% 95.2%
+S04
+94.0% 94.0% 95.2%
+S07
+95.6% 93.8% 94.7% 95.2%
+S08
+95.9% 93.0% 92.2%
+S10
+S11
+90.4% 88.4% 87.9% 88.6% 88.8% 94.1%
+Peng et al. ’04 95.7% 89.4% 94.6% 94.6% 93.6% 94.1%
+
+90.1%
+
+Our System 96.8% 89.1% 95.2% 95.2%
+
+94.1%
+
+Table 4: Comparisons against other systems (this table is
+adopted from Peng et al. 2004)
+
+6.2 Results of POS Tagging
+Since the Bakeoff competition does not provide gold-standard
+POS tagging outputs, we only used CTB corpus to compare
+the POS tagging results of our joint decoding method with the
+baseline method. We performed 10-fold cross-validation on
+the CTB corpus. The results are summarized in Table 5.
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+Baseline
+93.8% 93.7% 90.2% 92.0% 93.3% 87.2%
+Joint Decoding 94.0% 93.9% 90.4% 92.2% 93.4% 87.5%
+
+Baseline
+Joint Decoding 92.4% 91.0% 91.7% 92.1%
+
+average
+92.2% 90.8% 91.5% 92.0 % 91.67%
+91.86%
+
+10
+
+7
+
+8
+
+9
+
+Table 5: Comparison of 10-fold cross-validation POS tagging
+results on CTB corpus. Each column represents one out of
+the 10-fold cross-validation results. The last column is the
+average result over the 10 folds.
+
+From Table 5 we can see that our joint decoding method
+has higher accuracy in each one of the 10 fold tests than the
+baseline method. Pairwise t-test showed that our method was
+found to be signiﬁcantly better than the baseline method un-
+der the signiﬁcance level of 3.3−5 (p-value). This improve-
+
+IJCAI-07
+
+1711
+
+ment on POS tagging accuracy can be understood as the result
+of the improved segmentation accuracy through joint decod-
+ing (as shown in Table 2). Therefore, these results showed
+that our joint decoding method not only helps to improve seg-
+mentation results, it also beneﬁts POS tagging results.
+
+7 Discussion on Reranking
+
+Reranking technique has been successfully applied in many
+NLP applications before, such as speech recognition [Stol-
+cke et al., 1997], NP-bracketing [Daume and Marcu, 2004]
+and semantic role labeling (SRL) [Toutanova et al., 2005].
+However, It is worth pointing out that the contexts in which
+they applied reranking method differ from ours in that we
+use reranking as an approximation technique for joint decod-
+ing. One similar work which also used reranking as approx-
+imation to joint decoding is [Sutton and McCallum, 2005b].
+Nevertheless, their experiments showed negative results when
+reranking was applied to the task of joint parsing and SRL.
+One possible explanation is that the maximum entropy clas-
+siﬁer they used is based on a local log-linear model, while
+CRFs employed by our method model the joint probability
+of the entire sequence, and therefore are more natural for our
+proposed joint decoding method.
+
+8 Conclusion
+
+We introduced a uniﬁed framework to integrate cascaded seg-
+mentation and labeling tasks by joint decoding based on dual-
+layer CRFs. We applied our method to Chinese segmentation
+and POS tagging tasks, and demonstrated the effectiveness of
+our method. Our proposed method not only enhances both
+segmentation and POS tagging accuracy, but it also offers an
+insight to improving performance of a task by learning from
+its related tasks.
+
+References
+[Asahara et al., 2003] M. Asahara, C. Goh, X. Wang, and
+Y. Matsumoto. Combining segmenter and chunker for Chi-
+nese word segmentation. In Proceedings of ACL SIGHAN
+Workshop, 2003.
+
+[Burge and Karlin, 1997] C. Burge and S. Karlin. Prediction
+of complete gene structures in human genomic DNA. J.
+Mol. Biol., 1997.
+
+[Daume and Marcu, 2004] H. Daume and D. Marcu. NP
+bracketing by maximum entropy tagging and SVM rerank-
+ing. In Proceedings of EMNLP, 2004.
+
+[Della Pietra et al., 1997] S. Della Pietra, V. Della Pietra,
+and J. Lafferty. Inducing features of random ﬁelds. IEEE
+TPAMI, 1997.
+
+[Dong and Dong, 2006] Z. Dong and Q. Dong. HowNet And
+
+The Computation Of Meaning. World Scientiﬁc, 2006.
+
+[Gao et al., 2004] J. Gao, A. Wu, M. Li, C. Huang, H. Li,
+X. Xia, and H. Qin. Adaptive chinese word segmentation.
+In Proceedings of ACL, 2004.
+
+[Kudo et al., 2004] T. Kudo, K. Yamamoto, and Y. Mat-
+sumoto. Applying conditional random ﬁelds to japanese
+morphological analysis. In Proceedings of EMNLP, 2004.
+
+[Lafferty et al., 2001] J. Lafferty, A. McCallum,
+
+and
+Conditional random ﬁelds: Probabilistic
+In
+
+F. Pereira.
+models for segmenting and labeling sequence data.
+Proceedings of ICML, 2001.
+
+[Luo, 2003] X. Luo. A maximum entropy Chinese character-
+
+based parser. In Proceedings of EMNLP, 2003.
+
+[Miller et al., 2000] S. Miller, H. Fox, L. Ramshaw, and
+R. Weischedel. A novel use of statistical parsing to extract
+information from text. In Proceedings of ANLP, 2000.
+
+[Ng and Low, 2004] H. Ng and J. Low. Chinese part-of-
+speech tagging: one-at-a-time or all-at-once? word-based
+or character-based? In Proceedings of EMNLP, 2004.
+
+[Peng et al., 2004] F. Peng, F. Feng, and A. McCallum. Chi-
+nese segmentation and new word detection using condi-
+tional random ﬁelds. In Proceedings of COLING, 2004.
+
+[Pradhan et al., 2004] S. Pradhan, W. Ward, K. Hacioglu,
+J. Martin, and D. Jurafsky. Shallow semantic parsing using
+support vector machines. In Proceedings of HLT, 2004.
+
+[Schwartz and Chow, 1990] R. Schwartz and Y. Chow. The
+N-best algorithm: An efﬁcient and exact procedure for
+ﬁnding the N most likely sentence hypotheses.
+In Pro-
+ceedings of ICASSP, 1990.
+
+[Sproat and Emerson, 2003] R. Sproat and T. Emerson. The
+ﬁrst international Chinese word segmentation bakeoff. In
+Proceedings of ACL SIGHAN Workshop, 2003.
+
+[Stolcke et al., 1997] A. Stolcke, Y. Konig, and M. Wein-
+traub. Explicit word error minimization in N-best list
+rescoring. In Proceedings of Eurospeech, 1997.
+
+[Sutton and McCallum, 2005a] C. Sutton and A. McCallum.
+Composition of conditional random ﬁelds for transfer
+learning. In Proceedings of HLT/EMNLP, 2005.
+
+[Sutton and McCallum, 2005b] C. Sutton and A. McCallum.
+Joint parsing and semantic role labeling. In Proceedings
+of CoNLL, 2005.
+
+[Sutton et al., 2004] C. Sutton, K. Rohanimanesh,
+
+and
+A. McCallum. Dynamic conditional random ﬁelds: Fac-
+torized probabilistic models for labeling and segmenting
+sequence data. In Proceedings of ICML, 2004.
+
+[Toutanova et al., 2005] K. Toutanova, A. Haghighi, and
+C. Manning. Joint learning improves semantic role label-
+ing. In Proceedings of ACL, 2005.
+
+[Xue and Palmer, 2004] N. Xue and M. Palmer. Calibrat-
+ing features for semantic role labeling. In Proceedings of
+EMNLP, 2004.
+
+[Xue and Shen, 2003] N. Xue and L. Shen. Chinese word
+In Proceedings of ACL
+
+segmentation as LMR tagging.
+SIGHAN Workshop, 2003.
+
+[Xue et al., 2002] N. Xue, F. Chiou, and M. Palmer. Building
+a large-scale annotated Chinese corpus. In Proceedings of
+COLING, 2002.
+
+[Yi and Palmer, 2005] S. Yi and M. Palmer. The integration
+In Pro-
+
+of syntactic parsing and semantic role labeling.
+ceedings of CoNLL, 2005.
+
+IJCAI-07
+
+1712
+
+

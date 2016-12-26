@@ -1,0 +1,964 @@
+QCSP Made Practical by Virtue of Restricted Quantiﬁcation
+
+Marco Benedetti∗, Arnaud Lallouet, and J´er´emie Vautard
+
+LIFO - University of Orl´eans
+
+BP 6759 – F45067 Orl´eans Cedex 2, France
+
+name.surname@univ-orleans.fr
+
+Abstract
+
+The QCSP+ language we introduce extends the
+framework of Quantiﬁed Constraint Satisfaction
+Problems (QCSPs) by enabling us to neatly ex-
+press restricted quantiﬁcations via a chain of nested
+CSPs to be interpreted as alternately conjuncted
+and disjuncted. Restricted quantiﬁers turn out to
+be a convenient solution to the crippling modeling
+issues we encounter in QCSP and—surprisingly—
+they help to reuse propagation technology and to
+prune the search space. Our QCSP+ solver—which
+also handles arithmetic and global constraints—
+exhibits state-of-the-art performances.
+
+Introduction
+
+1
+We extend the QCSP (Quantiﬁed Constraint Satisfaction
+Problem) framework by introducing a new language, called
+QCSP+. Such extension is motivated by the difﬁculties we
+experienced in modelling and solving most non-trivial prob-
+lems as plain QCSPs. So, let us start by describing (Q)CSP,
+in order to point out some of its modeling weaknesses.
+
+A CSP is a search problem established by giving a set of
+variables ranging over ﬁnite domains, and a conjunction of
+constraints mentioning such variables. For example, given
+x ∈ {1, 2, 3}, y ∈ {3, 4}, and z ∈ {4, 5, 6}, the CSP
+
+x < y ∧ x + y = z ∧ z (cid:5)= 3x
+
+is solved by selecting (if possible) one value for each variable
+in so as to satisfy the three constraints at once. For example,
+x = 1, y = 4, z = 5 is a valid solution, while x = 2, y = 4,
+z = 6 is not. CSP formulations are naturally suited to model
+real-world problems, and countless applications exist indeed.
+For the sake of this paper, a CSP problem is best viewed
+as a decision problem in which all the variables are quanti-
+ﬁed existentially (i.e.
+the existence of one single consistent
+assignment sufﬁces to answer the problem positively):
+∃x∈{1, 2, 3}∃y∈{3, 4}∃z∈{4, 5, 6}. x < y∧ x + y = z∧ z (cid:5)= 3x
+The seemengly inconsequential amendment of making quan-
+tiﬁers explicit leads us to play in an entirely new ﬁeld [Bor-
+deaux and Monfroy, 2002]: What if (some of) the variables
+are quantiﬁed universally? For example, what means for
+
+∗
+
+This author is supported by “Le STUDIUM R(cid:7)
+
+” (France).
+
+∃x∈{1, 2, 3}∀y∈{3, 4}∃z∈{4, 5, 6}. x < y∧ x + y = z∧ z (cid:5)= 3x
+(1)
+to be true? The most intuitive way of entering the new sce-
+nario is by thinking of it as a game between two players. One
+player is associated to the existential quantiﬁer—we call him
+the ∃-player—the other is related to the universal quantiﬁer:
+the ∀-player. The goal of the ∃-player is to satisfy each con-
+straint, hence to satisfy the whole CSP. The goal of the ∀-
+player is to violate at least one constraint, thus overcoming
+the opponent’s effort. The two players play against each other
+in turn, for a ﬁnite and ﬁxed number of rounds. The moves
+they do consist in assigning values to variables. Which vari-
+ables get assigned at each step is statically decided by the
+left-to-right order in the preﬁx of the problem (in our exam-
+ple, the preﬁx is “∃x ∈ {1, 2, 3}∀y ∈ {3, 4}∃z ∈ {4, 5, 6}”).
+In (1), the ∃-player plays ﬁrst, and he is given the chance
+to choose a value for x. Then, it is time for the ∀-player to
+assign a value to the variable y. Finally, the ∃-player assigns
+z and the game terminates: The satisfaction of the set of con-
+straints is evaluated. We say that such quantiﬁed CSP (QCSP)
+is true if the ∃-player has a winning strategy—i.e. if he can
+manage to satisfy every constraint whatever the universal op-
+ponent does—and is false otherwise. For example, (1) is true,
+while it becomes false if we change the preﬁx to ∀x∃y∀z. As
+opposed to the purely existential CSP case, the order of quan-
+tiﬁers is important: By ﬂipping y and z in (1) we play under
+the preﬁx ∃x∃z∀y, and the existential player looses the game.
+QCSP is widely believed to be strictly more “powerful”
+than CSP: An entire hierarchy of QCSP problems exists for
+which no equivalent CSP formulation can be written “com-
+pactly” (QCSP is PSPACE-complete, CSP is NP-complete).
+Some of these problems are openly perceived as games by hu-
+mans (i.e. board games), while in others the underlying game
+structure is camouﬂaged (see Section 2).
+
+Despite the expectation engendered by the strength of the
+language, we ﬁnd in the literature no single account of a real-
+world model1 actually solved by a QCSP solver. Why?
+
+A partial explanation is that QCSP solvers are in their in-
+fancy and miss most (quantiﬁed) constraint propagators, i.e.
+forward inference rules that are vital to cut the search space.
+
+1By real-world model we mean any model designed to cap-
+ture the pre-existing and human-intelligible semantics of some
+problem—e.g. the ones in Section 2—as opposed to random models
+that obey merely syntactical generation patterns.
+
+IJCAI-07
+
+38
+
+This limitation discourages or prevents people from invest-
+ing in the production of realistic models. However, we have
+recently built a full-ﬂedged QCSP solver [Benedetti et al.,
+2006b], which manages several constraints. Even so, models
+of many “natural” cases stay surprisingly difﬁcult to devise.
+To pinpoint the problem, let us take a step back to QCSP as
+a game between ∃ and ∀, and let us observe that with games
+almost invariably come rules: Some choices could be pre-
+cluded as a function of previous choices by the same player
+or by the opponent. An elementary example is the prohibi-
+tion in most board games to play in a cell already occupied
+by someone. In the QCSP game, this means that players can-
+not in general assign variables in arbitrary ways. The set of
+legal choices is dynamically restricted over a game life-span
+in relation to the moves already occurred, so to comply with
+an underlying game discipline. The observance of such disci-
+pline is precisely what plain QCSPs ﬁnd difﬁcult to enforce.
+No support for dynamic ranges of variables is provided by
+the preﬁx: In (1) z ranges over {4, 5, 6} whichever the values
+chosen for x and y. So, we have to embed the game dis-
+cipline in the constraints.
+It is a matter of stating that if a
+player chooses a forbidden value (or combination of values)
+he looses immediately. Such threat is promptly posed to the
+∃-player: We consider the membership of the move to the set
+of legal moves as just an additional constraint. If the ∃-player
+cheats, he makes such constraint false, he looses the game.
+No similar expedient can be used against the ∀-player: The
+game is a loss for him when all the constraints are satisﬁed,
+a thing which simply cannot be imposed by just conjunct-
+ing whatever additional constraint. Rather, to solve such ∀-
+discipline problem we should slightly modify the whole for-
+malization. This reformulation-based approach has been pre-
+sented in [Ans´otegui et al., 2005] for the case of two-players
+QBF games but, for the reasons discussed in Section 4, it
+comes out to be an unsatisfactory remedy to our problem.
+So, let us introduce a different solution, based on handling
+the game rules explicitly. As we shall see shortly, QCSP is
+not enough to plainly state the new formalization as it lacks
+support for disjunctions between constraint sets. Consider the
+following problem (in which rules are provisionally absent)
+(2)
+Let uppercase letters denote sets of variables rather than a
+single variable (domains are not shown). Suppose the legal
+opening moves for ∀-player are characterized by a set of con-
+∀
+straints (a CSP) L
+1 (X1), i.e. an assignment to the variables
+∀
+in X1 is a legal opening move iff it is a solution to L
+1 in the
+classical CSP sense. Next, ∃-player’s reply at second step
+∃
+is constrained by some CSP L
+1 (X1, Y1): Once the choices
+over X1 from ∀-player’s side are known, an assigment over
+∃
+Y1 is to be considered only if it solves L
+1. Likewise, rules
+∃
+∀
+2 (X1, Y1, X2, Y2) are provided. To cap-
+2 (X1, Y1, X2) and L
+L
+ture this scenario, we introduce restricted quantiﬁers qX[L],
+with q ∈ {∃,∀}: They quantify over X yet only span over
+those assignments to X which comply with the CSP-based
+rule L. With this compact notation, our example is written:
+∀X1[L
+
+∀X1∃Y1∀X2∃Y2.C(X1, X2, Y1, Y2)
+
+1 (X1, Y1)]. ∀X2[L
+∃
+
+1 (X1)]. ∃Y1[L
+∀
+
+∀
+2 (X1, Y1, X2)].
+∃
+2 (X1, Y1, X2, Y2)]. C(X1, X2, Y1, Y2)
+
+∃Y2[L
+
+∀
+which reads “for all the assignments to X1 such that L
+1
+∃
+1 holds and for
+holds, exists an assignment to Y2 such that L
+
+all...”. We can reshape the above formula as a prenex QCSP
+as we realize that the “such that” connective stays for a con-
+junction when ∃-player is involved, and for an implication
+when ∀-player is concerned. So, we actually ask whether
+
+∀X1(L
+
+1 → ∃Y1(L
+∀
+
+1 ∧ ∀X2(L
+∃
+
+2 → ∃Y2(L
+∀
+
+2 ∧ C))))
+∃
+
+∀X1
+→
+
+1 ∧ (L
+∃
+
+2 ∨ (L
+∀
+
+1 ∨ (L
+∀
+
+2 ∧ C))))
+∃
+
+∀X1∃Y1∀X2∃Y2.(L
+
+(3)
+or, in an equivalent prenex form with explicit disjunction, if
+(4)
+Statement (4) shows that the most natural way to express re-
+stricted quantiﬁers would be to extend the language to handle
+disjunctions. But, a shift to general non-conjunctive CSPs
+would hamper the critical opportunity to inherit the huge
+amount of propagators already implemented for the purely
+conjunctive case. We would fall back into the inability to ex-
+ercise CSP tools on real problems, by having a nice formalism
+with just a proof-of-concept or no implementation at all.
+
+Our solution is to design a limited disjunctive extension of
+the QCSP formalism, which is (i) enough to express all the
+disjunctions originating from the use of restricted (universal)
+quantiﬁcations, but is (ii) still capable of inheriting and exer-
+cising the reasoning core of standard (Q)CSP solvers.
+
+∀
+L
+2
+
+∃
+L
+1
+
+∀
+L
+1
+
+∃Y1
+∧
+
+∃Xn
+∧
+
+∀X2
+→
+
+From a FOL perspective, the syntactic shape of
+the problems we introduce—the QCSP+ prob-
+lems, generalizing Example (3-4)—is a chain
+of nested alternated quantiﬁcations with re-
+strictions (depicted aside). This language is
+cognitively adequate to represent game-with-
+rules scenarios (modeler’s viewpoint, Section
+2), and at the same time is amenable to be de-
+cided by reusing existing technology (solver’s
+viewpoint, Section 3).
+Indeed, each restric-
+tion rule is a standard CSP, inside which the
+usual propagation procedures can be capital-
+ized. What is to be designed is (i) an exter-
+nal search-guiding mechanism that evaluates
+the truth value of the alternated chain of CSPs
+as a function of the truth value of the leaves,
+and (ii) an inter-leaf propagation scheme that
+reconciles the separate CSPs and makes them
+share information in a sound way. As a ﬁnal
+note, let us observe that the “game-with-rules”
+scenario we target is deﬁnitely not a marginal
+modeling case. On the contrary, the usage of
+restricted quantiﬁers is so natural (see Section 2) that one
+ends up wondering which non-trivial problems can be mod-
+eled as plain QCSPs! The relation between our approach and
+recent contributions in the close ﬁeld of QBF decision pro-
+cedures is discussed in Section 4. The implementation of a
+full-ﬂedged solver and experiments on quantiﬁed models are
+presented in Section 5. In Section 6 we summarize our con-
+tributions and present directions for future work.
+2 Motivating Examples
+The concepts involved in the modeling of the following com-
+mon problems are naturally captured as a conjunction of con-
+straints. However, the questions we ask require universal
+quantiﬁers and disjunctions in exactly the QCSP+ style.
+Problem 1 Suppose some (partial) ordering (cid:11) is established
+to rank the solutions of a given CSP P . While a CSP is not
+
+C(X1,Y1, . . . ,Xn,Yn)
+
+∃
+L
+n
+
+IJCAI-07
+
+39
+
+, c(cid:14) ∈ Contr, if C
+
+enough to compactly characterize the best solutions of P w.r.t.
+(cid:11), QCSP+ gives to the problem an elegant one-move game
+formulation: ∃X[P (X)]. ∀Y [P (Y )]. Y (cid:11) X.
+In the following example [Cadoli et al., 1997], solutions to
+the CSP represent sets, and the ⊆ relation creates preferences.
+Example 1 (Strategic Companies) We are given a collec-
+tion C of companies, a set G of goods, and a relation P rod⊆
+C×G to specify which goods each company produces. Com-
+panies have reciprocal ﬁnancial participations, and a subset
+(cid:4)⊆C that owns more than 50% of some c∈C is said to be a
+C
+controlling set for c. A company may have many controlling
+sets. They all are represented by a relation Contr⊆2C×C. A
+set of companies S ⊆ C is “production-preserving”—written
+PP(S)—if it (i) covers all the goods in G, i.e. by cumulat-
+ing the goods g such that (cid:13)c, g(cid:14) ∈ P rod and c ∈ S we obtain
+G; and (ii) is closed under the controlling relation, i.e., for
+(cid:4) ⊆ S then c ∈ S. A strategic set
+each (cid:13)C
+is any subset-minimal production-preserving set (i.e. the PP
+property is lost in each proper subset of a strategic set). A
+company x∈ C is not strategic (intuition: it can be sold with
+no impact on either the overall portfolio of goods or the con-
+trolled companies) if it belongs to no strategic set, i.e. if
+(cid:5) ⊂ S
+∀S[S ⊆ C ∧ PP(S) ∧ x ∈ S]. ∃S
+(cid:5)]. S
+The P rod and Contr relations as deﬁned above can be easily
+expressed in propositional logic. We adopted such restricted
+version to enable a direct comparison with boolean reason-
+ers (Section 5). More realistic models—mentioning explicit
+amounts of goods, capacity of production and percentage of
+participations—still ﬁt nicely in the CSP vocabulary, but they
+lay outside the natural reach of propositional logic.
+Problem 2 (Game strategy) Let a set of variables Xi de-
+scribe the state at step i of a system evolving after the al-
+ternate moves of two opponents p∀ and p∃, selected out of
+a ﬁnite set of possibilities. A game is deﬁned by a 4-tuple
+(cid:13)PA, SSA, G, I(cid:14) of CSPs: A move M in a state X is only pos-
+sible when the precondition axiom PA(X, M ) is satisﬁed and
+(cid:5) deﬁned by the successor state axiom
+leads to a new state X
+SSA(X, X
+Initial and winning conditions are recog-
+nized by I(X) and G(P, X) respectively (with P ∈ {p∀, p∃}).
+Let ∀ denote ∃ and vice-versa. The ﬁrst player p∃ wins the
+game in at most k rounds if ∃X0[I(X0)].WS(∃, 1), where
+WS(q, i) := qXi, Mi[ PA(Xi−1, Mi) ∧ G(pq, Xi−1)∧
+
+(cid:5)) ∧ x /∈ S
+
+(cid:5)[PP(S
+
+, M ).
+
+SSA(Xi−1, Xi, Mi)].WS(q, i+1)
+
+(cid:4)
+
+(cid:5)
+
+for i < 2k, and WS(q, i) := G(pq, Xi−1) for i = 2k.
+The next example shows QCSP+ escaping the intricacies of
+game formalization we ﬁnd in e.g. [Gent and Rowley, 2003].
+Example 2 (Connect n×m−k) Let B = (bij)∈{0, p∀, p∃}n×m
+be a matrix of variables representing the board state in a gen-
+eralized Connect-4 game (played on a n×m board in the at-
+tempt to align k signs). The existence of a winning strategy
+for the ﬁrst player is modeled by posing PA(B, x) := bnx(cid:5)= 0,
+where x∈[1..m] is the column of the current move, and using
+∧i∈[1..n]j∈[1..m](bij(cid:5)=b
+ij =P ∧ bi−1j(cid:5)=0)
+(cid:5)
+, x), where P ∈ {p∀, p∃} is the current player.
+as SSA(B, B
+The initial condition I(B) is ∧ijbij = 0. The G CSP is a con-
+junction of allDifferent constraints excluding each alignment.
+
+ij) ↔ (j =x∧ bij =0∧ b
+(cid:5)
+
+(cid:5)
+
+Problem 3 (Conformant Scheduling) Consider n tasks of
+duration δ1 . . . δn requiring an amount of resource r1 . . . rn,
+and subject to the ordering constraints O⊆[1..n]×[1..n], where
+(cid:13)i, j(cid:14) ∈ O means that task i must end before task j starts. We
+want to schedule the tasks so that (i) we ﬁnish by time T , (ii)
+we comply with O, and (iii) the instantaneous resource con-
+sumption never exceeds a ﬁxed capacity R. A global con-
+straint cumulative(R, t1, δ1, r1, . . . , tn, δn, rn) is provided by
+most CSP solvers to check the latter condition. We have a
+degree of uncertainty about the actual resources required by
+each task. An hostile environment can impact on them, sub-
+ject to certain constraints EM(r1, . . . , rn).
+Is it possible to
+devise an adversary-safe schedule?
+∃t1, . . . , tn[∧(cid:7)i,j(cid:8)∈Oti+δi ≤ tj]. ∀r1, . . . , rn[EM(r1, . . . , rn)].
+cumulative(R, t1, δ1, r1, . . . , tn, δn, rn) ∧ max(ti+δi) ≤ T
+
+Example 3 Consider three tasks to be completed within
+time T = 4 and without surpassing a capacity R = 5, with
+δ1 = 1, δ2 = 2, δ3 = 3, r1 = 3, r2 = 2, and r3 = 1. Task 1 has
+to ﬁnish before Task 2 starts. We seek an attack-safe schedule,
+under the assump-
+tion that
+the en-
+vironment can add
+one unit of cost to
+up to two tasks.
+The picture aside
+shows that the opti-
+mal schedule (A) is
+subject
+to critical
+attacks, the linear schedule (B) exceeds T , while the solution
+(C) to the our QCSP+ instance meets all the requirements.
+3 Formalizing and Deciding QCSP+
+Let V be a set of variables and D = (Dv)v∈V the family
+of their domains (hereafter we tacitly assume an underlying
+global version of V and D). For W ⊆ V , we denote by D
+W
+the set Πv∈W Dv of tuples on W . The projection of a tuple t
+(or a set of tuples T ) on a variable v (or a set of variables W )
+is denoted by t|v (or T|W ). A constraint is a couple c=(W, T )
+with W ⊆ V and T ⊆ D
+W (W and T are noted var(c) and
+sol(c)). A CSP is a set of constraints. For a CSP C, we note
+c∈C var(c) its variables and by sol(C) =(cid:2)(cid:3)c∈C
+by var(C) =
+sol(c) its solutions, where—for any W, U ⊆ V , A ⊆ D
+W , and
+W∪U | t|W ∈A ∧ t|U ∈B}. We
+B ⊆ D
+name range over W ⊆ V any function R with domain W that
+associates to each v ∈ W a subset R(v) ⊆ Dv.
+Deﬁnition 1 (Restricted quantiﬁer) A restricted quantiﬁer
+is a 4-tuple Q = (q, W, R, C) where q ∈ {∃,∀}, W is a set of
+variables, R is a range over W , and C is a CSP.
+Deﬁnition 2 (QCSP+) A QCSP+ with free variables F is
+a couple (QS, G), where the quantiﬁcation structure QS is
+a ﬁnite (possibly empty) sequence [Q1, . . . , Qn] of restricted
+quantiﬁers Qi = (qi, Vi, Ri, Ci) for which it holds that
+• ∀i, j ∈ [1..n], Vi ∩ F = ∅ and i (cid:5)= j ⇒ Vi ∩ Vj = ∅
+• var(Ci) ⊆ Wi ∪ F with Wi =
+
+U —it is A (cid:2)(cid:3) B = {t∈D
+
+and G is a CSP, called goal, with var(G) ⊆ Wn ∪ F . If F = ∅
+the QCSP+ problem is said to be closed.
+
+j≤i Vj
+
+S
+
+S
+
+IJCAI-07
+
+40
+
+(cid:4)
+
+F (cid:24) R).
+
+(cid:4) = propG(R
+
+(cid:4)(v) = ∅, where R
+
+), it is cascade(P ) = ([(q, W, R
+
+base case. It is cascade(([], G)) = ([],⊥) if, for any v ∈ F ,
+F ). Otherwise,
+we have R
+cascade(([], G)) = ([], G).
+inductive case. Let it be P = ([(q, W, R, C)|QS], G) and
+(cid:4) = propC (R
+If for any v ∈ F ∪ W it is
+R
+(cid:4)(v) = ∅, then cascade(P ) = ([],(cid:22)) if q = ∀, and
+R
+cascade(P )=([],⊥) if q=∃. Otherwise (no empty range
+(cid:4))
+(cid:4)|W , C)|QS(cid:4)], G
+in R
+(cid:4)) = cascade((QS, G)) is computed using
+where (QS(cid:4)
+, G
+(cid:4)
+for the free variables F ∪W of (QS, G).
+the new range R
+The intuition is that propagation at the level of each restricted
+quantiﬁer (q, W, R, C) is the “authoritative” source of infor-
+mation about the new ranges of W . Conversely, for variables
+in var(C)\W a private temporary version of the ranges is em-
+ployed where all the prunings realized by dominating scopes
+are cumulated. Such collective result ﬂows through the chain
+of authoritative propagations to boost them, then vanishes.
+
+(cid:4)(v) ⊆ R(v).
+
+We call validity preserving any mapping op : QCSP
+
+The alternated structure of QCSP+ endows cascade prop-
+agation with an intrinsic advantage over the usual quanti-
+ﬁed arc-consistency of QCSP: It turns the global consistency
+check for values in universal domains into a local property,
+decidable at the level of single constraints in the CSP rule
+of restricted quantiﬁers. This way, we expunge values from
+both universal and existential domains, symmetrically, by just
+(re)using quantiﬁcation-unaware CSP propagators.
++ →
++ such that ∀P ∈ QCSP
+, eval(P ) = eval(op(P )),
+QCSP
+and we say that op is a contractor if ∀P = (QS, G) ∈
+(cid:4)) = op(P ) it is (i) |QS(cid:4)| ≤ |QS|, (ii)
+(cid:4) = (QS(cid:4)
++, P
+, G
+QCSP
+(cid:4)) ⊆ var(P ), and (iii) for every (q, W, R, C) ∈ QS,
+var(P
+(q(cid:4)
+(cid:4)
+(cid:4)
+(cid:4)) ∈ QS(cid:4)
+, if v ∈ W ∩ W
+, W
+Theorem 1 Cascade propagation is a validity-preserving
+contractor for QCSP+ problems.
+The above property guarantees soundness and termination of
+the decision procedure, which performs cascade propagation
+at each search node. For details see [Benedetti et al., 2006a].
+4 Discussion and Related Works
+Concerns about the unsuitability of QCSP to model real cases
+have not been raised so far2: Current random models do not
+clash with the issues addressed in this paper. QCSP+ has
+been designed in fact to provide crucial beneﬁts in the up-
+coming development of more realistic models.
+The existence of a “∀-discipline” issue in quantiﬁed con-
+junctive languages has been recently identiﬁed by the QBF
+community [Ans´otegui et al., 2005]. A static version of the
+same question has been discussed for the case of QBF encod-
+ings of multi-valued QCSP variables whose boolean mapping
+needs to avoid “illegal” combinations [Gent et al., 2004].
+
+then R
+
+This problem impacts on QCSP remarkably more than
+on QBF: The latter does not bother at all with the mod-
+eler’s viewpoint, as it is not required for a human to write
+or understand a QBF speciﬁcation. Such QBF is obtained
+through a computer-assisted compilation which starts from
+
+, R
+
+, C
+
++
+
+(cid:4)
+
+Consistently with the examples already presented, we com-
+pactly denote such QCSP+ by writing:
+
+q1V1 ∈ R1 [C1]. . . . . qnVn ∈ Rn [Cn].G
+
+(cid:4)
+
+Only two closed QCSP+ with an empty quantiﬁcation
+([ ],(cid:22)) and ([ ],⊥), where (cid:22) denotes the
+structure exists:
+empty CSP, and ⊥ stands for any CSP which contains
+Given a QCSP+ problem P =
+an empty constraint.
+([(q1, V1, R1, C1), . . . , (qn, Vn, Rn, Cn)], G) with free vari-
+ables F , the result of assigning the value a∈ Dv to a variable
+v∈ F , written P [v = a], is deﬁned as P = ([(q1, V1, R1, C1[v =
+a]), . . . , (qn, Vn, Rn, Cn[v = a])], G[v = a]), where the assign-
+ment to a CSP is in turn obtained by collecting the result
+of the assignments to each constraint: Given a constraint
+c = (W, T ), it is c[v = a] = c if v /∈ W . Otherwise, it is
+(cid:4) = W \ {v} and T
+(cid:4) ∈
+(cid:4) = c[v = a] = (W
+c
+(cid:4) ∧ t|v =a}. This notion extends natu-
+W (cid:2) | ∃t ∈ D
+D
+rally to tuple-assignments [W = t], with W ⊆ V , t∈D
+W . For
+any W ⊆ V , t ∈ D
+W , and any range R over W , let us write
+t∈W R to mean ∀v ∈ W t|v ∈ R(v).
+Deﬁnition 3 (Evaluation of a QCSP+) Any closed QCSP+
+(QS, G) evaluates to a value in {true,false} as follows.
+base case. eval(([ ],(cid:22)))=true and eval(([ ],⊥))=false.
+inductive case. Let it be QS = [(q, W, R, C) | QS(cid:4)].
+
+It is
+eval((QS, G)) = true iff: (i) q = ∀ and for all t ∈ W R
+such that t∈sol(C), it is eval((QS(cid:4)
+, G)[W =t]) = true, or
+(ii) q=∃ and there exists t∈W R such that t∈sol(C) and
+eval((QS(cid:4)
+
+(cid:4)) where W
+
+, t|W (cid:2) =t
+
+, G)[W =t]) = true.
+
+(cid:4) = {t
+
+, T
+
+W
+
+The decision procedure we implement closely mimics the
+deﬁnition of eval, and is based on a classical depth-ﬁrst re-
+cursive search of the and/or tree associated to a quantiﬁcation
+structure. As in CSP solvers, a form of forward-inference
+(called propagation) is of key importance to prune the search
+space, and is exercised in each search node. What is peculiar
+to QCSP+ is exactly the way this propagation operates, and
+the way it builds on top of standard CSP propagation.
+We model a CSP propagation scheme as parametric func-
+tion propP (·)—where the parameter P is a CSP—whose do-
+main and co-domain are the families of ranges over var(P ).
+(cid:4) = propP (R) of a propagation over R is meant
+The result R
+to contract the range of each variable (hence to reduce the
+branching factor of the search) while preserving the solu-
+tions of P . This means that for any variable v ∈ var(P )
+(cid:4)(v) ⊆ R(v), but at the same time for each solution
+it is R
+(cid:4)(v). Propagation is
+t ∈ sol(P ), if t|v ∈ R(v) then t|v ∈ R
+computed by a chaotic iteration as the greatest common ﬁx-
+point of the domain-reduction operators associated to each
+constraint c ∈ P , where the operator for c prunes values that
+fail a local consistency check against c [Apt, 1999].
+If R1 is a range over W1 and R2 is a range over W2 (W1 ∩
+W2 = ∅), we deﬁne R = R1 (cid:24) R2 as R(v) = R1(v) if v ∈ W1
+and R(v) = R2(v) if v ∈ W2. We note projections of ranges
+onto sub-domains by |, so e.g. R|W1 = R1 and R|W2 = R2.
+The analogous of propagation in QCSP+ is as follows.
+
+Deﬁnition 4 (Cascade Propagation) Given a propagation
+scheme prop, a QCSP+ problem P , and a range R
+F for the
+free variables F of P , the QCSP+ problem cascade(P ) ob-
+tained by cascade propagation from P is deﬁned as follows.
+
+2Such weakness is being quickly realized, as witnessed by the
+independent proposal of a framework focusing on simplifying the
+QCSP modeling of two-player games [Bessiere and Verger, 2006].
+
+IJCAI-07
+
+41
+
+some higher-level language and terminates in a process called
+CNF-ization. This consists in casting the meaning of any
+structured formula into a CNF by conjuncting the clause-
+based local meaning of each sub-formula through the help
+of auxiliary variables [Plaisted and Greenbaum, 1986]. A
+natural workaround to the discipline problem comes out of
+this mechanism: We reduce to a conjunctive matrix the entire
+meaning of e.g., (4). This trick has since ever been adopted—
+often tacitly—in QBF models, and is the reason why a library
+of real-world instances exists [Giunchiglia et al., 2001].
+
+A more structured QBF encoding technique—applied to
+two-player games—has been proposed in [Ans´otegui et al.,
+2005], where indicator variables are introduced to connect in
+a suited QBF the SAT-PLAN propositional encoding of pre-
+conditions, effects, etc [Kautz and Selman, 1992]. However,
+this approach is shown to lead search-based solvers to ex-
+plore artiﬁcially enlarged search spaces, an effect which can
+be mitigated either by employing encodings tuned to trigger
+a synergy between top-down search and boolean inference
+mechanisms, or by feeding the solver with information on the
+special role of indicator variables. More recently, DNF rep-
+resentations for boolean constraints have been adopted to re-
+duce the search space [Sabharwal et al., 2006; Zhang, 2006].
+These approaches involve intricate details, or do not intro-
+duce explicitly a language/semantics. They demand search-
+based solvers, or exploit boolean-only concepts (e.g. DNF),
+or focus on (human-level) games rather than on the general
+issue of modeling concepts through quantiﬁed constraints.
+
+Conversely, restricted quantiﬁcation is a fairly general and
+neat solution, inspired by analogous forms of quantiﬁcation
+found in other modeling languages under the name of qual-
+iﬁed (Description Logic), or bounded (Logic Programming),
+or restricted quantiﬁcation (Logic and Semantics Theory).
+
+Restricted quantiﬁers—which allow us to reuse propaga-
+tion technology and are not exclusively designed for search-
+based reasoners—can be fully “back ported” to the realm of
+QBF, where they yield the QBF+ language, deﬁned as the
+restriction of QCSP+ to boolean variables and clausal con-
+straints. QBF+ will be studied in a forthcoming paper, but a
+ﬁrst application is presented in the next section.
+
+The QBF-inspired techniques mentioned above can be in-
+terpreted as workarounds to bypass restricted quantiﬁers in
+QBF. While ﬁrst evidences suggest (cfr. next section) that re-
+stricted quantiﬁers may be equally rewarding in QBF, their
+introduction in QCSP is supported by compelling arguments,
+as major obstacles prevent us from adapting other solutions:
+First, the modeler should be made responsible for captur-
+ing the semantics of the alternating structure in (4). This
+threatens one of the fundamental assumptions of (Q)CSP:
+Models have to be human-writable and readable. Second,
+QCSP constraints cannot undergo arbitrary syntactic manipu-
+lations as clauses do. To illustrate the problem, let us consider
+the QCSP+ formula ∃X[C1(X)]∀Y [C2(X, Y )].C3(X, Y ). One
+way to attain a QCSP version of this formula would be
+to deﬁne a (single) constraint over X ∪ Y whose meaning
+is C1(X) ∧ (C2(X, Y ) ∨ C3(X, Y )), to be processed by a
+quantiﬁed extension of the GAC-scheme [Nightingale, 2005].
+Though heavily demanding (in space or time, depending on
+the technique employed), this is still feasible for small, ex-
+
+Figure 1: Running time comparison over the “Strategic Company”
+family (Example 1, Section 2). The x axis gives the number of com-
+panies in the set. We compare QeCode with state-of-the-art QBF
+solvers, and the QBF formulation with the QBF+ one.
+plicitly deﬁned table constraints. Yet no viable solution ex-
+ists if the C1−3 are (as they usually happen to be) sets of
+possibly arithmetic/global constraints. Another option is to
+use the reiﬁed version of each constraint [Bordeaux, 2005].
+The reiﬁed version of C(X) is an always consistent constraint
+(cid:5)(X, y), where y ∈ {0, 1}, which is satisﬁed as C
+(cid:5)(X, 1) if
+C
+(cid:5)(X, 0) otherwise. So, we can
+C(X) is consistent, and as C
+write ∃X.∀Y.∃a, b.C1(X)∧ C
+3(X, Y, b)∧ (¬a∨ b)
+2(X, Y, a)∧ C
+(cid:5)
+(cid:5)
+(a generalized version of such rewrite shows that QCSP+ is
+still in PSPACE). Inescapable complications arise in practice,
+as (i) no reiﬁed version is provided by the CSP environment
+for many constraints, and (ii) the shift to the reiﬁed version
+may be considerably detrimental from the solver’s viewpoint,
+since reiﬁed constraints cannot prune values from domains so
+long as they don’t know the value of their last parameter.
+5 Implementation, Models, and Experiments
+We implemented our decision procedure for QCSP+ in a sys-
+tem built around the CSP solver GeCode [Schulte and Tack,
+2005]. Our solver—called QeCode—accepts a wide set of
+constraints in the input language3, and is publically available
+from [Benedetti et al., 2006c]. At present, no other system
+accepts a constraint language as expressive as QeCode does4,
+and no suited public domain model exists yet.
+
+We contribute an initial test suite by devising QCSP+ gen-
+erators for the examples in Section 2. Example 1 and 2 do not
+rely on non-boolean variables/constraints and have a straight
+translation into QBF or QBF+. Our generators also produce
+such equivalent propositional formulations. This enables us
+to exercise our system against QBF solvers. It is to be noticed
+that such comparison is of relative signiﬁcance and biased in
+favor of QBF solvers, as it does not leverage the strengths
+of QeCode (e.g. non-boolean variables, propagators with a
+complex semantics), while an important weakness is exposed
+(i.e. data structures are not tailored to boolean reasoning).
+
+Results are shown in Figure 1 and 2. For the “strategic
+companies” case, it comes out that only one QBF solver, out
+
+3Actually, all those (the latest version of) GeCode knows.
+4Even if we eschew restricted quantiﬁers in the modeling.
+
+IJCAI-07
+
+42
+
+Figure 2: Comparison over some “Connect” games (Section 2, Example 2). The x axis gives the depth of analysis (number of moves).
+
+of the six state-of-the-art ones we have tested5, can compete
+with QeCode. This result is impressive in the light of a recent
+work [Gent et al., 2006] estimating in two to three orders
+of magnitude the gain (Q)CSP solvers can achieve by using
+the light data structures of SAT/QBF solvers (which GeCode,
+hence QeCode, are not using). To cross-check this hypothesis
+of gain we modiﬁed the QBF decision procedure described
+in [Benedetti, 2006] to parse and solve QBF+ speciﬁcations6:
+The results—labeled “A.B. on QBF+” in Figure 1—conﬁrm
+an improvement of one/two orders of magnitude over the best
+QBF solver and the base solver respectively.
+
+The existence of strategies in board games is a combina-
+torial problem with a large number of quantiﬁer alternations
+known to be hard for general purpose reasoners. For Connect
+n×m-k results are quite favorable to QeCode (Figure 2, only
+the two best performing QBF solvers are shown). Our models
+do not include symmetry breaking or auxiliary predicates.
+6 Conclusions and Future Work
+Major obstacles complicate the modeling of real-world prob-
+lems in purely-conjunctive quantiﬁed constraint languages,
+like QCSP or QBF. The “∀-discipline” issue has been iden-
+tiﬁed as the main culprit. We radically overcome such difﬁ-
+culty by introducing the QCSP+ language, where restricted
+quantiﬁers are allowed. This language enrichment is obtained
+through a controlled integration of disjunctive operators, and
+is purposely designed to facilitate the inheritance of exist-
+ing solving and propagation technology: We implement the
+full-ﬂedged QCSP+ solver QeCode on top of GeCode. Inci-
+dentally, QeCode (which can decide plain QCSPs as special
+cases) happens to be the ﬁrst QCSP solver to accept a wide
+set of constraints in the input language, including global con-
+straints, and one of the ﬁrst to be available publically.
+
+We devise multi-language generators to establish an initial
+suite of instances with restricted quantiﬁcation. Experimen-
+tal comparisons against QBF solvers on some boolean models
+are quite favorable. However, our main contribution lays else-
+where: QCSP+ offers the formerly absent possibility to write
+and solve real-world models based on quantiﬁed constraints.
+We are currently working on the modeling of applicative
+problems in QCSP+, and in designing decision procedures
+
+2005] but they are not competitive on these families.
+
+5We also tested Quantor [Biere, 2004] and sKizzo [Benedetti,
+6The current implementation is limited to ∀∃ preﬁxes, but the
+
+general case equally follows from the results in Section 3.
+
+for QCSP+ and QBF+ that are not based on search.
+References
+[Ans´otegui et al., 2005] C. Ans´otegui, C. Gomes, and B. Selman. The Achilles’ Heel
+
+of QBF. In Proc. of AAAI, 2005.
+
+[Apt, 1999] K.R. Apt. The essence of constraint propagation. Theoretical Computer
+
+Science, 221(1-2):179–210, 1999.
+
+[Benedetti et al., 2006a] M. Benedetti, A. Lallouet, and J. Vautard. Problem Modeling
+and Solving in QCSP made Practical. Tech. Rep. 11-06, LIFO, Univ. Orleans, 2006.
+[Benedetti et al., 2006b] M. Benedetti, A. Lallouet, and J. Vautard. Reusing CSP prop-
+agators for QCSPs. In Proc. of the Annual ERCIM Workshop on Constraint Solving
+and Constraint Logic Programming (CSCLP-06), Portugal, 2006.
+
+[Benedetti et al., 2006c] M. Benedetti, A. Lallouet, and J. Vautard. QeCode’s web
+page, www.univ-orleans.fr/lifo/members/vautard/qecode. 2006.
+In
+
+[Benedetti, 2005] M. Benedetti. Evaluating QBFs via Symbolic Skolemization.
+
+Proc. of LPAR’04. 2005.
+
+[Benedetti, 2006] M. Benedetti. Abstract Branching for Quantiﬁed Formulas. In Proc.
+
+of AAAI, 2006.
+
+[Bessiere and Verger, 2006] C. Bessiere and G. Verger. Strategic constraint satisfaction
+problems. In Proc. of CP’06 Workshop on Modelling and Reformulation, Nantes,
+France, 2006.
+
+[Biere, 2004] A. Biere. Resolve and Expand. In Proc. of SAT, 2004.
+[Bordeaux and Monfroy, 2002] L. Bordeaux and E. Monfroy. Beyond NP: Arc-
+
+consistency for quantiﬁed constraints. In Proc. of CP, 2002.
+
+[Bordeaux, 2005] L. Bordeaux. Boolean and Interval Propagation for Quantiﬁed
+Constraints. In Proc. of Workshop on Quantiﬁcation in Constraint Programming,
+Barcelona, Spain, 2005.
+
+[Cadoli et al., 1997] M. Cadoli, T. Eiter, and G. Gottlob. Default logic as a query
+language. IEEE Trans. on Knowledge and Data Engineering, 9(3):448–463, 1997.
+I. P. Gent and A. G. Rowley. Encoding Connect-4 using
+Quantiﬁed Boolean Formulae. Proc. of 2nd Int. Workshop on Modelling and Refor-
+mulating CSPs, Ireland, 2003.
+
+[Gent and Rowley, 2003]
+
+[Gent et al., 2004]
+
+I. P. Gent, P. Nightingale, and A. Rowley. Encoding quantiﬁed
+
+CSPs as Quantiﬁed Boolean Formulae. In Proc. of ECAI, 2004.
+
+[Gent et al., 2006]
+
+I. P. Gent, C. Jefferson, and I. Miguel. Minion: Lean, Fast Con-
+
+straint Solving. Proc. of ECAI, 2006.
+
+[Giunchiglia et al., 2001] E. Giunchiglia, M. Narizzano, and A. Tacchella. Quantiﬁed
+
+Boolean Formula library, www.qbflib.org, 2001.
+
+[Kautz and Selman, 1992] H. A. Kautz and B. Selman. Planning as satisﬁability. In
+
+Proc. of ECAI, 1992.
+
+[Nightingale, 2005] P. Nightingale. Consistency for Quantiﬁed Constraint Satisfaction
+
+Problems. In Proc. of CP, 2005.
+
+[Plaisted and Greenbaum, 1986] D. A. Plaisted and S. Greenbaum. A Structure-
+preserving Clause Form Translation. Journal of Symbolic Computation, pages 293–
+304, 1986.
+
+[Sabharwal et al., 2006] A. Sabharwal, C. Ansotegui, C. P. Gomes, J. W. Hart, and
+B. Selman. QBF Modeling: Exploiting Player Symmetry for Simplicity and Efﬁ-
+ciency. Proc. of SAT, 2006.
+
+[Schulte and Tack, 2005] C. Schulte and G. Tack. Views and iterators for generic con-
+
+straint implementations. In Proc. of CP, 2005.
+
+[Zhang, 2006] L. Zhang. Solving QBF with Combined Conjunctive and Disjunctive
+
+Normal Form. In Proc. of AAAI, 2006.
+
+IJCAI-07
+
+43
+
+

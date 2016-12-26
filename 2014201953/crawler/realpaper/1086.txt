@@ -1,0 +1,986 @@
+GUNSAT: a Greedy Local Search Algorithm for Unsatisﬁability
+
+Gilles Audemard∗
+
+Laurent Simon
+
+Univ d’Artois, CRIL - CNRS, FRE2499,
+
+Univ Paris-Sud, LRI - CNRS, UMR8623,
+
+Lens, F-62307
+
+audemard@cril.univ-artois.fr
+
+INRIA-Futurs, Orsay, F-91405
+
+simon@lri.fr
+
+Abstract
+
+Local search algorithms for satisﬁability testing are
+still the best methods for a large number of prob-
+lems, despite tremendous progresses observed on
+complete search algorithms over the last few years.
+However, their intrinsic limit does not allow them
+to address UNSAT problems. Ten years ago, this
+question challenged the community without any
+answer: was it possible to use local search algo-
+rithm for UNSAT formulae? We propose here a ﬁrst
+approach addressing this issue, that can beat the
+best resolution-based complete methods. We deﬁne
+the landscape of the search by approximating the
+number of ﬁltered clauses by resolution proof. Fur-
+thermore, we add high-level reasoning mechanism,
+based on Extended Resolution and Unit Propaga-
+tion Look-Ahead to make this new and challenging
+approach possible. Our new algorithm also tends
+to be the ﬁrst step on two other challenging prob-
+lems: obtaining short proofs for UNSAT problems
+and build a real local-search algorithm for QBF.
+
+1 Introduction
+
+Over the last ten years, a lot of impressive progresses have
+been made in the practical solving of the satisﬁability testing
+(SAT). All the methods that address this typical NP-Complete
+problem may be divided in two categories: Complete ones,
+usually based on the Davis, Logemann and Loveland pro-
+cedure [Davis et al., 1962; Moskewicz et al., 2001], can
+prove that a formula is satisﬁable or not. Incomplete solvers
+(also called one-sided solvers) only give an answer if the
+instance has a given property (generally if it is satisﬁable).
+Most of them, which are based on local search, perform a
+stochastic walk over the search space [Selman et al., 1994;
+Hoos and Stutzle, 2004]. Those methods give very good re-
+sults on certain classes of problems, like random 3SAT prob-
+lems [LeBerre and Simon, 2006].
+
+In 1997, [Selman et al., 1997] challenged the local search
+community with a quest for an efﬁcient local search algorithm
+for unsatisﬁable formulae. We propose here the ﬁrst success-
+ful approach, called GUNSAT, that pushes the local search
+
+∗supported by ANR “Planevo” project noJC05 41940.
+
+formalism into resolution proofs search space. Because state-
+of-the-art complete SAT solvers are terribly efﬁcient in prac-
+tice, we only call efﬁcient a solver, based on resolution, that
+can defeat state-of-the-art resolution-based solvers. For doing
+this, we propose to make a greedy walk among the resolution
+search space in which, at each step of the local search algo-
+rithm, we try to compute a ”better” neighbour proof, i.e. a
+proof which differs from the previous ones by at most two
+clauses, one added by resolution, and one that may have been
+removed. To ﬁnd such a neighbour, we approximate the num-
+ber of ﬁltered models by the proof. This is achieved by a
+score given to all pairs of literals depending on their frequen-
+cies in the formula. As we will show it in our experimental
+investigation, the use of higher reasoning mechanism, based
+on Extended Resolution [Robinson, 1965] and Unit Propaga-
+tion Look-Ahead [LeBerre, 2001] is a key to make this new
+and challenging approach possible. Because resolution-based
+methods seems to be an efﬁcient way for solving quantiﬁed
+boolean formulae (QBF), we believe that our algorithm may
+be the ﬁrst step on two other challenging problems: build a
+real local-search algorithm for QBF and obtain short proofs
+for UNSAT problems and QBF ones.
+
+The paper is organised as follows. We start by introducing
+some deﬁnitions and notations, then, in section 3, we discuss
+previous works done on local search for unsat problems, and
+we present our new approach. Before conclude, we provide
+some experiments.
+
+2 Preliminaries and deﬁnitions
+Let V = {x1, . . . , xn} be a set of boolean variables, a literal
+li is a variable xi or its negation ¬xi. A clause is a disjunction
+of literals ci = l1 ∨ l2... ∨ lni . A unit clause (or mono-literal)
+is a clause restricted to a single literal. A formula Σ is in con-
+junctive normal form (CNF) if Σ is a conjunction of clauses
+Σ = c1 ∧ c2... ∧ cm. The SAT decision problem is deﬁned as
+follows: given a formula Σ in CNF, is there an assignment of
+the variables V Σ such that Σ is satisﬁed, i.e. all the clauses
+of Σ are satisﬁed?
+
+2.1 Local Search for SAT problems
+Local search algorithms for SAT problems use a stochastic
+walk over total interpretations of Σ (i.e. all variables are as-
+signed). At each step (or ﬂip), they try to reduce the number
+of unsatisﬁable clauses (under certain conditions). The next
+
+IJCAI-07
+
+2256
+
+Algorithm 1: General scheme of a local search SAT solver
+
+: Σ a CNF formula
+
+Data
+Result : SAT if a model is found, UNKNOWN otherwise
+begin
+
+for i=1 to MaxTries do
+
+Choose a random interpretation I;
+for j=1 to MaxFlips do
+
+if I is a model of Σ then return SAT ;
+I = neighbour(I);
+
+end
+
+end
+return UNKNOWN ;
+
+end
+
+total interpretation is chosen among the neighbours of the cur-
+rent one (they differ only on one literal value). After a given
+number of steps, a restart is done to jump into an other part
+of the landscape (escape phase). We recall, algorithm 1, the
+general scheme of local search algorithms for SAT.
+
+A lot of improvements have been proposed in the literature,
+like tabu search or the use of different heuristics to ﬁnd the
+next interpretations. The interested reader may refer to [Hoos
+and Stutzle, 2004] for a detailed coverage of all methods.
+
+2.2 Resolution Proofs
+
+The resolution rule allows to deduce a new clause (called re-
+solvent) with the help of two clauses. It plays a central role
+in many works based on clausal representations of boolean
+formulae, like preprocessing steps [E´en and Biere, 2005].
+
+Deﬁnition 1 ([Robinson, 1965]) Let c1 = (x ∨ a1 ∨ a2 ∨
+. . . an) and c2 = (¬x ∨ b1 ∨ b2 ∨ . . . bm) be two clauses.
+The clause c = (a1 ∨ a2 ∨ . . . an ∨ b1 ∨ . . . bm) is called the
+resolvent of the clauses c1 and c2 by performing a resolution
+on the variable x. We note c = c1 ⊗ c2 this rule.
+
+One may apply the resolution rule many times including on
+resolvent clauses to derive new clause. The obtained clause
+is proved by resolution:
+
+Deﬁnition 2 (Resolution proof [Robinson, 1965]) Let Σ be
+a CNF formula. A resolution proof of a clause c is a succes-
+sion of clause P = c1, c2, . . . , ck such that c = ck and for all
+i ≤ k one of the following conditions holds :
+
+• ci ∈ Σ
+• ∃cm, cn ∈ P (m < i and n < i) such that ci = cm ⊗ cn
+
+If the empty clause (⊥) may be proved by resolution then
+the formula Σ is unsatisﬁable: The resolution proof system is
+complete for refutation. Restrictions on general resolution ex-
+ist and may still answer both SAT and UNSAT questions (like
+Ordered Resolution). However, in practice, resolution-based
+solvers are more suitable to knowledge compilation problem-
+atics (preprocessing, prime implicates computation, ...) than
+to SAT checking. Directional Resolution [Dechter and Rish,
+1994] is one of the most famous restriction, based on the well
+known work of [Davis and Putnam, 1960]. [Simon and del
+
+Val, 2001] has shown how a simple generalisation of the res-
+olution rule, called multi-resolution, allowed to scale-up most
+of the resolution based solvers, essentially for compilation
+purpose. This two resolution-based solvers will help us mea-
+sure the performances of GUNSAT. We call efﬁcient a solver,
+based on the resolution rule, that can beat both of them.
+
+Extended Resolution
+It is well known that the number of necessary clauses could
+be exponential to prove refutation by general resolution proof
+(even if no restrictions are imposed in the order of resolu-
+tions steps). This is the case for the well known pigeon hole
+problem [Haken, 1985], the Urquhart problems [Urquhart,
+1987] and even the random problems [Chv´atal and Sze-
+mer´edi, 1988]. We have here to notice that all those prob-
+lems need large clauses (i.e. unbounded size) in the resolu-
+tion proof before producing ⊥. On a lot of instances, allowing
+large clauses to be generated is essential.
+
+However, it is striking to notice that as soon as one al-
+lows the introduction of new variables during the proof (like
+lemmas in theorem proving), then short proofs for the above
+problems exist. [Tseitin, 1970] introduced this principle as
+the extended resolution rule. If Σ is a formula, one applica-
+tion of this rule allows us to consider Σ∧(e ⇔ l1∨l2) instead,
+where e is a fresh variable (not appearing in Σ) and l1 and l2
+are literals from Σ. Even if this rule looks very simple, there
+is no proof system known to be stronger than extended reso-
+lution. Despite its simplicity and its theoretical interests, no
+practical applications of extended resolution are used in mod-
+ern SAT solvers. Some works implicitly use a restriction of it,
+like symmetry breaking algorithm based on the introduction
+of new variables. The work of [Simon and del Val, 2001] can
+also be viewed as a restriction of this rule, where nodes of the
+graph representation of the formula may be viewed as new
+propositional variables. However, at the end, the whole prob-
+lem remains: even if this rule looks simple, how to choose the
+pair of literals to extend?
+
+3 Local search for UNSAT problems
+
+After a discussion of previous works, we present GUNSAT,
+our new local search algorithm for unsat checking.
+
+3.1 Previous Work
+Among the ten challenges proposed ten years ago [Selman et
+al., 1997], not so much work has been done to address the
+ﬁfth challenge: ”design a practical stochastic local search
+procedure for proving unsatisﬁability”.
+
+Hybrid solvers
+Almost all previous works on incomplete algorithms for un-
+satisﬁability has been done on hybrid solvers only. Some
+methods use a classical local search solver but record no-
+goods, based on resolvent. However, in the general case,
+those methods improve performance on satisﬁable problems
+only [Fang and Ruml, 2004; Shen and Zhang, 2005].
+
+With the new interest in QBF solving and the relative fail-
+ure of direct DPLL extensions on them, some effort have been
+done on ﬁnding new methods, based on resolution or local
+search. The solver WalkQSAT [Gent et al., 2003] has two
+
+IJCAI-07
+
+2257
+
+Algorithm 2: GUNSAT
+
+: Σ a CNF formula
+
+Data
+Result : UNSAT if a derivation of ⊥ is found, UN-
+
+KNOWN otherwise
+
+begin
+
+for i=1 to MaxTries do
+
+for j=1 to MaxFlips do
+
+if 2-Saturation(Σ) returns UNSAT then
+
+return UNSAT ;
+
+if |Σ| > MaxSize then
+
+Remove-One-Clause(Σ)
+
+Add-One-Clause(Σ);
+Add-Extended-Variables(Σ);
+Simplify-Look-Ahead(Σ);
+
+end
+Replace Σ by all its vital clauses;
+
+end
+return U N K N O W N;
+
+end
+
+distinct phases: the ﬁrst one is a complete algorithm based on
+DPLL for QBF; the second one use local search to quickly
+ﬁnd models. This incomplete solver can prove either the va-
+lidity and the invalidity of a QBF formula, but may never
+prove it.
+
+RANGER
+Ranger [Prestwich and Lynce, 2006] is also a local search
+algorithm for UNSAT problems that may looks very similar
+to GUNSAT. In this recent work, arbitrary resolution is per-
+formed in order to generate a large number of the shortest
+possible clauses, as fast as possible. To avoid combinatorial
+explosion, they may remove clauses. As we will see after,
+GUNSAT has a more powerful reasoning mechanism and a
+ﬁnest heuristic to guide moves whereas Ranger is simpler but
+performs many more moves per second.
+
+3.2 Skeleton of our local search algorithm
+The solver GUNSAT has, for a large part, the same skeleton
+than classical local search algorithms. Intuitively, our algo-
+rithm will remove and add new clauses to the set of clauses
+Σ, trying to derive ⊥ by the resolution rule. The whole prob-
+lem is to ensure that our algorithm may be able to perform
+greedy moves in the search space. It is also fundamental to
+add a higher level reasoning mechanism to ensure good prac-
+tical results. The GUNSAT algorithm, detailed in the later, is
+given in algorithm 2.
+
+3.3
+
+Inside GUNSAT
+
+Estimation of the number of ﬁltered clauses
+Given a set of clauses Σ built on n variables, we want to ap-
+proximate the total number of its potential models that are
+directly ﬁltered out (over the 2n potential ones). The mea-
+sure must be based on explicit information only, and the com-
+putational effort to obtain it must be polynomially bounded.
+Otherwise, one may need to exactly count the number of its
+models, which is clearly harder than the coNP-hard problem
+we are initially facing.
+
+Let ci = l1 ∨ l2... ∨ lni be a clause in the formula Σ. For
+any ci s.t. ni ≥ 1, it is clear that the clause ﬁlter out 2n−ni of
+potential models.
+
+Our ﬁrst measure (depth 0 of the approximation) estimates
+the number of ﬁltered models considering clauses indepen-
+dently. Each clause ci of length ni weights w0(ni) = 2n−ni .
+The whole weight of the proof may then be measured as
+Σn
+i=1w0(ni). It is however clear that ﬁltered models are not
+independent and this measure gives a very inaccurate indica-
+tion of the quality of the current proof. It remains at trying to
+produce as many short clauses as possible.
+
+At depth 1 of the approximation, we ﬁx the granularity to
+literals, by maintaining the estimation of the number of ﬁl-
+tered models for each literal. For each literal l, we may sum
+its weight in all clauses where it occurs by considering that
+a clause ci of length ni ≥ 1 ﬁlter out 2n−ni of the models
+that contain ¬l (over its 2n−1
+potential models). If we sup-
+pose that all these ﬁltered models are separately and equally
+distributed over all literals in the clause, which is a strong as-
+sumption on which our estimation is based, then the clause
+ci allows literal l to ﬁlter out w1(ni) = 2n−ni
+of the models
+ni
+containing ¬l. Even through this is a reﬁnement of depth 0, it
+is clear that if l occurs in the two clauses l ∧ q and l ∧ ¬q then
+this scoring scheme is particularly inappropriate.
+In some
+way, it is important to take the locality of common variables
+into account.
+
+This is what approximation of depth 2 does. The gran-
+ularity is here pairs of literals. For a clause ci of length
+ni, the 2n−ni ﬁltered models are supposed as equally dis-
+tributed over the ni.(ni − 1)/2 pairs of literals occurring in
+ci. Each pair (l1, l2) appearing in ci is credited a weight of
+w2(ni) = 2n−1−ni
+ni.(ni−1) . The score of a pair of literal (l1, l2)
+is deﬁned as the sum of its weights in all clauses and noted
+S(l1, l2). The score S(c) of a clause c is the sum of the scores
+of all the pairs of literals it contains. In the remaining sec-
+tions, w and S may be used without indices for depth 2.
+
+The deeper the approximation is, higher the cost to main-
+tain it. We may reﬁne our measurement by considering
+triplet of literals, but any explicit representation of all pos-
+sible triplets of literals may be quickly unpracticable on real-
+istic UNSAT benchmarks.
+
+Remark 1 (Clauses scoring) If a given clause ci has a score
+S(ci) (cid:11) ni.(ni − 1).w2(ni)/2 then ci is nearly the only one
+that ﬁlter the models composed by the negation of its literals.
+Even if such a clause is long, it should be kept in the proof.
+At the opposite, if S(ci) (cid:12) ni.(ni − 1).w2(ni)/2 then there
+is a little hope that this clause is from great importance in the
+current proof.
+
+What are Greedy Moves?
+We now have a scoring scheme for pairs and clauses. If we
+try to improve the total sum of clauses scores over Σ, then our
+algorithm will look for large clauses in which a lot of frequent
+pairs occur. This is the completely opposite goal.
+
+Instead of trying to improve a measurement over the whole
+proof, we’ll focus on quadruplets of pairs only. In order to
+derive ⊥, we need a step in our proof where l and ¬l are in
+
+IJCAI-07
+
+2258
+
+Σ. Because we perform 2-Saturation with Unit-Clause prop-
+agation at each step of our moves (see in the later), such a
+case never occurs. So, we have to ﬁnd two literals l1 and l2
+such that clauses l1 ∨ l2, ¬l1 ∨ l2, l1 ∨ ¬l2 and ¬l1 ∨ ¬l2
+can be derived from Σ.
+In other words, we’ll try to im-
+prove the scores of the four pairs built on the same vari-
+ables, called quadruplets and noted [x1, x2]. Because we
+want to localise quadruplets where all pairs have a high score,
+we deﬁne the score Sq([x1, x2]) over a quadruplet as the
+sum of the squares of the scores of its pairs Sq([x1, x2]) =
+S(l1, l2)2 + S(¬l1, l2)2 + S(l1, ¬l2)2 + S(¬l1, ¬l2)2
+. Any
+move that enhance the score of one of the best scored quadru-
+plets is thus a greedy move.
+
+Res
+
+Neighbourhood
+Adding any clause c(cid:2) /∈ Σ to Σ such that Σ (cid:13) c(cid:2) may deﬁne
+the neighbourhood. However, the deduction mechanism must
+be restricted to a correct but polynomially bounded and un-
+complete method. Otherwise, one may reduce GUNSAT to a
+single call to any complete SAT solver to check if Σ (cid:13) ⊥ and
+then add it to Σ.
+
+We chose to use the 1-Resolution mechanism, noted (cid:13)1
+
+Res,
+which is deﬁned as Σ (cid:13)1
+c iff c = c1 ⊗ c2 where
+c1 and c2 occur in Σ. Even if this rule is very simple,
+we are already facing a huge neighbourhood. To illustrate
+this, let’s take a random k-SAT formula at a given ratio r,
+with n variables and r × n clauses. Before the ﬁrst move,
+each literal occurs on average k.r.n/2 times, and k2.r2.n2/4
+clauses may be derived from 1-Resolution on it, which give
+for the whole formula n3.k2.r2/4 potential clauses. For a
+700 variables 3SAT formula at threshold (r = 4.25), we
+already have over 1010
+potential moves to rank. Random
+moves in this huge neighbourhood may only lead to blind
+search for unsatisﬁability, without any hope to beat ordered
+resolution-based algorithms like [Dechter and Rish, 1994;
+Simon and del Val, 2001].
+
+Finding the bests Greedy Moves
+Any explicit exploration of the neighbourhood is impossible
+in practice. However, if we know in advance that we have to
+increase the score of one of the bests quadruplets, we may try
+to increase the score of any of one of its pairs.
+
+Let [x1, x2] be the best scored quadruplet in Σ. Increasing
+the score of any of its pairs (l1, l2) amounts to adding any
+new clause containing both l1 and l2. Short clauses will grant
+(l1, l2) a higher score, and should be preferred. However, the
+score of the new clause itself has to be taken into account. If
+we add a short clause with a high score, then this clause will
+probably be considered as useless in the next iteration of the
+algorithm. Thus, we are looking for a short clause with the
+lowest possible score to ﬁlter out new potential models.
+
+When looking for this new clause with l1 and l2, we ﬁrst
+try to localise the pivot variable on which we’ll perform the
+resolution rule. If such a pivot p exists, then S(l1, p) > 0 and
+S(¬p, l2) > 0. We thus have to choose a clause cp containing
+l1 and p, and a clause c¬p containing ¬p and l2. To prevent
+the new clause from having a high score, we only try to gen-
+erate the new clause c from the two clauses having the lowest
+scores. Because of this restrictions, it is not always possible
+to produce a new clause c containing l1 and l2 (for instance,
+
+c may be subsumed by some clause of Σ or may simply be a
+tautology). If one pair score cannot be improved, then the
+other pairs of the same quadruplet are iteratively tried.
+If
+GUNSAT fails on all pairs of the best quadruplet, then the sec-
+ond quadruplet is tried and so on. This is what the call to
+Add-One-Clause does.
+
+Removing useless clauses
+As we have seen, clause scoring will be preferred to a sim-
+ple measurement of clause length to localise useless ones.
+This mechanism allows us to keep large clauses in Σ, es-
+pecially if it is the only one to ﬁlter out a large number of
+pairs. However, it is essential to keep vital clauses in Σ.
+They ensure that we are preserving its unsatisﬁability. Vi-
+tal clauses are initial clauses, or any clause that previously
+subsumed another vital clauses. We also forced the algorithm
+to keep binary clauses. This step is performed by the call to
+Remove-One-Clause.
+
+Finding a random start
+As described in GUNSAT skeleton, random start and general
+iteration of the algorithm only differ in the removing or not of
+clauses at each step. During the random start initialisation, no
+clauses are removed (except any subsumed clause) in order to
+ﬁll the proof up to MaxSize clauses.
+
+3.4 Other reﬁnements
+It has been essential to add three powerful mechanisms to
+GUNSAT in order to make it competitive to other resolution-
+based reasoning systems. The ﬁrst but essential reﬁnement
+concerns subsumptions. Before adding a new clause, we
+perform forward/backward subsumption detection [Zhang,
+2005].
+
+Binary clause saturation
+The power of binary clause saturation has been exploited
+with success in [Bacchus, 2002] for preprocessing purposes.
+At each step of the walk, binary clauses, related to our
+pairs of literals, have a special treatment in the call to
+2-Saturation. Each time a new binary clause is found
+in Σ, all resolutions between the set of binary clauses are per-
+formed to saturate Σ with it.
+In order to exploit their full
+power, an equivalency literal search is performed: if clauses
+l1 ∨ ¬l2 and ¬l1 ∨ l2 are found in Σ, then all occurrences of l1
+are replaced by l2 and l1 is tagged as a new potential extended
+variable to be used in the latter search.
+
+While performing the binary clause saturation, the algo-
+rithm may ﬁnd new unary clauses l1. The literal l1 is then
+propagated in the whole formula by unit propagation (all
+clauses containing l1 are deleted, all clauses containing ¬l1
+are shortened). An inconsistency may be found at this step
+and then returned to the main algorithm.
+
+Extended Resolution
+When the algorithm has tried to increase the score of a given
+pair of literals too many-times without any success, we chose
+to adopt a tricky solution that really pays: use extended res-
+olution (ER) to artiﬁcially increase the score of this pair of
+literals.
+
+The extended rule e ⇔ l1 ∨ l2 is encoded by the three
+clauses (¬e∨l1 ∨l2), (e∨¬l1) and (e∨¬l2). If necessary, the
+
+IJCAI-07
+
+2259
+
+Add-Extended-Variable step may add a fresh variable
+by adding all those three clauses to Σ. Of course, we ensured
+that a pair of literals can only appear in at most one extended
+rule. As we’ll see section 4, this very simple rule gives very
+good results in practice.
+
+Look Ahead techniques
+The patented St˚almarck method [St˚almarck, 1994], which
+gives good results in practice on some structured benchmarks,
+uses a powerful Look Ahead technique to detect equivalen-
+cies between literals until an inconsistency is found. It uses a
+reformulation of the initial formula, based on a set of triplets
+(p ⇔ q ⇔ r and p ⇔ q ⇒ r only). When formulae are ini-
+tially written in CNF, the power of this method may be par-
+tially captured by unit-propogation lookahead (LH) [LeBerre,
+2001].
+
+To enhance the power of GUNSAT, we added LH tech-
+niques on pairs of literals. The four possible values of pairs
+are iteratively propagated in Σ, searching for more, implied,
+unit propagations. If any literal l of Σ is set to ⊥ in all the
+four tries, then LH proved that Σ (cid:13) ¬l, and the unary clause
+¬l is added to Σ.
+
+Restarting
+When GUNSAT fails to derive ⊥ from Σ after MaxFlips
+steps, a restart is performed. All clauses, except binary ones
+and the set of vital clauses, are removed. To ensure that GUN-
+SAT will explore another part of the search space, we added
+random number to cut ties of quadruplets having the same
+scores up to a given . Each restart is followed by a new ran-
+dom generation of quadruplets random numbers. All clauses
+containing at least one extended variables are deleted after
+each restart, including binary ones.
+
+A particularity of our local search algorithm may be em-
+phasised here: because of unit propagation, binary clause sat-
+uration and subsumption deletion, Σ may evolve from starts
+to restarts. Hopefully, Σ will only evolve to a simpler and
+simpler formula.
+
+4 Experimental evaluation
+
+Our results were obtained with a Xeon 3.4Ghz with 2GB
+memory. GUNSAT is a prototype written in java and a lot of
+optimisations are still planned (Java API LinkedList data
+structure are for instance used and may be greatly improved).
+In addition, our current implementation use an explicit repre-
+sentation of all pairs, which is a very costly operation. We are
+planning to manipulate only the Top-M best pairs of literals
+in our next versions.
+
+Because of these two weak points, we selected instances
+with only a very restricted number of clauses and variables
+(aim, xor and jnh). Furthermore, like other local search algo-
+rithms, GUNSAT has a lot of parameters to tune and some of
+them may be improved in the near future. We chose to per-
+form 50 restarts and to ﬁx the number of ﬂips to 6 times the
+initial number of clauses.
+
+As we have previously said, our purpose is not here to
+compare GUNSAT to state-of-the-art SAT solvers. It is clear
+that conﬂict learning solvers like ZCHAFF [Moskewicz et
+al., 2001] for structured instances and solvers like KCNFS
+
+basic
+
+LH
+
+ER
+
+LH + ER
+
+aim-50 (8)
+
+% S
+12
+
+aim-100 (8)
+
+10
+
+aim-200 (8)
+
+jnh (33)
+
+xor (39)
+
+0
+
+6
+
+0
+
+T (F)
+2.14
+(26)
+36.83
+(3954)
+-
+
+0.95
+(0)
+-
+
+% S
+100
+
+55
+
+60
+
+57
+
+T (F)
+1.41
+(146)
+11.93
+(923)
+63.62
+(1098)
+8.48
+(276)
+-
+
+% S
+60
+
+27
+
+5
+
+18
+
+1.5
+
+T (F)
+15.14
+(1749)
+139.74
+(4998)
+739.00
+(9099)
+68.15
+(986)
+308.83
+(6932)
+
+% S
+100
+
+97
+
+85
+
+62
+
+11
+
+T (F)
+1.58
+(142)
+49.37
+(1726)
+201.29
+(2009)
+4.21
+(687)
+31.91
+(5197)
+
+Table 1: Results on structured instances. %S gives the per-
+centage of solved instances (5 launches per instance). T
+means Time (in seconds, averaged of all successful runs), and
+F gives the averaged total number of ﬂips.
+
+V
+
+50
+50
+50
+
+60
+60
+60
+
+70
+70
+70
+
+R
+
+4.25
+5.0
+6.0
+
+4.25
+5.0
+6.0
+
+4.25
+5.0
+6.0
+
+LH + ER
+
+% S
+
+T (F)
+
+58
+86
+97
+
+35
+68
+92
+
+23
+51
+87
+
+60 (3880)
+18 (1520)
+5 (545)
+
+126 (5785)
+67 (3346)
+16 (1094)
+
+189 (6626)
+187 (6193)
+59 (2389)
+
+Table 2: 3-SAT Random instances - Each category contains
+100 instances, each instance is solved 50 times
+
+[Dubois and Dequen, 2001] for random instances outperform
+GUNSAT. We rather want to compare it with resolution-based
+solvers.
+
+We compared 4 versions of our solver: the basic one, the
+one with lookahead (LH) only, with extended resolution only
+(ER) and the one with both of them (LH+ER).
+
+4.1 Structured instances
+
+Table 1 reports the results obtained by GUNSAT on structured
+problems. We do not report the original DR performances
+[Dechter and Rish, 1994]: over the 187 runs, only 47 ﬁn-
+ished without a memory allocation error and only 9 instances
+were solved (all aim-50 and 1 xor). ZRes [Simon and del
+Val, 2001] was able to solve all aim-50, half aim-100, but
+failed to solve aim-200 and jnh. It was able to solve all
+xor instances, because of its ability to handle large set of
+highly structured clauses.
+
+It is clear that proposed reﬁnements (LookAhead and Ex-
+tended Resolution) and especially their combination provide
+a realistic local search solver for UNSAT problems.
+
+4.2 Random instances
+
+Table 2 reports results on random instances with different
+number of variables (from 50 to 70) and different ratio (4.25,
+5 and 6). We only report results for ER+LH because all other
+versions of GUNSAT were only able to solve at most 1% of the
+instances. The solver DR cannot solve either these instances.
+ZRes solves only instances with 50 variables at the threshold
+in 250 seconds on average. [Prestwich and Lynce, 2006] also
+reports bad results on random instances with RANGER.
+
+Even on hard examples for resolution based algorithms,
+GUNSAT LH+ER showed promising results, in comparison
+
+IJCAI-07
+
+2260
+
+with resolution based solvers and RANGER, especially for
+large clause/variable ratios.
+
+One may also notice the very low number of ﬂips in all
+the cases, which mean that the obtained proof length is short,
+in comparison with ZRes experimentations on random in-
+stances.
+
+5 Conclusion and future work
+
+We report the ﬁrst good results on local search for unsatisﬁa-
+bility since [Selman et al., 1997] challenged the community.
+GUNSAT differs from classical local search algorithm in its
+high-cost ﬂip mechanism. Finding and adding good clauses,
+while maintaining the score of all pairs, is a costly – but nec-
+essary – task to prevent a blind local search. GUNSAT learns
+from start to restarts and may be able to prove unsatisﬁability
+start after restarts, by suddenly ﬁnding a derived unit clause
+before starting again with this new high-valuable clause. We
+showed that LH techniques with ER are two key points to
+allow local search on resolution proofs. With both mecha-
+nisms, made possible by our scoring based on pairs of lit-
+erals, GUNSAT was able to defeat state-of-the-art resolution
+based solvers.
+
+those solvers have two main drawbacks:
+
+Those good results should be relativized by the fact that
+GUNSAT cannot yet challenge state of the art DPLL solvers.
+However,
+they
+hardly exhibit a proof of unsatisﬁability of the initial formula
+that can be checked by a third-party trusted algorithm and
+they seem to reach their limit when extended to QBF solv-
+ing. Resolution-based algorithms may be the next generation
+of efﬁcient QBF solving, with a short proof checking made
+possible. In this new and still promising area, we believe that
+GUNSAT may take a good place.
+
+References
+
+[Bacchus, 2002] F. Bacchus. Enhancing davis putnam with
+extended binary clause reasoning. In proceedings of AAAI,
+pages 613–619, 2002.
+
+[Chv´atal and Szemer´edi, 1988] V. Chv´atal and E. Sze-
+mer´edi. Many hard examples for resolution. Journal of
+the ACM, 35:759–768, 1988.
+
+[Davis and Putnam, 1960] M. Davis and H. Putnam. A com-
+puting procedure for quantiﬁcation theory. Journal of the
+ACM, pages 201–215, 1960.
+
+[Davis et al., 1962] M. Davis, G. Logemann, and D. Love-
+land. A machine program for theorem-proving. Commu-
+nications of the ACM, 5(7):394–397, July 1962.
+
+[Dechter and Rish, 1994] R. Dechter and I. Rish. Directional
+resolution: the davis-putnam procedure, revisited. In pro-
+ceedings of KR, pages 134–145, 1994.
+
+[Dubois and Dequen, 2001] O. Dubois and G. Dequen. A
+backbone-search heuristic for efﬁcient solving of hard 3–
+sat formulae. In Proceedings of IJCAI, 2001.
+
+[E´en and Biere, 2005] N. E´en and A. Biere. Effective pre-
+processing in sat through variable and clause elimination.
+In in proceedings of SAT, pages 61–75, 2005.
+
+[Fang and Ruml, 2004] H. Fang and W. Ruml. Complete lo-
+cal search for propositional satisﬁability. In proceedings
+of AAAI, pages 161–166, 2004.
+
+[Gent et al., 2003] I. Gent, H. Hoos, A. Rowley, and
+K. Smyth. Using stochastic local search to solve quan-
+tiﬁed boolean formulae.
+In Proc.of CP, pages 348–362,
+2003.
+
+[Haken, 1985] A. Haken. The intractability of resolution.
+
+Theorical Computer Science, 39:297–308, 1985.
+
+[Hoos and Stutzle, 2004] H. Hoos and T. Stutzle. Stochas-
+tic Local Search, Foundations and Applications. Morgan
+Kaufmann / Elsevier, 2004.
+
+[LeBerre and Simon, 2006] D. LeBerre and L. Simon, edi-
+tors. Special Volume on the SAT 2005 competitions and
+evaluations, volume 2. Journal on Satisﬁability, Boolean
+Modeling and Computation, 2006.
+
+[LeBerre, 2001] D. LeBerre. Exploiting the real power of
+unit propagation lookahead. In Proceedings of SAT, 2001.
+[Moskewicz et al., 2001] M. Moskewicz, C. Madigan,
+Y. Zhao, L. Zhang, and S. Malik. Chaff : Engineering
+an efﬁcient sat solver.
+In Proceedings of DAC, pages
+530–535, 2001.
+
+[Prestwich and Lynce, 2006] S. Prestwich and I. Lynce. Lo-
+In Proceedings of SAT,
+
+cal search for unsatisﬁability.
+pages 283–296, 2006.
+
+[Robinson, 1965] J. Robinson. A machine-oriented logic
+based on the resolution principle. JACM, 12:23–41, 1965.
+
+[Selman et al., 1994] B. Selman, H. Levesque,
+
+and
+D. Mitchell. A New Method for Solving Hard Sat-
+isﬁability Problems.
+In Proceedings of AAAI, pages
+440–446, 1994.
+
+[Selman et al., 1997] B.
+
+Selman,
+
+D. McAllester.
+soning and search.
+1997.
+
+and
+Ten challenges in propositional rea-
+In Proc. of IJCAI, pages 50–54,
+
+H. Kautz,
+
+[Shen and Zhang, 2005] H. Shen and H. Zhang. Another
+complete local search method for sat. In in proceedings
+of LPAR, pages 595–605, 2005.
+
+[Simon and del Val, 2001] L. Simon and A. del Val. Efﬁcient
+consequence ﬁnding. In proceedings of IJCAI, pages 359–
+365, 2001.
+
+[St˚almarck, 1994] G. St˚almarck. A system for determining
+propositional logic theorem by applying values and rules
+to triplets that are generated from a formula. US Patent
+5,276,897; Canadian Patent 2,018,828; European Patent 0
+403 545; Swedish Patent 467 076, 1994.
+
+[Tseitin, 1970] G. Tseitin. On the complexity of derivation
+in propositional calculus. Studies in Constructive Mathe-
+matics and Mathematical Logic, 2:466–483, 1970.
+
+[Urquhart, 1987] A. Urquhart. Hard examples for resolution.
+
+JACM, 34(1):209–219, 1987.
+
+[Zhang, 2005] L. Zhang. On subsumption removal and on
+the ﬂy cnf simpliﬁcation. In proceedings of SAT, volume
+3569 of LNCS, pages 482–489, 2005.
+
+IJCAI-07
+
+2261
+
+

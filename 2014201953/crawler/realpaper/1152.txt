@@ -1,0 +1,931 @@
+Open Information Extraction from the Web
+
+Michele Banko, Michael J Cafarella, Stephen Soderland, Matt Broadhead and Oren Etzioni
+
+Department of Computer Science and Engineering
+
+Turing Center
+
+University of Washington
+
+Box 352350
+
+{banko,mjc,soderlan,hastur,etzioni}@cs.washington.edu
+
+Seattle, WA 98195, USA
+
+Abstract
+
+Traditionally, Information Extraction (IE) has fo-
+cused on satisfying precise, narrow, pre-speciﬁed
+requests from small homogeneous corpora (e.g.,
+extract the location and time of seminars from a
+set of announcements). Shifting to a new domain
+requires the user to name the target relations and
+to manually create new extraction rules or hand-tag
+new training examples. This manual labor scales
+linearly with the number of target relations.
+This paper introduces Open IE (OIE), a new ex-
+traction paradigm where the system makes a single
+data-driven pass over its corpus and extracts a large
+set of relational tuples without requiring any human
+input. The paper also introduces TEXTRUNNER,
+a fully implemented, highly scalable OIE system
+where the tuples are assigned a probability and
+indexed to support efﬁcient extraction and explo-
+ration via user queries.
+We report on experiments over a 9,000,000 Web
+page corpus that compare TEXTRUNNER with
+KNOWITALL, a state-of-the-art Web IE system.
+TEXTRUNNER achieves an error reduction of 33%
+on a comparable set of extractions. Furthermore,
+in the amount of time it takes KNOWITALL to per-
+form extraction for a handful of pre-speciﬁed re-
+lations, TEXTRUNNER extracts a far broader set
+of facts reﬂecting orders of magnitude more rela-
+tions, discovered on the ﬂy. We report statistics
+on TEXTRUNNER’s 11,000,000 highest probability
+tuples, and show that they contain over 1,000,000
+concrete facts and over 6,500,000 more abstract as-
+sertions.
+
+1 Introduction and Motivation
+This paper introduces Open Information Extraction (OIE)—
+a novel extraction paradigm that
+facilitates domain-
+independent discovery of relations extracted from text and
+readily scales to the diversity and size of the Web corpus.
+The sole input to an OIE system is a corpus, and its output
+is a set of extracted relations. An OIE system makes a single
+pass over its corpus guaranteeing scalability with the size of
+the corpus.
+
+Information Extraction (IE) has traditionally relied on ex-
+tensive human involvement in the form of hand-crafted ex-
+traction rules or hand-tagged training examples. Moreover,
+the user is required to explicitly pre-specify each relation of
+interest. While IE has become increasingly automated over
+time, enumerating all potential relations of interest for ex-
+traction by an IE system is highly problematic for corpora as
+large and varied as the Web. To make it possible for users to
+issue diverse queries over heterogeneous corpora, IE systems
+must move away from architectures that require relations to
+be speciﬁed prior to query time in favor of those that aim to
+discover all possible relations in the text.
+
+In the past, IE has been used on small, homogeneous cor-
+pora such as newswire stories or seminar announcements. As
+a result, traditional IE systems are able to rely on “heavy” lin-
+guistic technologies tuned to the domain of interest, such as
+dependency parsers and Named-Entity Recognizers (NERs).
+These systems were not designed to scale relative to the size
+of the corpus or the number of relations extracted, as both
+parameters were ﬁxed and small.
+
+The problem of extracting information from the Web vio-
+lates all of these assumptions. Corpora are massive and het-
+erogeneous, the relations of interest are unanticipated, and
+their number can be large. Below, we consider these chal-
+lenges in more detail.
+
+Automation The ﬁrst step in automating IE was moving
+from knowledge-based IE systems to trainable systems that
+took as input hand-tagged instances [Riloff, 1996] or doc-
+ument segments [Craven et al., 1999] and automatically
+learned domain-speciﬁc extraction patterns. DIPRE [Brin,
+1998], SNOWBALL [Agichtein and Gravano, 2000], and Web-
+based question answering systems [Ravichandran and Hovy,
+2002] further reduced manual labor needed for relation-
+speciﬁc text extraction by requiring only a small set of tagged
+seed instances or a few hand-crafted extraction patterns, per
+relation, to launch the training process. Still, the creation of
+suitable training data required substantial expertise as well as
+non-trivial manual effort for every relation extracted, and the
+relations have to be speciﬁed in advance.
+
+Corpus Heterogeneity Previous approaches to relation
+extraction have employed kernel-based methods [Bunescu
+
+IJCAI-07
+
+2670
+
+and Mooney, 2005], maximum-entropy models [Kambhatla,
+2004], graphical models [Rosario and Hearst, 2004; Culotta
+et al., 2006], and co-occurrence statistics [Lin and Pantel,
+2001; Ciaramita et al., 2005] over small, domain-speciﬁc cor-
+pora and limited sets of relations. The use of NERs as well
+as syntactic or dependency parsers is a common thread that
+uniﬁes most previous work. But this rather “heavy” linguis-
+tic technology runs into problems when applied to the het-
+erogeneous text found on the Web. While the parsers work
+well when trained and applied to a particular genre of text,
+such as ﬁnancial news data in the Penn Treebank, they make
+many more parsing errors when confronted with the diversity
+of Web text. Moreover, the number and complexity of en-
+tity types on the Web means that existing NER systems are
+inapplicable [Downey et al., 2007].
+
+Efﬁciency KNOWITALL [Etzioni et al., 2005] is a state-of-
+the-art Web extraction system that addresses the automation
+challenge by learning to label its own training examples us-
+ing a small set of domain-independent extraction patterns.
+KNOWITALL also addresses corpus heterogeneity by rely-
+ing on a part-of-speech tagger instead of a parser, and by
+not requiring a NER. However, KNOWITALL requires large
+numbers of search engine queries and Web page downloads.
+As a result, experiments using KNOWITALL can take weeks
+to complete. Finally, KNOWITALL takes relation names as
+input. Thus, the extraction process has to be run, and re-
+run, each time a relation of interest is identiﬁed. The OIE
+paradigm retains KNOWITALL’s beneﬁts but eliminates its
+inefﬁciencies.
+
+The paper reports on TEXTRUNNER, the ﬁrst scalable,
+domain-independent OIE system. TEXTRUNNER is a fully
+implemented system that extracts relational tuples from text.
+The tuples are assigned a probability and indexed to support
+efﬁcient extraction and exploration via user queries.
+
+The main contributions of this paper are to:
+• Introduce Open Information Extraction (OIE)—a new
+extraction paradigm that obviates relation speciﬁcity by
+automatically discovering possible relations of interest
+while making only a single pass over its corpus.
+
+• Introduce TEXTRUNNER, a fully implemented OIE sys-
+tem, and highlight the key elements of its novel archi-
+tecture. The paper compares TEXTRUNNER experimen-
+tally with the state-of-the-art Web IE system, KNOW-
+ITALL, and show that TEXTRUNNER achieves a 33%
+relative error reduction for a comparable number of ex-
+tractions.
+
+• Report on statistics over TEXTRUNNER’s 11,000,000
+highest probability extractions, which demonstrates its
+scalability, helps to assess the quality of its extractions,
+and suggests directions for future work.
+
+The remainder of the paper is organized as follows. Section
+2 introduces TEXTRUNNER, focusing on the novel elements
+of its architecture. Section 3 reports on our experimental re-
+sults. Section 4 considers related work, and the paper con-
+cludes with a discussion of future work.
+
+2 Open IE in TEXTRUNNER
+This section describes TEXTRUNNER’s architecture focus-
+ing on its novel components, and then considers how
+TEXTRUNNER addresses each of the challenges outlined in
+Section 1. TEXTRUNNER’s sole input is a corpus and its out-
+put is a set of extractions that are efﬁciently indexed to sup-
+port exploration via user queries.
+
+TEXTRUNNER consists of three key modules:
+
+1. Self-Supervised Learner: Given a small corpus sample
+as input, the Learner outputs a classiﬁer that labels can-
+didate extractions as “trustworthy” or not. The Learner
+requires no hand-tagged data.
+
+2. Single-Pass Extractor: The Extractor makes a single
+pass over the entire corpus to extract tuples for all possi-
+ble relations. The Extractor does not utilize a parser. The
+Extractor generates one or more candidate tuples from
+each sentence, sends each candidate to the classiﬁer, and
+retains the ones labeled as trustworthy.
+
+3. Redundancy-Based Assessor: The Assessor assigns a
+probability to each retained tuple based on a probabilis-
+tic model of redundancy in text introduced in [Downey
+et al., 2005].
+
+Below, we describe each module in more detail, discuss
+TEXTRUNNER’s ability to efﬁciently process queries over its
+extraction set, and analyze the system’s time complexity and
+speed.
+
+2.1 Self-Supervised Learner
+The Learner operates in two steps. First, it automatically la-
+bels its own training data as positive or negative. Second, it
+uses this labeled data to train a Naive Bayes classiﬁer, which
+is then used by the Extractor module.
+
+While deploying a deep linguistic parser to extract rela-
+tionships between objects is not practical at Web scale, we
+hypothesized that a parser can help to train an Extractor.
+Thus, prior to full-scale relation extraction, the Learner uses
+a parser [Klein and Manning, 2003] to automatically identify
+and label a set of trustworthy (and untrustworthy) extractions.
+These extractions are are used as positive (or negative) train-
+ing examples to a Naive Bayes classiﬁer.1 Our use of a noise-
+tolerant learning algorithm helps the system recover from the
+errors made by the parser when applied to heterogeneous Web
+text.
+
+Extractions take the form of a tuple t = (ei, ri,j, ej), where
+ei and ej are strings meant to denote entities, and ri,j is
+a string meant to denote a relationship between them. The
+trainer parses several thousand sentences to obtain their de-
+pendency graph representations. For each parsed sentence,
+the system ﬁnds all base noun phrase constituents ei.2 For
+each pair of noun phrases (ei, ej), i < j , the system traverses
+the parse structure connecting them to locate a sequence of
+words that becomes a potential relation ri,j in the tuple t. The
+Learner labels t as a positive example if certain constraints
+
+1Since the Learner labels its own training data, we refer to it as
+
+self supervised.
+
+2Base noun phrases do not contain nested noun phrases, or op-
+
+tional phrase modiﬁers, such as prepositional phrases.
+
+IJCAI-07
+
+2671
+
+on the syntactic structure shared by ei and ej are met. These
+constraints seek to extract relationships that are likely to be
+correct even when the parse tree contains some local errors; if
+any constraint fails, t is labeled as a negative instance. Some
+of the heuristics the system uses are:
+
+• There exists a dependency chain between ei and ej that is no
+
+longer than a certain length.
+
+• The path from ei to ej along the syntax tree does not cross a
+
+sentence-like boundary (e.g. relative clauses).
+
+• Neither ei nor ej consist solely of a pronoun.
+
+Once the Learner has found and labeled a set of tuples of
+the form t = (ei, ri,j, ej), it maps each tuple to a feature vec-
+tor representation. All features are domain independent, and
+can be evaluated at extraction time without the use of a parser.
+Examples of features include the presence of part-of-speech
+tag sequences in the relation ri,j , the number of tokens in ri,j ,
+the number of stopwords in ri,j , whether or not an object e is
+found to be a proper noun, the part-of-speech tag to the left of
+ei, the part-of-speech tag to the right of ej. Following feature
+extraction, the Learner uses this set of automatically labeled
+feature vectors as input to a Naive Bayes classiﬁer.
+
+The classiﬁer output by the Learner is language-speciﬁc
+but contains no relation-speciﬁc or lexical features. Thus, it
+can be used in a domain-independent manner.
+
+Prior to using a learning approach, one of the authors in-
+vested several weeks in manually constructing a relation-
+independent extraction classiﬁer. A ﬁrst attempt at relation
+extraction took the entire string between two entities detected
+to be of interest. Not surprisingly, this permissive approach
+captured an excess of extraneous and incoherent informa-
+tion. At the other extreme, a strict approach that simply looks
+for verbs in relation to a pair of nouns resulted in a loss of
+other links of importance, such as those that specify noun or
+attribute-centric properties, for example, (Oppenheimer, pro-
+fessor of, theoretical physics) and (trade schools, similar to,
+colleges). A purely verb-centric method was prone to extract-
+ing incomplete relationships, for example, (Berkeley, located,
+Bay Area) instead of (Berkeley, located in, Bay Area). The
+heuristic-based approaches that were attempted exposed the
+difﬁculties involved in anticipating the form of a relation and
+its arguments in a general manner. At best, a ﬁnal hand-
+built classiﬁer, which is a natural baseline for the learned one,
+achieved a mere one third of the accuracy of that obtained by
+the Learner.
+
+2.2 Single-Pass Extractor
+
+The Extractor makes a single pass over its corpus, automati-
+cally tagging each word in each sentence with its most prob-
+able part-of-speech. Using these tags, entities are found by
+identifying noun phrases using a lightweight noun phrase
+chunker.3 Relations are found by examining the text between
+
+3TEXTRUNNER performs this analysis using maximum-entropy
+models for part-of-speech tagging and noun-phrase chunking [Rat-
+naparkhi, 1998], as implemented in the OpenNLP toolkit. Both
+part-of-speech tags and noun phrases can be modeled with high
+accuracy across domains and languages [Brill and Ngai, 1999;
+Ngai and Florian, 2001]. This use of relatively “light” NLP tech-
+
+the noun phrases and heuristically eliminating non-essential
+phrases, such as prepositional phrases that overspecify an en-
+tity (e.g.“Scientists from many universities are studying ...” is
+analyzed as “Scientists are studying...”), or individual tokens,
+such as adverbs (e.g.“deﬁnitely developed” is reduced to “de-
+veloped”).
+
+For each noun phrase it ﬁnds, the chunker also provides the
+probability with which each word is believed to be part of the
+entity. These probabilities are subsequently used to discard
+tuples containing entities found with low levels of conﬁdence.
+Finally, each candidate tuple t is presented to the classiﬁer. If
+the classiﬁer labels t as trustworthy, it is extracted and stored
+by TEXTRUNNER.
+
+2.3 Redundancy-based Assessor
+During the extraction process, TEXTRUNNER creates a nor-
+malized form of the relation that omits non-essential modi-
+ﬁers to verbs and nouns, e.g. was developed by as a normal-
+ized form of was originally developed by. After extraction
+has been performed over the entire corpus, TEXTRUNNER
+automatically merges tuples where both entities and normal-
+ized relation are identical and counts the number of distinct
+sentences from which each extraction was found.
+
+Following extraction, the Assessor uses these counts to as-
+sign a probability to each tuple using the probabilistic model
+previously applied to unsupervised IE in the KNOWITALL
+system. Without hand-tagged data, the model efﬁciently esti-
+mates the probability that a tuple t = (ei, ri,j, ej) is a correct
+instance of the relation ri,j between ei and ej given that it was
+extracted from k different sentences. The model was shown
+to estimate far more accurate probabilities for IE than noisy-
+or and pointwise mutual information based methods [Downey
+et al., 2005].
+
+2.4 Query Processing
+TEXTRUNNER is capable of responding to queries over mil-
+lions of tuples at interactive speeds due to a inverted index
+distributed over a pool of machines. Each relation found dur-
+ing tuple extraction is assigned to a single machine in the
+pool. Every machine then computes an inverted index over
+the text of the locally-stored tuples, ensuring that each ma-
+chine is guaranteed to store all of the tuples containing a ref-
+erence to any relation assigned to that machine.4
+
+The efﬁcient indexing of tuples in TEXTRUNNER means
+that when a user (or application) wants to access a subset of
+tuples by naming one or more of its elements, the relevant
+subset can be retrieved in a manner of seconds, and irrele-
+vant extractions remain unrevealed to the user. Since the rela-
+tion names in TEXTRUNNER are drawn directly form the text,
+the intuitions that they implicitly use in formulating a search
+query are effective. Querying relational triples will be eas-
+ier once TEXTRUNNER is able to know which relations are
+synonymous with others. However, asking the user to “guess
+the right word” is a problem that is shared by search engines,
+which suggests that it is manageable for na¨ıve users.
+
+niques enables TEXTRUNNER to be more robust to the highly di-
+verse corpus of text on the Web.
+
+4The inverted index itself is built using the Lucene open source
+
+search engine.
+
+IJCAI-07
+
+2672
+
+Finally, TEXTRUNNER’s relation-centric index enables
+complex relational queries that are not currently possible us-
+ing a standard inverted index used by today’s search engines.
+These include relationship queries, unnamed-item queries,
+and multiple-attribute queries, each of which is described in
+detail in [Cafarella et al., 2006].
+
+2.5 Analysis
+Tuple extraction in TEXTRUNNER happens in O(D) time,
+where D is the number of documents in the corpus. It sub-
+sequently takes O(T log T ) time to sort, count and assess the
+set of T tuples found by the system. In contrast, each time a
+traditional IE system is asked to ﬁnd instances of a new set
+of relations R it may be forced to examine a substantial frac-
+tion of the documents in the corpus, making system run-time
+O(R · D). Thus, when D and R are large, as is typically
+the case on the Web, TEXTRUNNER’s ability to extract infor-
+mation for all relations at once, without having them named
+explicitly in its input, results in a signiﬁcant scalability ad-
+vantage over previous IE systems (including KNOWITALL).
+TEXTRUNNER extracts facts at an average speed of 0.036
+CPU seconds per sentence. Compared to dependency parsers
+which take an average of 3 seconds to process a single sen-
+tence, TEXTRUNNER runs more than 80 times faster on our
+corpus. On average, a Web page in our corpus contains 18
+sentences, making TEXTRUNNER’s average processing speed
+per document 0.65 CPU seconds and the total CPU time to
+extract tuples from our 9 million Web page corpus less than
+68 CPU hours. Because the corpus is easily divided into sep-
+arate chunks, the total time for the process on our 20 ma-
+chine cluster was less than 4 hours. It takes an additional 5
+hours for TEXTRUNNER to merge and sort the extracted tu-
+ples. We compare the performance of TEXTRUNNER relative
+to a state-of-the-art Web IE system in Section 3.1.
+
+The key to TEXTRUNNER’s scalability is processing time
+that is linear in D (and constant in R). But, as the above
+measurements show, TEXTRUNNER is not only scalable in
+theory, but also fast in practice.
+
+3 Experimental Results
+We ﬁrst compare recall and error rate of TEXTRUNNER with
+that of a closed IE system on a set of relations in Section
+3.1. We then turn to the fascinating challenge of character-
+izing the far broader set of facts and relations extracted by
+TEXTRUNNER in Section 3.2.
+
+3.1 Comparison with Traditional IE
+One means of evaluating Open IE is to compare its perfor-
+mance with a state-of-the-art Web IE system. For this com-
+parison we used KNOWITALL [Etzioni et al., 2005], a un-
+supervised IE system capable of performing large-scale ex-
+traction from the Web. To control the experiments, both
+TEXTRUNNER and KNOWITALL were tested on the task of
+extracting facts from our 9 million Web page corpus.
+
+Since KNOWITALL is a closed IE system, we needed to
+select a set of relations in advance. We randomly selected the
+following 10 relations that could be found in at least 1,000
+sentences in the corpus, manually ﬁltering out relations that
+were overly vague (e.g.“includes”):
+
+(<proper noun>, acquired, <proper noun>)
+(<proper noun>, graduated from, <proper noun>)
+(<proper noun>, is author of, <proper noun>)
+(<proper noun>, is based in, <proper noun>)
+(<proper noun>, studied, <noun phrase>)
+(<proper noun>, studied at, <proper noun>)
+(<proper noun>, was developed by, <proper noun>)
+(<proper noun>, was formed in, <year>)
+(<proper noun>, was founded by, <proper noun>)
+(<proper noun>, worked with, <proper noun>)
+
+Table 1 shows the average error rate over the ten relations
+and the total number of correct extractions for each of the two
+systems. TEXTRUNNER’s average error rate is 33% lower
+than KNOWITALL’s, but it ﬁnds an almost identical number
+of correct extractions. TEXTRUNNER’s improvement over
+KNOWITALL can be largely attributed to its ability to better
+identify appropriate arguments to relations.
+
+Still, a large proportion of the errors of both systems were
+from noun phrase analysis, where arguments were truncated
+or stray words added. It is difﬁcult to ﬁnd extraction bound-
+aries accurately when the intended type of arguments such as
+company names, person names, or book titles is not speciﬁed
+to the system. This was particularly the case for the authorOf
+relation, where many arguments reﬂecting book titles were
+truncated and the error rate was was 32% for TEXTRUNNER
+and 47% for KNOWITALL. With this outlier excluded, the
+average error rate is 10% for TEXTRUNNER and 16% for
+KNOWITALL.
+
+Even when extracting information for only ten relations,
+TEXTRUNNER’s efﬁciency advantage is apparent. Even
+though they were run over the same 9 million page corpus,
+TEXTRUNNER’s distributed extraction process took a total
+of 85 CPU hours, to perform extraction for all relations in
+the corpus at once, whereas KNOWITALL, which analyzed
+all sentences in the corpus that potentially matched its rules,
+took an average of 6.3 hours per relation. In the amount of
+time that KNOWITALL can extract data for 14 pre-speciﬁed
+relations, TEXTRUNNER discovers orders of magnitude more
+relations from the same corpus.
+
+Beyond the ten relations sampled, there is a fundamental
+difference between the two systems. Standard IE systems can
+only operate on relations given to it a priori by the user, and
+are only practical for a relatively small number of relations.
+In contrast, Open IE operates without knowing the relations
+a priori, and extracts information from all relations at once.
+We consider statistics on TEXTRUNNER’s extractions next.
+
+3.2 Global Statistics on Facts Learned
+
+Given a corpus of 9 million Web pages, containing 133 mil-
+lion sentences, TEXTRUNNER automatically extracted a set
+of 60.5 million tuples at an extraction rate of 2.2 tuples per
+sentence.
+
+When analyzing the output of open IE system such as
+TEXTRUNNER, several question naturally arise: How many
+of the tuples found represent actual relationships with plausi-
+ble arguments? What subset of these tuples is correct? How
+many of these tuples are distinct, as opposed to identical or
+synonymous? Answering these questions is challenging due
+to both the size and diversity of the tuple set. As explained
+
+IJCAI-07
+
+2673
+
+Average
+Error rate
+
+Correct
+
+Extractions
+
+TEXTRUNNER
+KNOWITALL
+
+12%
+18%
+
+11,476
+11,631
+
+Table 1: Over a set of ten relations, TEXTRUNNER achieved a
+33% lower error rate than KNOWITALL, while ﬁnding approx-
+imately as many correct extractions.
+
+below, we made a series of estimates and approximations in
+order to address the questions.
+
+As a ﬁrst step, we restricted our analysis to the subset of
+tuples that TEXTRUNNER extracted with high probability.
+Speciﬁcally, the tuples we evaluated met the following cri-
+teria: 1) TEXTRUNNER assigned a probability of at least 0.8
+to the tuple; 2) The tuple’s relation is supported by at least
+10 distinct sentences in the corpus; 3) The tuple’s relation is
+not found to be in the top 0.1% of relations by number of
+supporting sentences. (These relations were so general as to
+be nearly vacuous, such as (NP1, has, NP2)). This ﬁltered
+set consists of 11.3 million tuples containing 278,085 distinct
+relation strings. This ﬁltered set is the one used in all the
+measurements described in this section.
+
+Estimating the Correctness of Facts
+We randomly selected four hundred tuples from the ﬁltered
+set as our sample. The measurements below are extrapolated
+based on hand tagging the sample. Three authors of this paper
+inspected the tuples in order to characterize the data extracted
+by TEXTRUNNER. Each evaluator ﬁrst judged whether the
+relation was well-formed. A relation r is considered to be
+well-formed if there is some pair of entities X and Y such
+that (X, r, Y ) is a relation between X and Y . For example,
+(FCI, specializes in, software development) contains a well-
+formed relation, but (demands, of securing, border) does not.
+If a tuple was found to possess a well-formed relation, it was
+then judged to see if the arguments were reasonable for the
+relation. X and Y are well-formed arguments for the relation
+r if X and Y are of a ”type” of entity that can form a relation
+(X, r, Y ). An example of a tuple whose arguments are not
+well-formed is (29, dropped, instruments).
+
+We further classiﬁed the tuples that met these criteria as ei-
+ther concrete or abstract. Concrete means that the truth of the
+tuple is grounded in particular entities, for example, (Tesla,
+invented, coil transformer). Abstract tuples are underspeci-
+ﬁed, such as (Einstein, derived, theory), or refer to entities
+speciﬁed elsewhere, but imply properties of general classes,
+such as (executive, hired by, company).
+
+Finally, we judged each concrete or abstract tuple as true
+or false, based on whether it was consistent with the truth
+value of the sentence from which it was extracted. Figure 1
+summarizes this analysis of the extracted tuples.
+
+TEXTRUNNER ﬁnds 7.8 million facts having both a well-
+formed relation and arguments and probability at least 0.8.
+Of those facts, 80.4% were deemed to be correct according to
+human reviewers. Within a given relation, an average of 14%
+of the tuples are concrete facts of which 88.1% are correct,
+and 86% are abstract facts of which 77.2% are correct. Con-
+crete facts are potentially useful for information extraction or
+question answering, while abstract assertions are useful for
+
+Figure 1: Overview of the tuples extracted from 9 million Web
+page corpus. 7.8 million well-formed tuples are found having
+probability ≥ 0.8. Of those, TEXTRUNNER ﬁnds 1 million con-
+crete tuples with arguments grounded in particular real-world
+entities, 88.1% of which are correct, and 6.8 million tuples re-
+ﬂecting abstract assertions, 79.2% of which are correct.
+
+ontology learning and other applications. Of course, only a
+small subset of the universe of tuples would be of interest in
+any particular application (e.g., the tuples corresponding to
+the relations in the experiment in Section 3.1).
+
+Estimating the Number of Distinct Facts
+Of the millions of tuples extracted by TEXTRUNNER, how
+many reﬂect distinct statements as opposed to reformulations
+of existing extractions? In order to answer this question, one
+needs to be able to detect when one relation is synonymous
+with another, as well as when an entity is referred to by mul-
+tiple names. Both problems are very difﬁcult in an unsuper-
+vised, domain-independent context with a very large number
+of relations and entities of widely varying types. In our mea-
+surements, we were only able to address relation synonymy,
+which means that the measurements reported below should
+be viewed as rough approximations.
+
+In order to assess the number of distinct relations found by
+TEXTRUNNER, we further merged relations differing only in
+leading or trailing punctuation, auxiliary verbs, or in leading
+stopwords such as that, who and which. For example, “are
+consistent with” is merged with “, which is consistent with”.
+We also merged relations differing only by their use of active
+and passive voice (e.g., invented is merged with was invented
+by). This procedure reduced the number of distinct relations
+to 91% of the number before merging.
+
+Even after the above merge, the question remains: how
+many of the relation strings are synonymous? This is exceed-
+ingly difﬁcult to answer because many of the relations that
+TEXTRUNNER ﬁnds have multiple senses. The relation de-
+veloped, for example, may be a relation between a person and
+
+IJCAI-07
+
+2674
+
+an invention but also between a person and a disease. It is rare
+to ﬁnd two distinct relations that are truly synonymous in all
+senses of each phrase unless domain-speciﬁc type checking
+is performed on one or both arguments. If the ﬁrst argument
+is the name of a scientist, then developed is synonymous with
+invented and created, and is closely related to patented. With-
+out such argument type checking, these relations will pick out
+overlapping, but quite distinct sets of tuples.5
+
+It is, however, easier for a human to assess similarity at
+the tuple level, where context in the form of entities ground-
+ing the relationship is available.
+In order to estimate the
+number of similar facts extracted by TEXTRUNNER, we be-
+gan with our ﬁltered set of 11.3 million tuples. For each
+tuple, we found clusters of concrete tuples of the form
+(e1, r, e2), (e1, q, e2) where r (cid:2)= q, that is tuples where the
+entities match but the relation strings are distinct. We found
+that only one third of the tuples belonged to such “synonymy
+clusters”.
+
+Next, we randomly sampled 100 synonymy clusters and
+asked one author of this paper to determine how many distinct
+facts existed within each cluster. For example, the cluster of 4
+tuples below describes 2 distinct relations R1 and R2 between
+Bletchley Park and Station X as delineated below:
+
+R1
+
+R2
+R2
+R2
+
+(Bletchley Park, was location of
+
+, Station X)
+
+(Bletchley Park,
+(Bletchley Park,
+(Bletchley Park,
+
+being called
+, known as
+, codenamed
+
+, Station X)
+, Station X)
+, Station X)
+
+Overall, we found that roughly one quarter of the tuples
+in our sample were reformulations of other tuples contained
+somewhere in the ﬁltered set of 11.3 million tuples. Given
+our previous measurement that two thirds of the concrete fact
+tuples do not belong to synonymy clusters, we can compute
+that 2
+4 ) or roughly 92% of the tuples found by
+TEXTRUNNER express distinct assertions. As pointed out
+earlier, this is an overestimate of the number of unique facts
+because we have not been able to factor in the impact of mul-
+tiple entity names, which is a topic for future work.
+
+3 + ( 1
+
+× 3
+
+3
+
+4 Related Work
+
+Traditional “closed” IE work was discussed in Section 1. Re-
+cent efforts [Pasca et al., 2006] seeking to undertake large-
+scale extraction indicate a growing interest in the problem.
+
+This year, Sekine [Sekine, 2006] proposed a paradigm for
+“on-demand information extraction,” which aims to eliminate
+customization involved with adapting IE systems to new top-
+ics. Using unsupervised learning methods, the system auto-
+matically creates patterns and performs extraction based on a
+topic that has been speciﬁed by a user.
+
+Also this year, Shinyama and Sekine [Shinyama and
+Sekine, 2006] described an approach to “unrestricted re-
+lation discovery” that was developed independently of our
+work, and tested on a collection of 28,000 newswire articles.
+
+5We carried out several preliminary experiments using a data-
+driven approach to synonym discovery based on DIRT [Lin and Pan-
+tel, 2001] that conﬁrmed this hypothesis.
+
+This work contains the important idea of avoiding relation-
+speciﬁcity, but does not scale to the Web as explained below.
+Given a collection of documents, their system ﬁrst per-
+forms clustering of the entire set of articles, partitioning the
+corpus into sets of articles believed to discuss similar topics.
+Within each cluster, named-entity recognition, co-reference
+resolution and deep linguistic parse structures are computed
+and then used to automatically identify relations between sets
+of entities. This use of “heavy” linguistic machinery would
+be problematic if applied to the Web.
+
+Shinyama and Sekine’s system, which uses pairwise
+vector-space clustering, initially requires an O(D2) effort
+where D is the number of documents. Each document as-
+signed to a cluster is then subject to linguistic processing,
+potentially resulting in another pass through the set of input
+documents. This is far more expensive for large document
+collections than TEXTRUNNER’s O(D + T log T ) runtime as
+presented earlier.
+
+From a collection of 28,000 newswire articles, Shinyama
+and Sekine were able to discover 101 relations. While it is
+difﬁcult to measure the exact number of relations found by
+TEXTRUNNER on its 9,000,000 Web page corpus, it is at least
+two or three orders of magnitude greater than 101.
+
+5 Conclusions
+
+This paper introduces Open IE from the Web, an unsuper-
+vised extraction paradigm that eschews relation-speciﬁc ex-
+traction in favor of a single extraction pass over the corpus
+during which relations of interest are automatically discov-
+ered and efﬁciently stored. Unlike traditional IE systems that
+repeatedly incur the cost of corpus analysis with the naming
+of each new relation, Open IE’s one-time relation discovery
+procedure allows a user to name and explore relationships at
+interactive speeds.
+
+The paper also introduces TEXTRUNNER, a fully imple-
+mented Open IE system, and demonstrates its ability to
+extract massive amounts of high-quality information from
+a nine million Web page corpus. We have shown that
+TEXTRUNNER is able to match the recall of the KNOWITALL
+state-of-the-art Web IE system, while achieving higher preci-
+sion.
+
+In the future, we plan to integrate scalable methods for de-
+tecting synonyms and resolving multiple mentions of entities
+in TEXTRUNNER. The system would also beneﬁt from the
+ability to learn the types of entities commonly taken by re-
+lations. This would enable the system to make a distinction
+between different senses of a relation, as well as better locate
+entity boundaries. Finally we plan to unify tuples output by
+TEXTRUNNER into a graph-based structure, enabling com-
+plex relational queries.
+
+Acknowledegments
+
+We thank the following people for helpful comments on pre-
+vious drafts: Dan Weld, Eytan Adar, and Doug Downey.
+
+This research was supported in part by NSF grants
+contract
+IIS-0535284
+NBCHD030010, ONR grant N00014-02-1-0324 as well
+as gifts from Google, and carried out at the University of
+
+IIS-0312988,
+
+DARPA
+
+and
+
+IJCAI-07
+
+2675
+
+Washington’s Turing Center. The ﬁrst author of this paper
+received additional support thanks to a Google Anita Borg
+Memorial Scholarship.
+
+References
+
+[Agichtein and Gravano, 2000] E. Agichtein and L. Gra-
+vano. Snowball: Extracting relations from large plain-text
+collections. In Proceedings of the Fifth ACM International
+Conference on Digital Libraries, 2000.
+
+[Brill and Ngai, 1999] E. Brill and G. Ngai. Man (and
+woman) vs. machine: a case study in base noun phrase
+learning. In Proceedings of the ACL, pages 65–72, 1999.
+
+[Brin, 1998] S. Brin. Extracting Patterns and Relations from
+the World Wide Web. In WebDB Workshop at 6th Inter-
+national Conference on Extending Database Technology,
+EDBT’98, pages 172–183, Valencia, Spain, 1998.
+
+[Bunescu and Mooney, 2005] R. Bunescu and R. Mooney. A
+shortest path dependency kernel for relation extraction. In
+Proc. of the HLT/EMLNP, 2005.
+
+[Cafarella et al., 2006] Michael J. Cafarella, Michele Banko,
+and Oren Etzioni. Relational web search. Technical Report
+06-04-02, University of Washington, 2006.
+
+[Ciaramita et al., 2005] M.
+
+A. Gangemi,
+E. Ratsch, J. Saric, and I. Rojas. Unsupervised learning
+of semantic relations between concepts of a molecular
+biology ontology. In Proceedings of IJCAI, 2005.
+
+Ciaramita,
+
+[Ngai and Florian, 2001] G. Ngai
+
+and
+
+R.
+
+Transformation-based learning in the fast
+Proceedings of the NAACL, pages 40–47, 2001.
+
+Florian.
+In
+
+lane.
+
+[Pasca et al., 2006] M. Pasca, D. Lin, J. Bigham, A. Lif-
+chits, and A. Jain. Names and similarities on the web:
+Fact extraction in the fast lane.
+In (To appear) Proc. of
+ACL/COLING 2006, 2006.
+
+[Ratnaparkhi, 1998] A. Ratnaparkhi. Maximum Entropy
+Models for Natural Language Ambiguity Resolution. PhD
+thesis, University of Pennsylvania, 1998.
+
+[Ravichandran and Hovy, 2002] D.
+
+and
+D. Hovy. Learning surface text patterns for a question
+answering system.
+In Proceedings of the ACL, pages
+41–47, Philadelphia, Pennsylvania, 2002.
+
+Ravichandran
+
+[Riloff, 1996] E. Riloff. Automatically constructing extrac-
+tion patterns from untagged text. In Proc. of AAAI, 1996.
+
+[Rosario and Hearst, 2004] B. Rosario and M. Hearst. Clas-
+sifying semantic relations in bioscience text. In Proc. of
+ACL, 2004.
+
+[Sekine, 2006] S. Sekine. On-demand information extrac-
+
+tion. In Procs. of COLING, 2006.
+
+[Shinyama and Sekine, 2006] Y. Shinyama and S. Sekine.
+Preemptive information extraction using unrestricted rela-
+tion discovery. In Proc. of the HLT-NAACL, 2006.
+
+[Craven et al., 1999] M. Craven, D. DiPasquo, D. Freitag,
+A. McCallum, T. Mitchell, K. Nigam, and S. Slattery.
+Learning to construct knowledge bases from the world
+wide web. In Artiﬁcial Intelligence, 1999.
+
+[Culotta et al., 2006] A. Culotta, A. McCallum, and J. Betz.
+Integrating probabilistic extraction models and relational
+data mining to discover relations and patterns in text. In
+Proceedings of HLT-NAACL, New York, NY, 2006.
+
+[Downey et al., 2005] D. Downey, O. Etzioni, and S. Soder-
+land. A Probabilistic Model of Redundancy in Information
+Extraction. In Proc. of IJCAI, 2005.
+
+[Downey et al., 2007] D. Downey, M. Broadhead, and O. Et-
+zioni. Locating Complex Named Entities in Web Text. In
+Proc. of IJCAI, 2007.
+
+[Etzioni et al., 2005] O. Etzioni, M. Cafarella, D. Downey,
+S. Kok, A. Popescu, T. Shaked, S. Soderland, D. Weld,
+and A. Yates. Unsupervised named-entity extraction from
+the web: An experimental study. Artiﬁcial Intelligence,
+165(1):91–134, 2005.
+
+[Kambhatla, 2004] N. Kambhatla. Combining lexical, syn-
+tactic and semantic features with maximum entropy mod-
+els. In Proceedings of ACL, 2004.
+
+[Klein and Manning, 2003] Dan Klein and Christopher D.
+Manning. Accurate unlexicalized parsing. In Proceedings
+of the ACL, 2003.
+
+[Lin and Pantel, 2001] D. Lin and P. Pantel. Discovery of
+
+inference rules from text. In Proceedings of KDD, 2001.
+
+IJCAI-07
+
+2676
+
+

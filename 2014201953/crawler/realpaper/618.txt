@@ -1,0 +1,1110 @@
+Use of Off-line Dynamic Programming for Efficient Image Interpretation 
+
+Ramana Isukapalli 
+
+101 Crawfords Corner Road 
+
+Lucent Technologies 
+
+Holmdel, NJ 07733 USA 
+
+risukapalli@lucent.com 
+
+Russell Greiner 
+
+Department of Computing Science 
+
+University of Alberta 
+
+Edmonton, AB T6G 2E8 Canada 
+greiner@cs.ualberta.ca 
+
+Abstract 
+
+An  interpretation system finds the  likely mappings 
+from portions of an image to real-world objects.  An 
+interpretation policy specifies  when  to  apply  which 
+imaging  operator,  to  which  portion  of the  image, 
+during every  stage of interpretation.  Earlier results 
+compared  a  number of policies,  and demonstrated 
+that policies  that  select  operators which  maximize 
+the  information gain  per cost,  worked  most effec(cid:173)
+tively.  However,  those policies are myopic — they 
+rank the operators based only on their immediate re(cid:173)
+wards.  This can  lead to  inferior overall  results:  it 
+may be better to use a relatively expensive operator 
+first,  if that  operator provides  information that will 
+significantly reduce  the cost  of the  subsequent op(cid:173)
+erators. 
+This  suggests  using  some  lookahead  process  to 
+compute  the  quality  for  operators  non-myopically. 
+Unfortunately,  this  is  prohibitively  expensive  for 
+most  domains,  especially  for domains  that  have  a 
+large number of complex  states.  We  therefore use 
+ideas  from  reinforcement  learning  to  compute  the 
+utility of each  operator sequence.  In  particular, our 
+system  first  uses  dynamic  programming,  over ab(cid:173)
+stract simplifications of interpretation states, to pre-
+compute  the  utility of each  relevant  sequence. 
+It 
+does this off-line, over a training sample of images. 
+At run time, our interpretation system uses these es(cid:173)
+timates to decide when to use which imaging oper(cid:173)
+ator.  Our empirical results, in the challenging real-
+world domain of face recognition, demonstrate that 
+this approach  works more effectively than myopic 
+approaches. 
+
+Introduction 
+
+1 
+Interpretation  is  the  process  of  finding  the  likely  mapping 
+from portions of an image to real-world objects.  It is the ba(cid:173)
+sis for a number of imaging tasks,  including recognition ("is 
+objectX  in the image?")  and  identification ("which object is 
+in  the  image?"),  as  well  as  several  forms  of tracking  ("find 
+all  moving  objects  of  typeX  in  this  sequence  of  images"), 
+etc.  [PL95; HR96].  It is important that an interpretation sys(cid:173)
+tem (IS) be efficient as well as accurate.  Any IS should have 
+
+access to an inventory of "imaging operators" — like edge de(cid:173)
+tectors, region growers, corner locators, etc.,  each of which, 
+when applied to any portion of the image, returns meaningful 
+tokens (like circles, regions of the same color, etc.). An "inter(cid:173)
+pretation policy" specifies  which  operator to apply to which 
+portion of the  image,  during  each  step  of the  interpretation 
+process.  Such  policies  must,  of course,  specify  the details: 
+perhaps by specifying exactly which  bottom-up operators to 
+use, and over what portion of the image, if and when to switch 
+from bottom-up to top-down, which  aspects  of the model  to 
+seek, etc. 
+
+Our earlier work llGOlb] considered various types of poli(cid:173)
+cies,  towards  demonstrating  that  an  "information  theoretic 
+policy",  which selects  operators that maximize  the informa(cid:173)
+tion gain per unit cost of the imaging operator, work more ef(cid:173)
+fectively than others.  However,  the  fIGOlb]  policies evalu-
+ate  each  operator  o(-)  myopically —  i.e.,  independent  of the 
+cost and effectiveness of subsequent operators that would be 
+applied,  after performing this  o(.).  To  see  why this is prob(cid:173)
+lematic,  assume  the task  is to determine whether there  is an 
+airplane in an  image,  by seeking the various parts of an  air(cid:173)
+plane — e.g., the fuselage, wings, engine pods, tailpiece, etc. 
+Now consider the oep operator that detects and locates the en(cid:173)
+gine pods.  As the engine pods are small  and often partially-
+occluded,  Oep  is  probably  expensive.  However,  once  these 
+parts have been located, we expect to find the associated wings 
+very easily, and then the remaining parts required to identify 
+the entire airplane.  A myopic policy, which evaluates an oper(cid:173)
+ator based only on its immediate cost, would miss this connec(cid:173)
+tion, and so would probably prefer a cheaper operator over the 
+expensive  oep.  A  better policy  would consider "operator in(cid:173)
+teractions" (here, relating oep to (say) the "wing finder opera(cid:173)
+tor") when deciding which operator to apply. The data in Sec(cid:173)
+tion 5 (related to the complex task of face recognition) shows 
+that such non-myopic policies can be both more accurate, and 
+more efficient. 
+
+Of  course,  non-myopic  policies  must  use  some  type  of 
+lookahead to evaluate the quality of its operators; this can be 
+combinatorially expensive to compute.  We address this con(cid:173)
+cern by (1) dealing with an abstract version of the "interpreta(cid:173)
+tion state space", and then by (2) using dynamic programming 
+techniques  over  this  abstracted  space,  pre-computing  many 
+relevant "utility"  [SB98]  values off-line [BDB00].  In  partic(cid:173)
+ular, our system computes the utility of imaging operator se-
+
+VISION 
+
+1319 
+
+quences in each state s encountered, based on data from a set 
+of training examples.  It produces a policy,  which maps each 
+state s to the operator 
+that appears to be the most promis(cid:173)
+ing,  incorporating this  lookahead.  At  run-time,  our system 
+finds the best matching state and applies the operator associ(cid:173)
+ated with that situation.  Our empirical results, in the domain 
+of face  recognition, show that such policies work effectively 
+—  better than  the best results obtained by any of the earlier 
+myopic systems. 
+
+Section 2 presents relevant related work, to help frame our 
+contributions. Section 3 discusses the salient features of inter(cid:173)
+pretation strategies.  Section 4 then presents our approach, of 
+using reinforcement  learning in  image  interpretation,  within 
+the domain of face recognition, using operators that each cor(cid:173)
+respond to types of eigenfeatures.  Section 5 provides empiri(cid:173)
+cal results that support our claims. 
+
+2  Related  w o rk 
+We produce an interpretation of an image by applying a se(cid:173)
+quence  of operators,  where  each  operator  maps  the  current 
+state (typically a partial interpretation) to a new state.  As the 
+effects of an operator may depend on information not explic(cid:173)
+itly contained in the state description, this mapping is stochas(cid:173)
+tic.  Moreover, each operator has a cost, and the state associ(cid:173)
+ated with the  final  interpretation has a "quality" (i.e., its ac(cid:173)
+curacy  as  an  interpretation).  As  such,  we view this image-
+interpretation task as a "Markov Decision Problem" (MDP). 
+This means  we can  apply the host of reinforcement learning 
+techniques [SB98] to this problem.  This specific  application 
+area,  of image interpretation, follows the pioneering work of 
+Draper [BDBOO], which shows that dynamic control policies 
+can  outperform hand-coded  policies.  We extend  their work 
+by addressing and exploiting the issue of operator interactions 
+and by doing a systematic analysis of the cost and  accuracy 
+tradeoffs in face recognition. 
+
+While we could encode each state as the entire image, this 
+would be too unwieldy. Boutilier et al.  [BDH99] survey sev(cid:173)
+eral types of representations in planning problems and discuss 
+ways to exploit them to ease the computational cost of policies 
+or plans.  Their work focuses on abstraction, aggregation and 
+decomposition techniques.  We use abstractions to reduce the 
+size of each state, and hence of the state space we are explor(cid:173)
+ing;  moreover,  we are not concerned  with the general plan(cid:173)
+ning problem.  Our system is similar to the "forest inventory 
+management  system"  [BDL02].  In  their system,  the output 
+of some  operators provide the  input to  some  other operator, 
+while in our system the result of one operator is used to nar(cid:173)
+row the search  for some other operator.  Moreover,  our sys(cid:173)
+tem can exploit the structure specific to our task to bound the 
+lookahead depth. 
+
+3  Framework 
+As suggested above, our overall objective is to produce an ef(cid:173)
+fective interpretation policy — e.g., one that efficiently returns 
+a sufficiently accurate interpretation, where accuracy  and ef(cid:173)
+ficiency are each measured with respect to the underlying task 
+and the distribution of images that will be encountered.  This 
+section makes  this framework more precise.  Subsection  3.1 
+
+specifies our particular task; Subsection 3.2 lists the strategies 
+we will evaluate; Subsection 3.3 outlines our performance do(cid:173)
+main, face recognition; and Subsection 3.4 describes the spe(cid:173)
+cific operators we will use. 
+
+Input to the Interpretation System 
+
+3.1 
+We assume that our interpretation system " / S" is given the fol(cid:173)
+lowing information: 
+*  The distribution D of images  that the IS  will encounter, 
+encoded in terms of the distribution of objects and views that 
+will be seen,  etc.  For our face recognition  task,  this corre(cid:173)
+sponds to  the distribution of all  people the  system  will  see, 
+which varies over race, gender and age, as well as poses and 
+sizes. We approximate this using the images given in the train(cid:173)
+ing set. See Figure 1. 
+•  The  task  T  — 
+includes  two  parts: 
+First, V specifies the objects that the IS should seek, and what 
+IS should return.  Second, the task specification also provides 
+the "evaluation criteria" for any policy, which is based on both 
+the expected "accuracy" 
+and the maximum interpreta(cid:173)
+tion "cost" 
+
+which the IS should not exceed. 
+
+Here, 
+
+specifies  our  task  is  to  identify  the  person  from 
+his/her given test image (wrt the people included in the train(cid:173)
+ing set), subject to the accuracy 
+and cost requirements 
+
+includes (say) 
+*  The set of possible "operators" 
+various edge detectors, region growers, graph matchers, etc. 
+For each operator o2, we must specify 
+
+•  its input and output, 
+•  its  "effectiveness",  which  specifies  the  accuracy  of the 
+
+• 
+
+output, as a function of the input. 
+its "cost", as a function of (the size of) its input and pa(cid:173)
+rameter setting. 
+
+We will use a specific set of operators in our face recognition 
+task; we describe these in detail in Section 3.4. 
+
+Borrowing from the MDP literature, we view the main in(cid:173)
+put to each  operator as  its  "state".  As  we  are  dealing  with 
+scenes,  we could use the entire pixel image  as (part of) the 
+state.  However, for reasons of efficiency, we will often use an 
+abstracted view 
+of (our interpretation of the) the scene 
+s.  Section 3.4 presents the specific abstraction we are using. 
+
+3.2  Strategies 
+
+Strategy I N F O G A I N:  selects the operator that provides the 
+largest  information  gain  (per  unit  cost)  at  each  step.  This 
+myopic strategy first computes the expected information gain 
+for each possible operator and argument combination 
+It then  executes  the operator that 
+
+o, as well as the cost 
+maximizes their ratio,  
+
+We focus on this strategy as a number of earlier empirical 
+studies have demonstrated that it was the best of all of the (my(cid:173)
+opic) strategies considered, across a number of task-contexts 
+and  domains,  including  simple  blocks  world 
+car 
+recognition (identifying the make and model of a car based on 
+its tail light assembly 
+as well as the face recognition 
+system considered here  
+Strategy BESTSEQ: selects an operator  
+that appears to 
+be the most promising in the current abstract state  F(s),  as 
+
+1320 
+
+VISION 
+
+given by the utility 
+is the (opti(cid:173)
+mal) mapping from state to actions.  See Section 4 for details. 
+
+where 
+
+3.3  Face recognition task 
+We  investigate the efficiency  and  accuracy  of the  strategies 
+listed above in the domain of face recognition [TP91; PMS94; 
+PWHR98; EC97].  This section briefly discusses the promi(cid:173)
+nent "eigenface" technique of face recognition that forms the 
+basis of our approach; then presents our framework, describ-
+ing  the  representation  and  the  operators  we  use  to  identify 
+faces;  and  finally  presents our face interpretation algorithm, 
+for identifying a person from a given image of his/her face. 
+Eigenface  and  EigenFeature  Method:  Many  of  today's 
+face  recognition  systems  use  Principal  Component Analysis 
+(PCA)  [TP911:  Given  a set of training images  of faces,  the 
+system first forms the covariance matrix C of the images, then 
+computes the  main  eigenvectors  of C  ("eigenfaces").  Ev(cid:173)
+ery training face 
+is then projected into this coordinate space 
+("facespace"), producing a vector  
+During recognition, the test face 
+
+is similarly projected 
+which is then 
+into the facespace,  producing the vector 
+compared with each of the training faces.  The best matching 
+training face is taken to be the interpretation [TP91]. 
+
+Following [PMS94],  we  extend  this  method to recognize 
+facial features — eyes, nose, mouth, etc. — which we then use 
+to help identify the individual in a given test image. We parti(cid:173)
+tion the training data into two sets, 
+for construct(cid:173)
+ing the eigenfeatures and 
+for collecting statistics, 
+where each set contains at least one face of each of the  peo(cid:173)
+ple.  (Feature  regions  for the  training data T were extracted 
+using the operators explained in 3.4 and verified manually for 
+correctness).  Letting 
+denote the person  whose face  is 
+given by  we have 
+each remaining 
+
+also maps to  
+
+and 
+
+let 
+
+be  the  "feature  space"  encoding  of   
+
+We use PCA on the mouth regions of each 
+
+image, to pro(cid:173)
+duce a set of eigenvectors; here eigen-mouths.  For each face 
+image 
+mouth-region. We will later compare the feature space encod(cid:173)
+ing 
+vectors, 
+of a new image 
+suggests  that  htcst  is 
+with the assumption that 
+really  person  i  — i.e.,  finding  that 
+is  small 
+should suggest that 
+norm,  aka Euclidean  distance.)  To quantify how  strong this 
+belief should be, we compute 
+where each 
+between  the  "eigen-mouth  encodings"  of 
+
+is the Euclidean distance 
+
+against these 
+
+refers to the  
+
+values 
+
+(Note 
+
+and 
+
+Using the 
+
+training data, we can learn a mapping from 
+
+these values to probabilities  
+
+which we can use to estimate 
+
+(See [IGOlb] for details.) 
+
+We compute similar estimates for the other facial features, 
+such as nose 
+We then use 
+the Nai've-Bayes assumption [DH73]  (that features are  inde(cid:173)
+pendent, given a specific person) 1 to compute a cumulative 
+
+left eye (le) and right eye 
+
+'Of course, this assumption is almost assuredly false in our sit-
+
+s
+
+f
+
+e
+
+"face probability" from these "feature probabilities": the val(cid:173)
+u
+of 
+We then compute 
+
+re  /,  corresponding  to  a  set 
+values (one for each individual i). 
+
+e
+
+a
+
+t
+
+u
+
+(0 
+
+where 
+
+is a scaling constant. 
+
+3.4  Operators 
+We  use 
+four 
+
+classes 
+
+of  operators,  O 
+
+-
+to 
+detect  respectively  "left  eye",  "right  eye",  "nose"  and 
+"mouth".  Each  specific  operator  also  takes  several  pa(cid:173)
+{25,30,35,40,45}  specifies  the  number 
+rameters: 
+of  eigen-vectors  being  considered; 
+the  other  parameters 
+specify the space this operator 
+It  will  look  in  the 
+pixels, 
+
+will  sweep,  looking  for  this  feature: 
+rectangle 
+centered at  
+
+i.e.,  sweep 
+
+and 
+
+Each instantiated operator 
+
+from within the entire face 
+
+takes as input the im(cid:173)
+and returns a probabilistic distribution 
+age of a test face 
+locates 
+over the individuals. It has three subtasks: 
+the feature 
+Here we 
+use a simple template matching technique in which we search 
+pixels, centered at pixel 
+in the fixed region  of size 
+then projects the relevant region of the test im(cid:173)
+into the feature space —  c o m p u t i n g of  dimen(cid:173)
+to compute first the values 
+for each person i and then to com(cid:173)
+pute the probability 
+for each person 
+i.  We use Equation 1  to update the distribution when consid(cid:173)
+ering the 2nd and subsequent features; see [IGOlb]. For each 
+eigenspace dimension  we empirically determined the cost 
+(in milliseconds) of the four operators — 
+
+.  SubTask#3 uses this 
+
+age 
+sion 
+
+is the size of the range.  While increas(cid:173)
+where 
+ 
+ing the dimensionality  of the feature space should improve 
+the accuracy of the result, here we see explicitly how this will 
+ 
+increase the cost. 
+4  Use of Dynamic Programming 
+This section briefly overviews MDPs, presents "state abstrac(cid:173)
+tion" in face  recognition and shows  how dynamic  program(cid:173)
+ming can  be used  to compute  the utility of operators  in  ab(cid:173)
+stracted states.  We also discuss operator interaction and de(cid:173)
+scribe how it can be exploited in face recognition. 
+
+uation. However, this classification has been found to work well in 
+practice [Mit97]. 
+
+VISION 
+
+1321 
+
+where  S  — 
+
+of  states,  A  — 
+tions, 
+bility  function 
+taking action  a  in  situation  s  leads  to being  in  state 
+
+4.1  Markov  Decision  Problem 
+A  Markov  Decision  Problem  can  be  described  as  a  4-tuple 
+is  a  finite  set 
+is  a  finite  set  of  ac(cid:173)
+is  the  state  transition proba(cid:173)
+is  the probability that 
+and 
+is the reward an agent gets for taking an 
+<S.  The Markov property  holds  if 
+action 
+A  in  state s 
+using action a depends only 
+to 
+the transition from state 
+on  st  and not  the previous history.  A  policy 
+A  is 
+a mapping  from states  to actions.  For any policy 7r,  we can 
+define a utility function 
+
+such that 
+
+:  S 
+
+which corresponds to the expected cumulative rewards of ex(cid:173)
+in state s, then follow(cid:173)
+ecuting the apparently-optimal action 
+ing policy  after that. 
+
+Given an MDP, we naturally seek an optimal policy 
+
+cumulative reward for 
+i.e., a policy that produces the 
+each state, 
+Dynamic programming provides a way to 
+compute this optimal policy, by computing the utilities of the 
+best actions. Of course, given the values of 
+the optimal 
+action at each state s is simply  
+
+This  can  be challenging in the general  setting, where se(cid:173)
+quences  of actions can  map  one  state  to  itself;  much  of the 
+work  in  Reinforcement  Learning  [SB98]  is  designed  to  ad(cid:173)
+dress these issues.  In our current case, however, we will see 
+there is a partial order on the states, meaning no sequence of 
+actions can  map a state to itself.  Here,  we can  use dynamic 
+programming  to  compute  the  optimal  utility  for each  "final 
+step", then use these values to compute the optimal action (and 
+utility) for each penultimate state, and so forth. 
+
+4.2  State  abstraction 
+An MDP involves "states".  In our face recognition task, any 
+attempt to define states in terms of the pixel values of an image 
+would be problematic, as there will be far too many states to 
+enumerate.  Following [BDBOO; BDL02], we use the notion of 
+"abstract states", which basically redefines an original state in 
+a much more compact form, using only the certain aspects of 
+the state.  Since we recognize a person using the features, we 
+define an abstraction function 
+
+denotes  the  location  (center)  of feature 
+
+(2) 
+where s is the actual complex state as present in the image and 
+(left  eye, 
+right eye,  nose or mouth) in the image.  (Here C is the total 
+cost we have spent so far, and 
+is the 
+current posterior distribution over the possible faces, based on 
+the current evidence 
+The location of some feature  may 
+not yet be known in an  image;  here,  we use the value  of 
+for both 
+Further,  we say  two abstractions are 
+equivalent", written   
+
+and 
+
+— i.e., when the distance (in pixels) between the centers 
+of feature 
+
+and .s-2 is small  
+
+in 
+
+As we are  using  normalized  images that contain only faces, 
+denoting the distance in absolute pixel values is not an issue. 
+In general, 
+
+is a small, predefined constant; we used 10.2 
+
+The result of abstraction  is that a large number of complex 
+states can  be described  by  a small  number of compact  state 
+descriptions.  Of course, the same abstract state can represent 
+multiple states 
+
+when 
+
+We  use  a  lookahead  algorithm to  compute  the  £/-values. 
+Since we consider only four features, we need a lookahead of 
+only depth four.  Moreover, we can do this during the training 
+phase.  We will use the reward function 
+
+ 
+
+(3) 
+
+that penalizes each  operator a by a times the time 
+it re(cid:173)
+quired (in seconds) as well as a positive score for obtaining the 
+correct interpretation (here 
+represents that correct  identity 
+of the person in  the image.)  We used 
+=  0.2.  During the 
+training phase, our system finds the optimal operator sequence 
+
+i.e.,  the  one that  has  the  maximum 
+
+value, based on the abstracted state  
+
+= 
+
+ 
+
+with 5  different values  of 
+total of 20 operators (see  Section  3.4).  The parameters 
+
+4.3  Dynamic Programming 
+This section shows how to compute  U{s)  utility values. 
+Tree  expansion:  We  use  four  classes  of operators  O  — 
+each 
+for a 
+-
+specify  the rectangular area  where 
+the operator will search.  Our system does not have to search 
+over  their  values;  instead,  it  directly  computes  their  values 
+from the locations of the features 
+we 
+have already detected; see Section 4.4. 
+
+and 
+
+Our system expands the operator tree exhaustively using a 
+depth-first search.  Of course,  the depth of the tree is at most 
+4 (not 20), as we only consider at most one instance of each 
+operator along any path. 
+Computing U( s):  We compute the various utility values us(cid:173)
+ing a dynamic programming approach: 
+
+(i) We first apply every sequence of 4 different operators to 
+the original image, to produce the set of all possible  s(4)  leaf 
+states.  Then 
+is 
+w
+the correct interpretation, and 
+is the observed locations of 
+the various features. 
+
+re
+
+e
+
+h
+
+e
+
+s
+
+t
+
+ 
+
+(ii) Now consider each state 
+
+that involves some set of 
+3 operators.  For each, we can consider all 5  +  1 possible ac(cid:173)
+tions: either 
+or apply the remaining operator (with one 
+of the 5 possible k values).  We can trivially compute the util(cid:173)
+ity of each  option:  as 
+action, and 
+if the action a takes time t(a) and produces 
+
+for the 
+
+•  si  and  «2  have located  the same set  of features 
+
+and 
+
+i.e., 
+
+of 
+
+2 For this value of  we found that there were about 1600 entries 
+
+totally. 
+
+1322 
+
+VISION 
+
+Figure 1:  Training images (top); test images (bottom) 
+
+We  s e t
+
+to  be the largest of these 6 val(cid:173)
+to the action which produced this largest 
+
+the state 
+ues, and 
+values. 
+
+After computing 
+
+for all "depth-3" states, we then 
+
+recur, to deal with depth-2 states, and so forth. 
+
+Of course,  these  states  here  actually  refer only  to the ab(cid:173)
+Moreover, we "bin" these values:  Sup(cid:173)
+If 
+and de(cid:173)
+we  would then  reset  the 
+to be the values found 
+
+stracted state 
+pose we have encountered some abstracted state 
+we later  find  a state 52,  where 
+termine 
+value  of 
+for  
+Retrieving  the  most  promising operator  during  interpre(cid:173)
+tation: This entire procedure of computing the optimal policy 
+is done off-line, during the training phase.  During inter(cid:173)
+pretation (performance phase),  in any state  we (i) find the 
+such that the sum of the distances 
+"nearest neighbour" 
+between the corresponding features  in 
+is 
+the minimum over all possible entries; and (ii) return the oper(cid:173)
+which is either 
+ator 
+or an instantiated 
+operator —  say 
+(25,  (50,66),  (60,52)).  If not-Stop, the 
+run-time system then executes this operator to locate another 
+feature,  which produces a new state  (updating the total cost 
+and posterior distribution as well).  It then determines the next 
+action to perform, and so forth. 
+
+and 
+
+There is one place where our system might perform differ(cid:173)
+ently from what the policy dictates:  As we are maintaining the 
+actual cost  so  far,  and  the actual  posterior distribution over 
+interpretations, our run-time system will actually terminate if 
+either the actual cost has exceeded our specs, or if the highest 
+probability is above the minimal acceptable value. 
+
+Notice, given our specific set-up — e.g., only 4 types of op(cid:173)
+erators that can only be executed once, and which always suc(cid:173)
+ceed, etc. — the policy obtained can be viewed as a "straight-
+line"  policy:  seek  one  specific  feature,  than  another,  until 
+achieving some termination condition; see Figure 2 for an ex(cid:173)
+ample.  In general, this basic dynamic programming approach 
+could produce more complex policies. 
+
+4,4  Operator dependencies 
+Our face recognition system will exploit a certain type of op(cid:173)
+erator interactions, 
+using the result of one operator to sim(cid:173)
+plify a subsequent one.  That is, after detecting some feature 
+(say the left eye), we expect to have some idea where to find 
+
+Figure  2: 
+
+Policy 
+
+learned  by  BESTSEQ, 
+
+for 
+
+the other features (e.g., the right eye). We model this as a lin(cid:173)
+ear function, mapping from the location of the left eye to the 
+expected location of the right eye.  If the left eye was detected 
+at 
+then the expected location of the right eye would 
+be the window 
+We also model 
+the "variance"  — i.e.,  the size  of the  search  window  around 
+this expected position. To be more precise, let us assume that 
+the search  window for some feature 
+we instead search for f1 in 
+pixels.  After detecting feature 
+a  smaller r e g i o n c e n t e r ed  at  the  location  that  we 
+computed from 
+
+'s location, using that linear function. 
+
+is  of size 
+
+After observing several features (say nose and left eye), we 
+will have several estimates for the location of the current fea(cid:173)
+ture (here right eye).  Here we take the smallest bounding box 
+and use that as the search area for locating the current feature. 
+This "factoring" means we need only consider a set of 4  x  3 
+transformations (of each  of the four feature  versus  the other 
+three features), rather than deal with all possible subsets. 
+
+To make these ideas more concrete: Initially, given no other 
+information,  we  would  look  for  the  right  eye  in  the  region 
+However, after finding the left eye at loca-
+our system knows that, if asked to look for 
+
+the right eye, it should search in the region 
+(We  are  not committing  to  looking for the  right eye  at  this 
+time;  just indicating  where  to  search,  if requested.)  Notice 
+this region is different from the one we would consider if we 
+had not located the left eye;  moreover,  if we also knew that 
+the nose was at location 
+=  (30,50)  (as well  as left eye), 
+we would use a yet more refined region — here   
+
+Image interpretation policies 
+
+4.5 
+During interpretation,  I N F O G A IN  and  (the policy produced 
+by) BESTSEQ each iteratively select an  operator 
+(Recall that the values of r and £ are determined from the con(cid:173)
+text (of other detected features);  we therefore do not need to 
+specify them here.) 
+I N F O G A IN chooses an instantiated op(cid:173)
+erator 
+
+that has the  maximum   
+
+VISION 
+
+1323 
+
+value.  BESTSEQ  selects  an  operator 
+where a is the current state and 
+is the (optimal) mapping 
+from state to actions.  In each case, the operator is applied to 
+the appropriate region in the given test face image and the dis(cid:173)
+tribution  is  updated...until  one  face  is  identified with  suffi(cid:173)
+ciently high  probability 
+or the system fails (by ex(cid:173)
+hausting all the possible operators, or cost  
+
+5  Experiments 
+We used face images of 102 different people, each 92  x  112 
+pixels. We assigned 187 images to the set T, another 187 im(cid:173)
+ages to S and used another 333 as test images.3  As shown in 
+Figure  1, the faces are more or less in the same pose (facing 
+front), with some small variation in size and orientation. 4 We 
+considered  all  20 operators based on the four features  listed 
+above and 
+{25,30,35,40,45}  for  each  feature.  The 
+BESTSEQ interpretation policy decides precisely what oper(cid:173)
+ator 
+to apply on which portion of the image, given 
+each  state (which here corresponds to a specific  set of infor(cid:173)
+mation gathered); see Figure 2. 
+Basic Experiment:  We  set   
+(i.e., no upper limit on identification cost). 5  In each "set-up", 
+we assigned a random probability to each person (correspond(cid:173)
+ing to drawing a sample with replacement).  On each run, we 
+picked one face randomly from the test set as the target, and 
+identified it using each of the policies.  We repeated this for a 
+total of 30 runs per set-up, then changed the probability dis(cid:173)
+tribution and repeated the entire process again, for a total of 
+15 set-ups.  The accuracy of identification for I N F O G A IN and 
+BESTSEQ are 89.78%and 90.44%,respectively.  (Recall both 
+were  required to obtain  at least  Pmin  =  90%.)  The  average 
+cost of identification was  1.045  0.038 and 0.717  0.030 sec(cid:173)
+onds6 for I N F O G A IN  and BESTSEQ respectively.  Hence, we 
+see BESTSEQ took much less time than I N F O G A IN to obtain 
+this level  of accuracy. 
+
+The first two rows of Table 1  shows how often I N F O G A IN 
+(resp., BESTSEQ) used one (resp., two, three, four) operators 
+before terminating, over these 450 runs.  We observe the I N(cid:173)
+F O G A IN applied slightly more operators than BESTSEQ on 
+the average. More importantly, as BESTSEQ can exploit sim(cid:173)
+ple operator interactions, the search area it uses for the sub(cid:173)
+sequent operators can be narrower than I N F O G A I N ' S. These 
+two factors result in a much lower cost for BESTSEQ. 
+Bounding the Cost:  In many situations we need to impose a 
+hard restriction on the total cost; we therefore considered var-
+
+3 We assume that any test face-image belongs to one of the people 
+
+in the training set, but probably with a different facial expression or 
+in a slightly different view, and perhaps with some external features 
+not in the training image (like glasses, hat, etc.), or vice versa. 
+
+4(1) 
+
+web 
+
+faces  were 
+
+These 
+sites 
+
+the 
+and 
+(2)  This  work  assumes the  head  has 
+already been located and normalized; if not, we can use standard 
+techniques [TP91] first. 
+
+downloaded 
+
+from 
+
+5The other part of the task, 
+
+is "identifying people"; this is true 
+
+for all of the experiments discussed here. 
+
+6 All the experiments reported in this paper were run on a Pentium 
+
+866 MHz. PC with 128 MB RAM ninning Linux OS 2.2.19-12. 
+
+ious values  of 
+in the range [0.25-2.0] seconds. We then 
+picked one face randomly from the test set, and identified the 
+test image for each of these maximal costs, using I N F O G A IN 
+and  BESTSEQ. 
+
+As  always,  we  terminate  whenever  the probability of any 
+returning 
+
+or if the  cost exceeds 
+
+person exceeds 
+the most likely interpretation. 
+
+We repeated this experiment for a total of 15 set-ups (each 
+with a different distribution over the people) and with 30 ran(cid:173)
+dom  runs  (target  face  images)  per  set-up.  We  found  that 
+74.29% of the policies produced matched the policy shown in 
+Figure 2. 
+
+Figure  3(a)  plots  the  accuracy  (the  percentage  of correct 
+identifications)  for  the  policies  found  for  various  values  of 
+In  general,  the  policies  produced  by  BESTSEQ  had 
+better accuracy than the ones produced by I N F O G A I N.  BEST(cid:173)
+SEQ found different policies for different costs.  The bottom 
+5 rows of Table 1 show how often BESTSEQ used one (resp., 
+two, three, four) operators for different values of  
+before 
+terminating. 
+
+For  low  cost  values  (under  0.5  seconds),  BESTSEQ  per(cid:173)
+
+forms much better than I N F O G A IN (accuracy  of 
+versus 
+As BESTSEQ was able to exploit operator 
+interactions,  it was  able  to apply  a second  (and probably  a 
+third) operator by using a smaller sweep area 
+within the 
+allotted time. Since I N F O G A IN does not exploit this, it needed 
+significantly more time. 
+
+Varying  the  Minimum  Accuracy:  In  this  experiment,  we 
+varied 
+from 0.1  to  0.9.  For each  of these  values,  we 
+chose a face randomly from the test set as the target and iden(cid:173)
+tified it using each of the two policies.  During the process, the 
+first person 
+
+in the training set for which  
+
+is returned  (or if cost 
+
+the most probable face 
+is returned). We repeated this for 30 different faces (runs) per 
+set-up, and repeated the entire process for a total of 15 differ(cid:173)
+ent set-ups.  About 70.4% of these policies matched Figure 2. 
+We evaluated the results in two different ways.  First, Fig(cid:173)
+ure 3(b) compares  the percentage of wrong identifications of 
+each policy, for each 
+value.  We see no significant differ(cid:173)
+ence in error between BESTSEQ and I N F O G A I N. The second 
+graph, Figure 3(c), compares the average cost of each policy, 
+for  each 
+value.  Here we see that BESTSEQ has much 
+lower cost than I N F O G A I N. Again, this is because BESTSEQ 
+can use operator interactions to sweep a narrower region. 
+
+1324 
+
+VISION 
+
+Figure 3:  (a) Cost vs. Accuracy 
+
+(b) Min. Accuracy vs. Error 
+
+(c) Min. Accuracy vs. Cost 
+
+6  Conclusions 
+
+Future  Work:  This paper explored one type of operator in(cid:173)
+teraction: where the output of one operator can be used to help 
+a subsequent operator— here by reducing the time it will re(cid:173)
+quire to search.  Moreover, our operators were relatively sim(cid:173)
+ple, as they always succeeded (or at least, think that they suc(cid:173)
+ceed), and they could be run in any order.  As a consequence, 
+our policy was quite simple — just straight-line sequence of 
+operators. 
+
+There are many ways to extend our analysis. First, it might 
+be useful to allow each operator to return not just a position, 
+but also other information, such as confidence (which would 
+become  part of the  state).  The  best  policy,  then,  could  use 
+that information when deciding on the proper future action to 
+take.  If the  abstracted  state also  included  other information 
+about the image,  such as average intensity, the policy could 
+use that information as well. This could result in a policy that 
+was more complicated and, presumably, more accurate. 
+
+Finally,  it would be  interesting to consider operators that 
+have  some  explicit  dependency  —  e.g.,  one cannot run  the 
+"connect  edgeP  operator unless  we  have  already  run  some 
+"produce  edgel"  operator.  These  precedence  constraints 
+would add yet other challenges to our framework. 
+Contributions:  This  paper  shows  how  dynamic  program(cid:173)
+ming can be used to build efficient interpretation systems. We 
+argue  that computing the utility of operator sequences,  which 
+incorporate the  benefits  of operator  interactions,  can  play  a 
+significant role towards  building efficient  interpretation sys(cid:173)
+tems. However, in several real world situations, such systems 
+may have (i) to deal  with complex  and unwieldy states,  and 
+(ii) to explore the operator space  to  find  the most promising 
+operator sequence, which is expensive. We addressed the first 
+issue by using simplified abstract states  in  face  recognition, 
+and addressed the second by using an off-line limited looka-
+head search to find the most promising operator sequence. 
+
+We framed the image interpretation task as a Markov De(cid:173)
+cision Problem and used ideas from reinforcement learning to 
+compute the utility of imaging operators non-myopically over 
+a finite lookahead depth in an operator space.  We built an in(cid:173)
+terpretation system that uses these concepts and compared its 
+performance with a successful myopic system in face recog(cid:173)
+nition. Our results show that the former has a much better per(cid:173)
+formance in various experiments that address the cost and ac(cid:173)
+curacy tradeoffs. 
+
+Acknowledgments 
+The  authors  gratefully  acknowledges  the  generous  support 
+from  Canada's  Natural  Science  and  Engineering  Research 
+Council and the Alberta Ingenuity Centre for Machine Learn(cid:173)
+ing. 
+
+References 
+IBDBOOJ  J. Bins B. Draper and K. Baek.  Adore:  Adaptive 
+
+object recognition. In Videre,  1(4), pages 86-99, 2000. 
+
+IBDH99]  C  Boutilier,  T  Dean,  and  S  Hanks.  Decision-
+theoretic planning:  Structural  assumptions and  computa(cid:173)
+tional leverage.  J. Artificial Intelligence Reseach,  1999. 
+
+[BDL02]  V Bulitko, B  Draper,  and I. Levner.  MR ADORE 
+control policies.  TR,  Dept.  of Computing Science,  U. of 
+Alberta, 2002. 
+
+[DH731  R.O. Duda and RE. Hart.  Pattern Classification and 
+
+Scene Analysis. Wiley, New York, 1973. 
+
+[EC971  K Etemad and R Chellappa. Discriminant analysis for 
+recognition of human faces. J. Optical Society of America, 
+1997. 
+
+[HR961  R Huang and  S Russell.  Object identification:  A 
+bayesian  analysis  with  application  to  traffic  surveillance. 
+Artificial  Intelligence,  1996. 
+
+[IG01 al  R. Isukapalli and R. Greiner. Efficient car recognition 
+
+policies. In ICRA, pages 2134-2139, Seoul, 2001. 
+
+fIGOlbl  R. Isukapalli and R. Greiner.  Efficient interpretation 
+
+policies. In IJCAI, Seattle, 2001. 
+
+[Mit97]  T  M  Mitchell.  Machine  Learning.  McGraw-Hill, 
+
+1997. 
+
+[PL95]  A R Pope and D Lowe.  Learning object recognition 
+
+models from images.  In Early Visual Learning,  1995. 
+
+[PMS94]  A Pentland, B Moghaddam, and T Starner.  View-
+In 
+
+based  and  modular eigenspaces  for  face  recognition. 
+IEEECVPR,  1994. 
+
+IPWHR98]  P Phillips, H Wechsler, J Huang, and P Rauss. 
+The feret database and evaluation procedure for face recog(cid:173)
+nition algorithms. Image and Vision Computing,  1998. 
+
+[SB98]  R. S. Sutton and A. G. Barto.  Reinforcement Learn(cid:173)
+
+ing:  An Introduction.  MIT Press, Cambridge,  1998. 
+
+ITP91 ]  M Turk and A Pentland.  Eigenfaces for recognition. 
+
+J. Cognitive Neuroscience, 1991. 
+
+VISION 
+
+1325 
+
+

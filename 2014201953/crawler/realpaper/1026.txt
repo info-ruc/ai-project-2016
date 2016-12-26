@@ -1,0 +1,1481 @@
+Planning with Goal Utility Dependencies
+
+Minh B. Do† and J. Benton ‡ and Menkes van den Briel ‡ and Subbarao Kambhampati ‡
+
+† Embedded Reasoning Area, Palo Alto Research Center, Palo Alto, CA 94304, USA, minh.do@parc.com
+
+‡ CSE Department Arizona State Univ. Tempe, AZ 85287, USA, {j.benton,menkes,rao}@asu.edu
+
+Abstract
+
+Work in partial satisfaction planning (PSP) has
+hitherto assumed that goals are independent thus
+implying that they have additive utility values. In
+many real-world problems, we cannot make this
+assumption. In this paper, we motivate the need
+for handling various types of goal utility depen-
+dence in PSP. We provide a framework for rep-
+resenting them using the General Additive In-
+dependence model and investigate two different
+approaches to handle this problem: (1) compil-
+ing PSP with utility dependencies to Integer Pro-
+gramming; (2) extending forward heuristic search
+planning to handle PSP goal dependencies. To
+guide the forward planning search, we introduce
+a novel heuristic framework that combines cost-
+propagation and Integer Programming to select
+beneﬁcial goals to ﬁnd an informative heuristic es-
+timate. The two implemented planners, iPUD and
+SPUDS, using the approaches discussed above,
+are compared empirically on several benchmark
+domains. While iPUD is more readily amend-
+able to handle goal utility dependencies and can
+provide bounded optimality guarantees, SPUDS
+scales much better.
+
+1 Introduction
+
+Classical planning aims at ﬁnding a plan that achieves a set of
+conjunctive goals. Partial satisfaction planning (PSP) relaxes
+this all-or-nothing constraint, focusing on ﬁnding a plan that
+achieves the “best” subset of goals (i.e.
+the plan that gives
+the maximum trade-off between total achieved goal utilities
+and total incurred action cost). The process of ﬁnding goals
+on which to focus is complicated by the fact that they in-
+teract with one another. For instance, actions may share in
+their achievement of goals (positive interaction) or conﬂict
+(negative interaction). These types of interactions introduce
+cost dependencies between goals because the cost of achiev-
+ing them separately may differ from the cost of achieving
+them together. In the existing frameworks, goals only inter-
+act through cost dependencies. In this paper we extend PSP
+to handle utility dependency which allows users to specify
+
+changes in utility on sets of goals, thereby increasing its ex-
+pressive power.
+
+Two concrete examples of utility dependency are mutual
+dependency and conditional dependency. For mutual depen-
+dency, the utility of a set of goals is different from the sum
+of the utility of each individual goal. For example, (1) while
+the utility of having either a left or right shoe alone is zero,
+utility of having both of them is much higher (i.e. the goals
+“complement” each other); (2) utility of having two cars is
+smaller than the sum of the individual utilities of having each
+one of them (i.e.
+the goals “substitute” each other). Con-
+ditional dependency is where the utility of a goal or set of
+goals depend on whether or not another goal or set of goals
+is already achieved. For example, the utility of having a ho-
+tel reservation in Hawaii depends on whether or not we have
+already purchased a ticket to Hawaii.
+
+The main technical challenges in handling utility depen-
+dencies are in ﬁnding (1) a model where different types of
+goal utility dependencies can be compactly expressed and (2)
+an approach that effectively combines utility interactions with
+cost interactions to ﬁnd a high quality plan. The primary con-
+tribution of our paper is a systematic approach for handling
+cost and utility dependencies together in PSP. In particular we
+present:
+
+• An approach for representing utility dependencies be-
+tween planning goals using the Generalized Additive In-
+dependence (GAI) model [Bacchus and Grove, 1995],
+combining utility theory and deterministic planning.
+
+• An extension of a state of the art Integer Programming
+(IP) planner [van den Briel et al., 2005] to solve this
+extended PSP problem.
+
+• A novel heuristic framework combining cost propaga-
+tion and an IP encoding to capture mutual dependencies
+of goal achievement cost and goal utility. This leads to
+informative heuristics used for guiding a variation of a
+forward state space search planner.
+
+The two approaches (IP encoding and forward heuristic
+search) are implemented, resulting in two planners iPUD and
+SPUDS, and tested on several planning benchmark domains.
+While the IP approach is more readily amendable to handle
+goal utility dependencies and can provide bounded optimal-
+ity guarantees, we shall see that the heuristic search method
+scale much better.
+
+IJCAI07
+
+1872
+
+In partial satisfaction planning (PSP)
+
+2 Problem Formulation
+A classical planning problem is a 4-tuple (cid:2)F, I, G, A(cid:3) where:
+ﬂuents F are a set of predicate symbols; initial state I is
+completely deﬁned by predicates in F ; goal state G is par-
+tially deﬁned by a set of predicates in F ; a set of actions
+A with a ∈ A are deﬁned by pre- and post-conditions
+P re(a), Add (a), Delete(a) ⊆ F . A plan P is a sequence of
+actions that when executed from I achieves all goals g ∈ G.
+[Smith, 2004;
+van den Briel et al., 2004], goals g ∈ G have utility val-
+ues ug ≥ 0, representing how much each goal is worth to
+the user; each action a ∈ A has an associated execution cost
+ca ≥ 0, representing how costly it is to execute each action
+(e.g. amount of time or resources consumed). Let GP ⊆ G
+be the set of goals achieved by a plan P . The objective is
+to ﬁnd a plan P that maximizes the difference between total
+achieved utility u(GP ) and total cost of all actions a ∈ P
+(i.e., plan beneﬁt):
+
+(cid:2)
+
+MAX
+
+P
+
+u(GP ) −
+
+ca
+
+a∈P
+
+(1)
+
+(cid:3)
+
+g∈GP ug.
+
+Work on PSP has until now assumed that goals have
+no utility dependencies and thus their utilities are additive:
+u(GP ) =
+In order to represent the types of
+goal utility dependencies discussed in the previous section
+(i.e., complement, substitute, conditional), we adopt the Gen-
+eralized Additive Independence (GAI) model [Bacchus and
+Grove, 1995]. We chose this model because it is expressive,
+general and we can compile to it from other commonly used
+models such as UCP-Net [Boutilier et al., 2001]. We assume
+that the utility of the goal set G can be represented by k local
+utility functions f u(Gk) ∈ R over sets Gk ⊆ G. For any
+subset G
+
+(cid:3)
+(cid:3) ⊆ G the utility of G
+
+(cid:2)
+is:
+
+u(G
+
+(cid:3)) =
+
+f u(Gk)
+
+(2)
+
+Gk⊆G(cid:2)
+
+U D
+
+This model allows users to specify changes in utility over
+sets of goals. For the rest of this paper, we name the new PSP
+problem with utility dependencies represented by the GAI
+. If there are |G| local functions f k(Gk) and
+model PSP
+each Gk contains a single goal then PSP
+reduces to the
+original PSP problem (no utility dependencies).
+3 IP Encoding for PSPU D
+Since classical planning can be solved by IP, and since IP
+provides a natural way to incorporate numeric constraints and
+planning problems
+objective functions, it follows that PSP
+can be solved by IP as well.
+
+U D
+
+U D
+
+We setup an IP formulation to handle PSP
+
+problems
+by extending the generalized single state change (G1SC) for-
+mulation [van den Briel et al., 2005]. Currently, the G1SC
+formulation is the most effective IP formulation for solving
+classical planning problems, and it outperforms the previ-
+ously developed IP formulation used to solve PSP problems
+without utility dependencies [van den Briel et al., 2004].
+
+U D
+
+The G1SC formulation represents the planning problem as
+a set of loosely coupled network ﬂow problems, where each
+network corresponds to one of the state variables in the plan-
+ning domain. The network nodes correspond to the state vari-
+able values and the network arcs correspond to the value tran-
+sitions. The planning problem is to ﬁnd a path (a sequence of
+
+actions) in each network such that, when merged, they con-
+stitute a feasible plan. In the networks, nodes and arcs ap-
+pear in layers, where each layer represents a plan period. The
+layers are used to solve the planning problem incrementally.
+That is, we start by performing reachability analysis to ﬁnd a
+lower bound on the number of layers necessary to solve the
+problem. If no plan is found, all the networks are extended
+by one extra layer and the planning problem is solved again.
+This process is repeated until a plan is found (see [van den
+Briel et al., 2005] for a complete description of the G1SC
+formulation).
+
+In order to deal with utility dependencies we incorporate
+
+the following extensions to the G1SC formulation:
+
+• In PSP
+
+U D
+
+problems not all goals have to be achieved
+for a plan to be feasible. Therefore, we remove those
+constraints from the G1SC formulation which state that
+goals must be achieved.
+
+• For each goal utility dependency function Gk we add a
+= 1 if all goals in Gk
+
+∈ {0, 1}, where zGk
+
+variable zGk
+are achieved, and zGk
+
+= 0 otherwise.
+
+• For each goal utility dependency function Gk we add
+constraints to ensure that Gk is satisﬁed if and only if
+all goals g ∈ Gk are achieved, that is:
+
+(cid:2)
+
+yc,f,g,T − |Gk| + 1 ≤ zGk
+
+f,g∈Dc:g∈Gk
+
+(cid:2)
+
+≤
+
+zGk
+
+yc,f,g,T
+
+∀g ∈ Dc : g ∈ Gk
+
+(3)
+
+(4)
+
+f ∈Dc
+
+where Dc
+is the domain of a state variable c,
+yc,f,g,T ∈ {0, 1} are variables of the IP problem that
+represent value changes in the state variables, and T is
+the plan horizon.
+
+• We create an objective function to maximize the net-
+
+(cid:2)
+beneﬁt (utility minus cost) of the plan.
+
+(cid:2)
+
+MAX
+
+u(Gk)zGk
+
+−
+
+caxa,t
+
+(5)
+
+Gk
+
+a∈A,1≤t≤T
+
+where u(Gk) represents the utility of satisfying the goal
+utility dependency function Gk, and ca represents the
+cost of executing action a ∈ A.
+
+The extended G1SC formulation is bounded length opti-
+mal (i.e., it generates optimal plans for a plan horizon T ).
+Global optimality cannot be guaranteed as there could still be
+solutions with higher net beneﬁt at longer plan horizons.
+
+4 Heuristics for Maximizing Plan Beneﬁt
+While IP planners are optimal within a bounded horizon,
+prior work suggests that heuristic search planners are more
+efﬁcient and are able to ﬁnd better solutions in larger prob-
+lems [van den Briel et al., 2004]. For PSP
+problems, the
+challenge in computing a heuristic for maximizing plan ben-
+eﬁt is that we need to simultaneously (1) pick the best set of
+goals and (2) ﬁnd the best plan for them. While the ﬁrst chal-
+lenge is complicated by the utility dependencies, the second
+is complicated by the cost dependencies.
+
+U D
+
+Current heuristic approaches for solving PSP problems in-
+volve planning graph based heuristics that handle cost depen-
+dencies by providing an estimate of the cost for achieving
+
+IJCAI07
+
+1873
+
+each goal. The heuristics then use the goals’ deﬁned utility
+values to select goal subsets that offer the best net beneﬁt on
+the estimated cost. In this scenario goals have no dependen-
+cies on one another. In PSP
+we must deal with the fact that
+both cost dependencies between actions and utility dependen-
+cies between goals exist.
+
+U D
+
+In this section we deﬁne our search algorithm along with
+three heuristics that combine planning graph methods with
+a declarative IP encoding. We generate an IP encoding over
+the relaxed plan heuristic rather than the entire problem as
+discussed in Section 3. By solving the IP encoding, we select
+a goal set along with an estimated cost for achieving it. Our
+main innovation is the combination of a relaxed plan that
+handles cost interactions between goals and a declarative IP
+encoding that captures both mutual goal achievement cost
+and goal utility dependencies.
+
+U D
+
+U D
+
+: To handle PSP
+
+,
+Best-First Heuristic Search for PSP
+we use the best-ﬁrst anytime heuristic search framework in
+PS [van den Briel et al., 2004]. This forward metric
+Sapa
+∗
+temporal planner uses an anytime variation of the A
+algo-
+rithm guided by a heuristic derived from the relaxed planning
+∗
+graph. Like A
+, this algorithm starts with the initial state
+Sinit and continues to dequeue from the open-list the most
+promising node S (i.e. highest f (S) = g(S) + h(S) value).
+For each search node S, g(S) represents the beneﬁt achieved
+so far by visiting S from Sinit and h(S) represents the pro-
+jected maximum additional beneﬁt gained by expanding S,
+with plan beneﬁt deﬁned in Section 2. Though calculating
+g(S) is trivial, having a good estimate of h(S) is hard and key
+to the success of best-ﬁrst search algorithms. During explo-
+∗
+ration of the search tree the algorithm, which is called A
+P SP ,
+keeps outputting better quality plans whenever a node S with
+∗
+the best-so-far g(S) value is expanded. Like A
+, the algo-
+rithm terminates when a node S with h(S) = 0 is picked
+from the top of the open list.
+
+PS
+
+∗
+Though A
+P SP can keep all generated search nodes,
+in practice Sapa
+prunes the search space by removing
+that appear unpromising (i.e., nodes where
+nodes that
+the estimated beneﬁt is negative). Though this improves
+efﬁciency, one potential drawback is that when the heuristic
+h(S) underestimates the value of a search node S, then S
+will be discarded (when compared to the beneﬁt of the best
+solution found so far g(SB)) even if it can be extended to
+reach a better solution. To mitigate this issue, we modiﬁed
+search strategy to keep some search nodes that
+the Sapa
+appear unpromising when ﬁrst generated. During search we
+set a value  as half the distance between the best node found
+so far SB and the worst-valued unpromising node. For each
+unpromising search node S that is within a threshold  of
+the current best solution, we ﬁnd ρ, the complement of the
+percentage distance between it and the beneﬁt of SB (i.e.
+g(SB)). We then keep S with probability ρ.
+
+PS
+
+Goal Achievement Cost Propagation: In all of our heuristic
+methods we estimate the cost C(g) to achieve each goal [Do
+and Kambhampati, 2004]. Starting with C(f ) = 0 for facts
+f in the initial state I and C(f ) = C(a) = ∞ for all other
+facts and all actions, the propagation rules to estimate costs
+
+to achieve facts p and to execute actions a are1:
+(C(a) + ca)
+
+• Facts: ∀f : C(f ) = M IN
+f ∈Add(a)
+
+• Either:
+
+1. Max-prop: ∀a ∈ A : C(a) = M AX
+f ∈P re(a)
+
+C(f ); or
+
+2. Sum-prop: ∀a ∈ A : C(a) =
+
+Σ
+
+f ∈P re(a)
+
+C(f )
+
+The update rules are used while extending the (relaxed)
+planning graph structure [Blum and Furst, 1997]. After
+the propagation is done (i.e., no costs change), C(g) is an
+estimate on the cost to achieve g for each goal g ∈ G.
+
+Deriving Heuristics from Propagated Costs: We will use
+the notation hx
+y to name our heuristics. Here x is the method
+used to estimate the goal utilities and y is the method used to
+estimate the goal costs. If utilities and costs are independent,
+both x and y can be “sum”. The dependencies between goal
+utilities can be estimated using the GAI model while the de-
+pendencies between goal costs can be estimated using relaxed
+plans.2
+
+It is easy to observe that if we use max propagation (max-
+prop), then C(g) will underestimate the cost to achieve g
+while there is no such guarantee for sum propagation (sum-
+prop) [Bonet et al., 1997]. Using C(g) calculated by the cost
+propagation process outlined in the previous section, we can
+estimate the achievable beneﬁt value as below:
+
+hGAI = M AX
+G(cid:2)⊆G
+
+[u(G
+
+(cid:3)) − (M AX
+g∈G(cid:2)
+
+C(g))]
+
+(6)
+
+then Equation 6 will give the hGAI
+
+Notice that, as part of our heuristic, we the calculate the
+local utility functions as deﬁned in Equation 2. As such,
+If we use
+our heuristic directly applies the GAI model.
+max heuristic
+max-prop,
+and if we use sum-prop, it will give a corresponding hGAI
+sum
+heuristic. While hGAI
+max overestimates the real achievable
+∗
+beneﬁt, there is no such guarantee for hGAI
+sum . Thus A
+P SP
+using hGAI
+max is guaranteed to output an optimal solution given
+enough time.
+
+Relaxed Plan based Heuristic: Because hGAI
+max can signif-
+icantly over-estimate the real beneﬁt of achieving a set of
+goals, it performs badly in some domains (as we shall see).
+The hGAI
+sum heuristic, while more informative, relaxes the cost
+interaction and assumes that plans achieving different goals
+are independent and do not overlap. To improve on those two
+heuristics, we adapt the relaxed plan heuristic, ﬁrst introduced
+in the FF planner [Hoffmann and Nebel, 2001], that solves
+the planning problem ignoring the delete list. This heuristic
+improves over hGAI
+sum by taking into account actions contribut-
+ing to the achievement of several goals. The challenge in ex-
+is how to efﬁciently ﬁnd a high-beneﬁt
+tending it to PSP
+
+U D
+
+1ca, which is the execution cost of a, is different from C(a),
+which is the cost to enable the execution of a (i.e., costs to achieve
+preconditions of a)
+
+2Given this notation, we can view the heuristic used in
+P S [Do and Kambhampati, 2004] as hsum
+Sapa
+relax because it sums
+the individual goal utilities and extracts a relaxed plan to estimate
+cost.
+
+IJCAI07
+
+1874
+
+relaxed plan in the presence of both cost and utility depen-
+dencies.
+
+Let GP + ⊆ G be the set of goals achieved by the relaxed
+
++
+
+plan P
+
+. The relaxed plan heuristic for PSP
+
+∗ GAI
+relax
+
+h
+
+= MAX
+
+P +
+
+u(GP + ) −
+
+U D
+
+(cid:2)
+
+a∈P +
+
+is:
+
+ca
+
+(7)
+
+Note that Equation 7 looks like Equation 1 except that the
+optimal plan P in Equation 1 is replaced by the optimal re-
+laxed plan P
+(i.e. achieving maximum beneﬁt) in Equa-
+tion 7. h
+relax overestimates the real achievable beneﬁt and
+∗
+can be used as an admissible heuristic in A
+P SP to ﬁnd the
+optimal solution for PSP problems.
+
++
+∗ GAI
+
++
+While ﬁnding a satisfying relaxed plan P
+for any given
+∗ GAI
+goal set GP + ⊆ G is polynomial, extracting h
+relax requires
+ﬁnding an optimal relaxed plan (highest beneﬁt). This task is
+NP-hard even when we already know the optimal goal set
+∗
+P + and actions have uniform cost [Bylander, 1994]. To
+G
+approximate h
+we use the following three
+steps. The ﬁrst step was introduced in Sapa
+while the
+second and third steps are novel:
+
+relax for PSP
+
+∗ GAI
+
+U D
+
+PS
+
+1. Greedily extract a low cost relaxed plan P
+
+achieves the largest set of achievable goals.
+
++
+
+that
+
+2. Capture the achievement cost dependencies between
+
+achievable goals using the causal structure of P
+
++
+
+.
+
++
+
+3. Pose the problem of extracting the optimal subplan
+within P
+that takes both cost and beneﬁt dependen-
+cies into account as an IP encoding. A solution hGAI
+relax
+of this IP encoding is used to estimate h
+
+∗ GAI
+
+relax.
+
+Notice that if we compile the entire relaxed planning graph
+(rather than just the greedily extracted relaxed plan) we can
+post the problem of ﬁnding h
+relax as an IP problem. Despite
+its conceptual elegance, we chose not to follow this route as
+the cost of heuristic computation increases signiﬁcantly (es-
+pecially for our progression planner which extracts a relaxed
+plan at each node).
+
+∗ GAI
+
+Step 1: Heuristically Extract a Low Cost Relaxed Plan
+(cid:3) ⊆ G be the set of all achievable goals (C(g) < ∞), we
+Let G
+use the planning graph and the propagated achievement costs
+in Section 4 to heuristically extract a low-cost relaxed plan to
+(cid:3)
+support G
+
+as follows:
+
+1. Start with supported facts SF = I, subgoal set SG =
+
+(cid:3) \ I and the relaxed plan P
+
++ = ∅.
+
+G
+
+2. For each g ∈ SG select a supporting action
+a : g ∈ Add(a) with lowest execution cost C(a) value.
++ ∪ {a}, SG ← SG ∪ (P re(a) \ SF )
+Update: P
+and SF ← SF ∪ Add (a).
+
++ ← P
+
+3. Repeat until SG = ∅.
+This backtrack-free process is guaranteed to ﬁnish in time
+
+polynomial in the number of actions.
+
+Step 2: Build Cost Dependencies within P
+Because certain actions contribute to the achievement of
+multiple goals, there are dependencies between the costs to
+achieve them. Those relations can be discovered by using the
+causal structure of the extracted relaxed plan P
+
++
+
+.
+
++
+
+To capture the mutual dependencies between the goal
+achievement costs, we ﬁnd the set of actions shared between
+different partial plans achieving different goals. This proce-
+dure utilizes the causal links in the relaxed plan P
+
++
+
+.
+
+1. Initialize:
+
+∀a
+
+(cid:4)
+∈
+
+∀ p ∈ Add (a)
+∀ g ∈ G : GS(g) = {g}.
+
++
+
+: GS(a) = ∅;
+P
+P rec(a) : GS(p) = ∅;
+
+2. Backward sweep from goals achieved by P
+(cid:4)
+
+(cid:4)
+until ﬁx-point:
+GS(a) =
+
+GS(p); GS(p) =
+
++
+
+and update
+
+GS(a)
+
+p∈Add(a)
+
+p∈P re(a)
+
+Using the procedure above, for each action a, GS(a) con-
+tains the set of goals g that a contributes to, where the goal-
+supporting sets GS(a) represents the achievement cost de-
+pendencies between goals.
+
+(cid:3)
+
+(cid:3)
+
++
+
++
+
++
+
+within P
+
+(cid:3) ⊆ P
+
+subsets G
+
+(cid:3)
+achieving G
+
+Step 3: Estimate the Maximum Achievable Beneﬁt
+In this step, we combine the goal supporting set GS(a) found
+in the previous step with the goal utility dependencies f u to
+ﬁnd the most beneﬁcial relaxed plan P
+. One sim-
+ple approach to ﬁnd this plan P
+is to iterate over
+2|GP + |
+(cid:3) ⊆ GP + of goals, with GP + is the set
+of goals achieved by P
+, and compare the beneﬁt of plans
+. However, when |G| is large this approach
+P
+becomes impractical.3 Therefore, we use a declarative ap-
+proach of setting up an IP encoding with solution represent-
+ing the most beneﬁcial relaxed plan P
+. Note that
+while IP is generally slow for solving a complete planning
+problem, the number of actions in the relaxed plan is much
+smaller (by several orders) than the number of actions in the
+(relaxed) planning graph. This allows us to ﬁnd an optimal
+solution in reasonable time. This is critical because we will
+build an IP encoding for each search node generated during
+forward heuristic search. The IP formulation that we set up
+is very similar to the one described in Section 3 but it only
+allows actions that are in the relaxed plan and it does not
+create constraints for negative interactions. Moreover, addi-
+tional constraints representing the goal supporting set GS(a)
+found in the previous step are also included to enforce that if
+a given goal g is selected, then any action that contributes to
+the achievement of g should also be selected. Speciﬁcally:
+
+(cid:3) ⊆ P
+
++
+
+• Binary Variables:
+
+– ∀a ∈ P, ∀g ∈ G, ∀Gk ⊆ G, f u(Gk) (cid:13)= 0: create
+
+one binary integer variable Xa, Xg, XGk .
+
+• Constraints:
+
+(cid:3)
+
+– ∀a ∈ P, ∀g ∈ GS(a) : (1 − Xg) + Xa ≥ 1
+–
+
+(1 − Xg) + XGk
+
+≥ 1
+
+g∈Gk
+
+– ∀g ∈ Gk : (1 − XGk
+
+) + Xg ≥ 1
+
+(cid:3)
+
+• Objective: MAX (
+Solving this IP encoding gives the beneﬁt value of the most
+(cid:3)
+. The beneﬁt of this P
+
+f u(Gk) ∗ XGk
+
+− ΣXa ∗ ca)
+
+within P
+
++
+
+(cid:3)
+
+beneﬁcial relaxed plan P
+plan can be used as a hGAI
+
+∗
+P SP .4
+relax heuristic to guide A
+
+3In the empirical section, we test with problems used in the plan-
+
+ning competition, which can have more than 40 goals.
+
+4We use similar IP encoding to derive the heuristic estimates for
+
+hGAI
+
+max and hGAI
+
+sum as described in the earlier part of this section.
+
+IJCAI07
+
+1875
+
+5 Empirical Results
+
+PS
+
+We have implemented the heuristic framework on top of the
+planner along with the extension to the G1SC en-
+Sapa
+coding discussed in Section 3. We call the new planners
+SPUDS and iPUD and compare (1) iPUD; (2) SPUDS with
+three heuristics (hGAI
+sum ); and (3) a version
+of Sapa
+whose heuristic ignores the goal utility dependen-
+cies (but whose g-value does not)
+
+max, and hGAI
+
+relax, hGAI
+
+PS
+
+iPUD runs with CPLEX 10.0, a commercial LP solver,
+while we use lp solve version 5.5 (a free solver with a Java
+wrapper) to solve the IP encodings in SPUDS. We found
+that lp solve, while less powerful than CPLEX, has a shorter
+setup time and is more suitable for SPUDS, which sets up
+an IP encoding at every search node. All tests use a P4
+2.66GHz/1GB RAM computer with a 600 second time limit.
+SPUDS and Sapa
+continuously ﬁnd better solutions until
+a termination criterion is met.
+
+PS
+
+Test Problems: We automatically generated the PSP
+problems from a subset of the propositional planning bench-
+marks used in IPC3 and IPC5: In Zenotravel, airplanes move
+people between cities; in Satellite, satellites turn to objects
+and take pictures; in Rovers, sets of rovers navigate to take
+samples and images; and in TPP, trucks visit markets to buy
+products.
+
+U D
+
+For each domain, we implemented a Java program that
+U D
+
+parses the original problem ﬁles and generates the PSP
+version with action cost and goal utilities randomly generated
+within appropriate upper and lower bounds. The set of goal
+dependencies along with their utility values are also randomly
+generated. Thus, the number of dependencies, size of the de-
+pendencies, set of goals involved, utility values and action
+costs are all selected within varied lower and upper bounds
+for each domain. All goals are soft, and therefore planners
+can trivially solve each problem with the null plan.
+
+We varied our bounds on action cost and goal set utility
+values such that each domain focuses on different aspects
+of utility dependency.
+In Zenotravel, ending a plan with
+people at various locations increases utility signiﬁcantly. But
+ﬂying a person from one location to another has a cost that
+is only slightly less than the individual utilities of achieving
+each goal. Thus, it is vital to have sets of people at their
+desired location. In TPP, purchasing items has a cost about
+equivalent to the individual utility of having the item. How-
+ever, having items together can change the utility of a plan
+considerably. The idea is to simulate the beneﬁt of having
+several items together (e.g., to build a crate you need wood,
+nails, a hammer and saw). The Satellite domain removes
+the emphasis on cost. Here actions have costs lower than
+the comparatively higher beneﬁt of having several images
+together (e.g., to produce a mosaic image). The domain also
+adds negative goal utility dependencies (i.e., substitution) by
+including negative utility for having certain sets of images
+yet ending a plan by pointing to an inconvenient spot.5 The
+Rovers domain focuses on substitution as having certain
+
+5In this case we group the goal of having certain images along
+with a ﬁnal ending position as a dependency with a randomly gen-
+erated negative utility.
+
+scientiﬁc data together gives redundant
+information and
+therefore removes a large portion of utility gained by having
+them separately.
+
+Analysis: The empirical evaluation is designed to: (1) com-
+pare the effectiveness of the IP-based and heuristic search
+approaches in solving PSP
+problems; (2) determine the
+characteristics of PSP
+planning problems which cause our
+approaches to return plans of differing quality.
+
+U D
+
+U D
+
+Our results in Figure 1 show the plan quality achieved by
+each planning method and the time to reach that quality. On
+problems where only the null plan was found, we indicate
+the extensive search for a better plan by setting the time to
+600 seconds. For every other instance, the time that the best
+plan was found is shown. As the ﬁgure shows, the tested
+approaches varied in their relative plan quality on each do-
+main but SPUDS using the hGAI
+relax heuristic always performed
+among the best.
+
+PS
+
+First, we observe the planner behavior in Zenotravel and
+TPP. Both of these domains involve gathering objects, though
+Zenotravel focuses on delivering these objects as well. Util-
+ity dependencies play an important role in these domains, and
+does poorly, while the SPUDS heuristics
+we see that Sapa
+and iPUD fared much better. Since the Sapa
+heuristic is
+not informed about utility dependencies, this comes as no sur-
+prise. In easier problems, the hGAI
+sum heuristic tends to return
+plans of similar or equal quality as compared with the other
+techniques used. However, as problem size increases, hGAI
+sum
+begins to return plans of better quality, but still does worse
+than hGAI
+relax in terms of the overall number of plans found with
+best quality. With iPUD, as the size of the problem encoding
+increases it is unable to ﬁnd a good feasible solution.
+
+PS
+
+For our version of the Satellite domain, some goal combi-
+nations remove utility from the overall quality of plans. Also,
+the plans of higher quality tend to require many actions. This
+can be seen in the quality of the plans that iPUD returns. Its
+reachability analysis is unable to properly estimate the dis-
+tance to goals and it therefore begins its solution searching
+at a small horizon. For the hGAI
+relax heuristic, it turns out that
+action selection helps guide search toward the goals.
+
+For the Rovers domain, iPUD does well on several prob-
+lems. However, like in the Satellite domain, it turns out that
+better quality plans require a larger horizon on some of the
+problems than its initial horizon provides. This gives SPUDS
+with the hGAI
+relax heuristic an edge over iPUD in 8 of the 20
+problems. The heuristics hGAI
+max have information
+regarding utility dependencies, though hGAI
+sum often performs
+worse than hGAI
+relax (solving 5 of 20 problems with better qual-
+ity plans) and hGAI
+max is only able to ﬁnd the null plan in every
+problem instance. Neither of these heuristics can detect the
+individual dependencies between actions.
+
+sum and hGAI
+
+Also of interest is the time it takes to solve each problem
+between the heuristic search methods and the IP encoding
+used in iPUD. Since the SPUDS heuristics solve an IP encod-
+ing at each search node, they take much longer to compute on
+heuristic. Un-
+larger problems than the procedural Sapa
+fortunately, Sapa
+lacks the heuristic guidance necessary
+to properly select goals with utility dependencies. Though we
+found that the per-node IP encoding of hGAI
+relax increased the
+
+PS
+
+PS
+
+IJCAI07
+
+1876
+
+200000
+
+y
+t
+i
+l
+
+GAI relax
+
+GAI max
+
+GAI sum
+
+SapaPS
+
+iPUD
+
+ 
+
+a
+u
+q
+n
+o
+i
+t
+u
+o
+S
+
+l
+
+)
+s
+d
+n
+o
+c
+e
+s
+(
+ 
+e
+m
+
+i
+t
+ 
+n
+o
+i
+t
+u
+o
+S
+
+l
+
+100000
+
+0
+
+Satellite
+
+100
+
+1
+
+0.01
+
+Satellite
+
+TPP
+
+Zenotravel
+
+Rovers
+
+TPP
+
+Zenotravel
+
+Rovers
+
+Figure 1: The problem results. For each domain we show the results of the problems solved (with later problems within the
+domain having increasing difﬁculty). The top graph shows the quality of the solutions found and the bottom graph shows the
+time taken to ﬁnd the solutions for each of our approaches.
+
+amount of time spent per search node by 3 to 200 times over
+(with the highest increases on larger prob-
+that of Sapa
+lems), SPUDS with the hGAI
+
+relax heuristic does better overall.
+
+PS
+
+PS
+
+PS
+
+, SPUDS and iPUD return their best solution.
+
+When reaching the time limit (600 seconds for our results),
+In
+Sapa
+SPUDS and Sapa
+this behavior comes from the best ﬁrst
+anytime search and with iPUD this behavior comes from the
+CPLEX solver, which can return the best feasible solution
+found within a given time limit. Insights can be obtained by
+observing the amount of time it takes to ﬁnd the solution that
+is eventually returned. We used the anytime behavior to il-
+lustrate the scalability of each approach. Figure 2 shows, of
+problems 10 through 20 in each domain (i.e., the most difﬁ-
+cult), which each technique performs best in terms of quality
+throughout their search (e.g., hGAI
+relax has the best quality for 16
+of the problems at 2 seconds). Of our approaches, hGAI
+relax per-
+forms the best overall. In the 80 tested problems, it solves 22
+instances at 600 seconds better than any other planner. Also
+interesting is that in 45 instances it obtains the best plan of the
+approaches or one of similar quality (by “similar” we mean
+within 0.1% of the best solution). Figure 3 shows an exam-
+ple of the anytime behavior in a typical problem (Zenotravel
+problem 13). We can see that all of the SPUDS heuristic ap-
+proaches quickly ﬁnd a high quality plan, iPUD continues to
+improve its solution until the time limit, and Sapa
+is only
+able to ﬁnd a poor quality plan.
+
+PS
+
+6 Related Work
+
+There has been work on PSP problems using orienteering
+to select goal subsets by David Smith (2004). Also, van
+den Briel et. al. (2004) introduced several planners such as
+AltAltps , Sapa
+, and OptiP lan that tackle PSP by either
+greedily selecting goals up-front, heuristically searching for
+solutions, or compiling the problem into IP. None of those
+
+PS
+
+y
+t
+i
+l
+
+a
+u
+q
+ 
+t
+s
+e
+b
+
+ 
+
+h
+t
+i
+
+ 
+
+w
+s
+m
+e
+
+l
+
+b
+o
+r
+p
+#
+
+ 
+
+GAI relax
+GAI sum
+iPUD
+
+GAI max
+SapaPS
+
+20
+
+15
+
+10
+
+5
+
+0
+
+0
+
+100
+
+200
+
+300
+
+400
+
+500
+
+600
+
+Time (seconds)
+
+Figure 2: The number of highest quality solutions found dur-
+ing anytime search by each planner from problems 10 through
+20 in the domains.
+
+planners deal with the utility dependencies we described. The
+most recent International Planning Competition [Gerevini et
+al., 2006] included problems with preferences that involved
+indicating costs on plans that failed to meet preferred con-
+straints. Also, PrefPlan [Brafman and Chernyavsky, 2005]
+can ﬁnd optimal plans with preferences between goals.
+
+Besides the GAI model that we used to represent the util-
+ity dependencies, there are several other attractive models
+such as UCP-Net [Boutilier et al., 2001] and the graphical
+model [Bacchus and Grove, 1995]. While both provide a
+graphical representation that can make it easier for users to
+understand the dependencies, the GAI model is more general
+and these modelling methods can be compiled into GAI. We
+also note that PDDL3 can represent GAI utility dependencies,
+albeit in an unnatural way.6
+
+It is possible to solve PSP problems by modelling them as
+MDPs [Boutilier et al., 1999] and extracting a solution from
+
+6We can represent utility by compiling it into “positive cost” that
+
+a PDDL3 metric maximizes.
+
+IJCAI07
+
+1877
+
+GAI relax
+GAI sum
+iPUD
+
+GAI max
+SapaPS
+
+References
+[Bacchus and Grove, 1995] F. Bacchus
+
+Graphical models for preference and utility.
+UAI-95, 1995.
+
+and A. Grove.
+In Proc. of
+
+150000
+
+100000
+
+50000
+
+y
+t
+i
+l
+
+a
+u
+q
+
+ 
+
+n
+o
+i
+t
+u
+
+l
+
+o
+S
+
+0
+
+0
+
+100
+
+200
+
+300
+
+400
+
+500
+
+600
+
+Time (seconds)
+
+Figure 3: Zenotravel, Problem 13 anytime behavior for each
+of the planners.
+
+an optimal policy. However, past experiments have shown
+this approach fails to scale well even when solving prob-
+lems without utility dependencies on state-of-the-art MDP
+solvers [Do and Kambhampati, 2004].
+
+While we are not aware of work on using an IP encoding
+in combination with a greedy search for a planning heuristic
+as in this paper, there has been work on using IP encoding
+to handle a subset of planning constraints involving continu-
+ous resource or temporal variables [Wolfman and Weld, 1999;
+Long and Fox, 2003b].
+
+7 Conclusion
+
+U D
+
+In this paper, we showed how the GAI framework can be
+used to represent utility dependencies in planning problems
+and introduced both a heuristic search framework and an IP
+encoding for solving partial satisfaction problems with utility
+). Though we saw variation in the per-
+dependencies (PSP
+formance of the planners, SPUDS using the hGAI
+relax heuristic
+typically did better than the other methods shown. Perfor-
+mance of the hGAI
+relax heuristic indicates that high quality re-
+laxed plan computation can involve signiﬁcant computation
+effort, but the extra guidance received pays off more than
+when lower-quality methods are used. We also see that while
+IP approaches solve these types of problems, they may have
+difﬁculty scaling in problem size. They also typically ﬁnd
+solutions at a slower rate than heuristic-based approaches as
+observed from iPUD’s performance over time.
+
+We plan to extend this work further to combine both the
+quantitative preferences of PSP with qualitative models as
+handled in planners like [Brafman and Chernyavsky, 2005].
+We are also considering extensions to our model that handle
+preferences like those seen in the most recent International
+Planning Competition (IPC5) [Gerevini et al., 2006]. To
+improve the performance, we plan on investigating more
+effective admissible heuristics that more aggressively take
+into account negative interactions, such as residual cost as
+described in AltWlt [Nigenda and Kambhampati, 2005] to
+improve the heuristic quality.
+
+Acknowledgement: We want to thank David Smith, Wheeler
+Ruml, Ronen Brafman, William Cushing, and the IJCAI re-
+viewers for helpful comments on this paper. Kambhampati’s
+research is supported in part by the NSF grant IIS–308139,
+the ONR grant N000140610058 and by a Lockheed Martin
+subcontract TT0687680 to ASU as part of the DARPA Inte-
+grated Learning program.
+
+[Blum and Furst, 1997] A. Blum and M. Furst. Planning
+through planning graph analysis. Artiﬁcial Intelligence
+Journal, 90:281–330, 1997.
+
+[Bonet et al., 1997] B. Bonet, Loerincs G., and H. Geffner.
+A robust and fast action selection mechanism for planning.
+In Proceedings of AAAI-97, 1997.
+
+[Boutilier et al., 1999] C. Boutilier, T. Dean, and S. Hanks.
+Decision-theoretic planning: Structural assumptions and
+computational leverage. Journal of Artiﬁcial Intelligence
+Research (JAIR), 11:1–91, 1999.
+
+[Boutilier et al., 2001] C. Boutilier, R. Brafman, H. Hoos, ,
+and D. Poole. Reasoning with conditional ceteris paribus
+preference statements. In Proc. of UAI-2001, 2001.
+
+[Brafman and Chernyavsky, 2005] R.I. Brafman and Y.
+Planning with goal preferences and
+
+Chernyavsky.
+constraints. In Proceeding of ICAPS-05, 2005.
+
+[Bylander, 1994] T. Bylander. The computational complex-
+ity of propositional strips planning. Artiﬁcial Intelligence
+Journal, 69:165–204, 1994.
+
+[Do and Kambhampati, 2004] M.B. Do and S. Kambham-
+pati. Partial satisfaction (over-subscription) planning as
+heuristic search. In Proceedings of KBCS-04, 2004.
+
+[Gerevini et al., 2006] A. Gerevini, B. Bonet, and R. Givan.
+Fifth international planning competition. In IPC06 Book-
+let, 2006.
+
+[Hoffmann and Nebel, 2001] J. Hoffmann and B. Nebel. The
+FF planning system: Fast plan generation through heuris-
+tic search. JAIR, 14:253–302, 2001.
+
+[Long and Fox, 2003b] D. Long and M. Fox. Exploiting a
+graphplan framework in temporal planning. In Proceed-
+ings of ICAPS-2003, 2003.
+
+[Nigenda and Kambhampati, 2005] R.S. Nigenda and S.
+Kambhampati. Planning graph heuristics for selecting ob-
+jectives in over-subscription planning problems. In Pro-
+ceedings of ICAPS-05, 2005.
+
+[Smith, 2004] D.E. Smith. Choosing objectives in over-
+subscription planning. In Proceedings of ICAPS-04, 2004.
+
+[van den Briel et al., 2004] M.H.L. van den Briel, R.S. Ni-
+genda, M.B. Do, and Subbarao Kambhampati. Effec-
+tive approaches for partial satisfaction (over-subscription)
+planning. In Proceedings of AAAI-04, 2004.
+
+[van den Briel et al., 2005] M.H.L. van den Briel, T. Vossen,
+and S. Kambhampati. Reviving integer programming ap-
+proaches for ai planning: A branch-and-cut framework. In
+Proceedings of ICAPS-05, 2005.
+
+[Wolfman and Weld, 1999] S. Wolfman and D.S. Weld. The
+LPSAT engine and its applicationto resource planning. In
+Proceedings of IJCAI-99, pages 310–317, 1999.
+
+IJCAI07
+
+1878
+
+

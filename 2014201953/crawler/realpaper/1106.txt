@@ -1,0 +1,1382 @@
+Best-ﬁrst Utility-guided Search
+
+Wheeler Ruml and Minh B. Do
+
+Palo Alto Research Center
+
+3333 Coyote Hill Road
+
+Palo Alto, CA 94304 USA
+
+ruml, minhdo at parc dot com
+
+Abstract
+
+In many shortest-path problems of practical inter-
+est, insufﬁcient time is available to ﬁnd a provably
+optimal solution. One can only hope to achieve
+a balance between search time and solution cost
+that respects the user’s preferences, expressed as a
+utility function over time and cost. Current state-
+of-the-art approaches to this problem rely on any-
+time algorithms such as Anytime A* or ARA*.
+These algorithms require the use of extensive train-
+ing data to compute a termination policy that re-
+spects the user’s utility function. We propose a
+more direct approach, called BUGSY, that incor-
+porates the utility function directly into the search,
+obviating the need for a separate termination pol-
+icy. Experiments in several challenging problem
+domains, including sequence alignment and tempo-
+ral planning, demonstrate that this direct approach
+can surpass anytime algorithms without requiring
+expensive performance proﬁling.
+
+1 Introduction
+Important tasks as diverse as planning and sequence align-
+ment can be represented as shortest-path problems. If suf-
+ﬁcient computation is available, optimal solutions to such
+problems can be found using A* search with an admissible
+heuristic [Hart et al., 1968]. However, in many practical sce-
+narios, time is limited or costly and it is not desirable, or even
+feasible, to look for the least-cost path. Search effort must
+be carefully allocated in a way that balances the cost of the
+paths found with the required computation time. This trade-
+off is expressed by the user’s utility function, which speciﬁes
+the subjective value of every combination of solution quality
+and search time. In this paper, we introduce a new shortest-
+path algorithm called BUGSY that explicitly incorporates the
+user’s utility function and uses it to guide its search.
+
+A* is a best-ﬁrst search in which the ‘open list’ of unex-
+plored nodes is sorted by f (n) = g(n) + h(n), where g(n)
+denotes the cost experienced in reaching a node n from the
+initial state and h(n) is typically a lower bound on the cost
+of reaching a solution from n. A* is optimal in the sense that
+no algorithm that returns an optimal solution using the same
+lower bound function h(n) visits fewer nodes [Dechter and
+
+Pearl, 1988]. However, in many applications solutions are
+needed faster than A* can provide them. To ﬁnd a solution
+faster, it is common practice to increase the weight of h(n)
+via f (n) = g(n) + w · h(n), with w ≥ 1 [Pohl, 1970]. In the
+recently proposed ARA* algorithm [Likhachev et al., 2004],
+this scheme is extended to return a series of solutions of de-
+creasing cost over time. The weight w is initially set to a high
+value and then decremented by δ after each solution. If al-
+lowed to continue, w eventually reaches 1 and the cheapest
+path is discovered. Of course, ﬁnding the optimal solution
+this way takes longer than simply running A* directly.
+
+These algorithms suffer from two inherent difﬁculties.
+First, it is not well understood how to set w or δ to best satisfy
+the user’s needs. Because it is linked to solution cost rather
+than solving time, it is not clear how to achieve a desired
+trade-off. Setting w too high or δ too low can result in many
+poor-quality solutions being returned, wasting time. But if w
+is set too low or δ too high, the algorithm may take a very
+long time to ﬁnd a solution. Therefore, to use a weighted A*
+technique the user must perform many pilot experiments in
+each new problem domain to ﬁnd good parameter settings.
+
+Second, for anytime algorithms such as ARA*, the user
+must estimate the right time to stop the algorithm. The search
+process appears as a black box that could emit a signiﬁcantly
+better solution at any moment, so one must repeatedly esti-
+mate the probability that continuing the computation will be
+worthwhile according to the user’s utility function. This re-
+quires substantial prior statistical knowledge of the run-time
+performance proﬁle of the algorithm and rests on the assump-
+tion that such learned knowledge applies to the current in-
+stance.
+
+These difﬁculties point to a more general problem: anytime
+algorithms must inherently provide suboptimal performance
+due to their ignorance of the user’s utility function. It is sim-
+ply not possible in general for an algorithm to quickly trans-
+form the best solution achievable from scratch in time t into
+the best solution that would have been achievable given time
+t + 1. In the worst case, visiting the next-most-promising so-
+lution might require starting back at a child of the root node.
+Without the ability to decide during the search whether a dis-
+tant solution is worth the expected effort of reaching it, any-
+time algorithms must be manually engineered according to
+a policy ﬁxed in advance. Such hardcoded policies mean
+that there will inevitably be situations in which anytime al-
+
+IJCAI-07
+
+2378
+
+gorithms will either waste time ﬁnding nearby poor-quality
+solutions or overexert themselves ﬁnding a very high quality
+solution when any would have sufﬁced.
+
+In this paper we address the fundamental issue: knowl-
+edge of the user’s utility function. We propose a simple vari-
+ant of best-ﬁrst search that represents the user’s desires and
+uses an estimate of this utility as guidance. We call the ap-
+proach BUGSY (Best-ﬁrst Utility-Guided Search—Yes!) and
+show empirically across several domains that it can success-
+fully adapt its behavior to suit the user, sometimes signiﬁ-
+cantly outperforming anytime algorithms. Furthermore, this
+utility-based methodology is easy to apply, requiring no per-
+formance proﬁling.
+
+2 The BUGSY Approach
+
+Ideally, a rational search agent would evaluate the utility to
+be gained by each possible node expansion. The utility of
+an expansion depends on the utility of the eventual outcomes
+enabled by that expansion, namely the solutions lying below
+that node. For instance, if there is only one solution in a tree-
+structured space, expanding any node other than the one it
+lies beneath has no utility (or negative utility if time is costly).
+We will approximate these true utilities by assuming that the
+utility of an expansion is merely the utility of the highest-
+utility solution lying below that node.
+
+We will further assume that the user’s utility function can
+be captured in a simple linear form. If f (s) represents the
+cost of solution s, and t(s) represents the time at which it
+is returned to the user, then we expect the user to supply
+three constants: Udefault, representing the utility of returning
+an empty solution; wf , representing the importance of solu-
+tion quality; and wt, representing the importance of compu-
+tation time. The utility of expanding node n is then computed
+as
+
+U (n) = Udefault − min
+
+s under n
+
+(wf · f (s) + wt · t(s))
+
+where s ranges over the possible solutions available under n.
+We follow the decision-theoretic tradition of better utilities
+being more positive, requiring us to subtract the estimated
+solution cost f (s) and search time t(s). (In the discussion
+below, this will mean that lower bounds on f (s) and t(s) will
+yield an upper bound on U (n).) This formulation allows us
+to express exclusive attention to either cost or time, or any
+linear trade-off between them. The number of time units that
+the user is willing to spend to achieve an improvement of one
+cost unit is wf /wt. This quantity is usually easily elicited
+from users if it is not already explicit in the application do-
+main. (Of course, such a utility function would also be neces-
+sary when constructing the termination policy for an anytime
+algorithm.) Although superﬁcially similar to weighted A*,
+BUGSY’s node evaluation function differs because wf is ap-
+plied to both g(n) and h(n).
+
+Of course, the solutions s available under a node are un-
+known, but we can estimate some of their utilities by using
+functions analogous to the traditional heuristic function h(n).
+Instead of merely computing a lower bound on the cost of the
+cheapest solution under a node, we also compute the lower
+
+cost
+
+nearest
+
+utility
+
+upper
+bound
+
+‘optimistic
+lower bound’
+
+cheapest
+
+time
+
+Figure 1: Estimating utility using the maximum of bounds on
+the nearest and cheapest solutions.
+
+bound on distance in search nodes to that hypothetical cheap-
+est solution. In many domains, this additional estimate en-
+tails only trivial modiﬁcations to the usual h function. Search
+distance can then be multiplied by an estimate of time per
+expansion to arrive at t(s). (Note that this simple estimation
+method makes the standard assumption of constant time per
+node expansion.) To provide a more informed estimate, we
+can also compute bounds on the cost and time to the nearest
+solution in addition to the cheapest. Again, standard heuristic
+functions can often be easily modiﬁed to produce this infor-
+mation. U (n) can then be estimated as the maximum of the
+two utilities. For convenience, we will notate by f (n) and
+t(n) the values inherited from whichever hypothesized solu-
+tion had the higher utility.
+
+Figure 1 illustrates this computation schematically. The
+two solid dots represent the solutions hypothesized by the
+cheapest and nearest heuristic functions. The dashed circles
+represent other possible solutions, demonstrating a trade-off
+between those two extremes. The dotted lines represent con-
+tours of constant utility and the dotted arrow shows the di-
+rection of the utility gradient. Assuming that the two solid
+dots represent lower bounds, then an upper bound on utility
+would combine the cost of the cheapest solution with the time
+to the nearest solution. However, this is probably a signiﬁcant
+overestimate.1 Note that under different utility functions (dif-
+ferent slopes for the dotted lines) the relative superiority of
+the nearest and cheapest solutions can change.
+
+2.1
+
+Implementation
+
+Figure 2 gives a pseudo-code sketch of a BUGSY implemen-
+tation. The algorithm closely follows a standard best-ﬁrst
+search. U (n) is an estimate, not a true upper bound, so it
+can underestimate or change arbitrarily along a path. This
+implies that we might discover a better route to a previously
+expanded state. Duplicate paths to the same search state are
+detected in steps 7 and 10; only the cheaper path is retained.
+We record links to a node’s children as well as the preferred
+parent so that the utility of descendants can be recomputed
+
+1It is interesting to note that taking the time of the cheapest and
+the cost of the nearest is not a true lower bound on utility because the
+two hypothesized solutions are themselves lower bounds and might
+in reality lie further toward the top and right of the ﬁgure. Hence it
+is marked as an ‘optimistic lower bound’ in the ﬁgure.
+
+IJCAI-07
+
+2379
+
+if c is not a goal and U (c) < 0, skip c
+if an old version of c is in closed,
+
+BUGSY(initial, U ())
+1. open ← {initial}, closed ← {}
+2. n ← remove node from open with highest U (n) value
+3. if n is a goal, return it
+4. add n to closed
+5. for each of n’s children c,
+6.
+7.
+8.
+9.
+10.
+11.
+12.
+13.
+14. go to step 2
+
+update cold
+else, add c to open
+
+if c is better than cold,
+
+if c is better than cold,
+
+update cold and its children
+
+else, if an old version of c is in open,
+
+Figure 2: BUGSY follows the outline of best-ﬁrst search.
+
+(step 9) if g(n) changes [Nilsson, 1980, p. 66]. The on-line
+estimation of time per expansion has been omitted for clarity.
+The exact ordering function used for open (and to determine
+‘better’ in steps 8 and 11) prefers high U (n) values, break-
+ing ties for low t(n), breaking ties for low f (n), breaking
+ties for high g(n). Note that the linear formulation of utility
+means that open need not be resorted as time passes because
+all nodes lose utility at the same constant rate independent
+of their estimated solution cost. In effect, utilities are stored
+independent of the search time so far.
+
+The h(n) and t(n) functions used by BUGSY do not have
+to be lower bounds. BUGSY requires estimates—there is no
+admissibility requirement. If one has data from previous runs
+on similar problems, this information can be used to convert
+standard lower bounds into estimates [Russell and Wefald,
+1991].
+In the experiments reported below, we eschew the
+assumption that training data is available and compute cor-
+rections on-line. We keep a running average of the one-step
+error in the cost-to-go and distance-to-go, measured at each
+node generation. These errors are computed by comparing
+the cost-to-go and distance-to-go of a node with those of its
+children. If the cost-to-go has not decreased by the cost of the
+operator used to generate the child, we can conclude that the
+parent’s value was too low and record the discrepancy as an
+error. Similarly, the distance-to-go should have decreased by
+one. These correction factors are then used when computing
+a node’s utility to give a more accurate estimate based on the
+experience during the search so far. Given the raw cost-to-go
+value h and distance-to-go value d and average errors eh and
+ed, d(cid:2) = d(1 + ed) and h(cid:2) = h + d(cid:2)eh. To temper this inad-
+missible estimate, especially when the utility function speci-
+ﬁes that solution cost is very important, we weight both error
+estimates by min(200, (wt/wf ))/1000. Because on-line es-
+timation of the time per expansion and the cost and distance
+corrections create additional overhead for BUGSY relative to
+other search algorithms, we will take care to measure CPU
+time when computing utility values in our experimental eval-
+uation, not just node generations.
+
+2.2 Properties of the Algorithm
+
+BUGSY is trivially sound—it only returns nodes that are
+goals. If the heuristic and distance functions are used without
+inadmissible corrections, then the algorithm is also complete
+if the search space is ﬁnite. If wt = 0 and wf > 0, BUGSY
+reduces to A*, returning the cheapest solution. If wf = 0 and
+wt > 0, then BUGSY is greedy on t(n). Ties will be broken
+on low f (n), so a longer route to a previously visited state
+will be discarded. This limits the size of open to the size of
+the search space, implying that a solution will eventually be
+discovered. Similarly, if both wf and wt > 0, BUGSY is com-
+plete because t(n) is static at every state. The f (n) term in
+U (n) will then cause a longer path to any previously visited
+state to be discarded, bounding the search space and ensuring
+completeness. Unfortunately, if the search space is inﬁnite,
+t(n) is inadmissible, and wt > 0, BUGSY is not complete be-
+cause a pathological t(n) can potentially mislead the search
+forever.
+
+If the utility estimates U (n) are perfect, BUGSY is optimal.
+This follows because it will proceed directly to the highest-
+utility solution. Assuming U (n) is perfect, when BUGSY ex-
+pands the start node the child node on the path to the highest
+utility solution will be put at the front of the open list. BUGSY
+will expand this node next. One of the children of this node
+must have the highest utility on the open list since it is one
+step closer to the goal than its parent, which previously had
+the highest utility, and it leads to a solution of the same qual-
+ity. In this way, BUGSY proceeds directly to the highest util-
+ity solution achievable from the start state. It incurs no loss in
+utility due to wasted time since it only expands nodes on the
+path to the optimal solution.
+
+It seems intuitive that BUGSY might have application in
+problems where operators have different costs and hence the
+distance to a goal in the search space might not correspond
+directly to its cost. But even in a search space in which all
+operators have unit cost (and hence the nearest and cheapest
+heuristics are the same), BUGSY can make different choices
+than A*. Consider a situation in which, after several expan-
+sions, it appears that node A, although closer to a goal than
+node B, might result in a worse overall solution. (Such a sit-
+uation can easily come about even with an admissible and
+consistent heuristic function.) If time is weighted more heav-
+ily than solution cost, BUGSY will expand node A in an at-
+tempt to capitalize on previous search effort and reach a goal
+quickly. A*, on the other hand, will always abandon that
+search path and expand node B in a dogged attempt to op-
+timize solution cost regardless of time.
+
+In domains in which the cost-to-goal and distance-to-goal
+functions are different, BUGSY can have a signiﬁcant advan-
+tage over weighted A*. With a very high weight, weighted
+A* looks only at cost to go and will ﬁnd a solution only as
+quickly as the greedy algorithm. BUGSY however, because
+its search is guided by an estimate of the distance to solutions
+as well as their cost, can possibly ﬁnd a solution in less time
+than the greedy algorithm.
+
+IJCAI-07
+
+2380
+
+3 Empirical Evaluation
+
+To determine whether such a simple mechanism for time-
+aware search can be effective in practice, especially with
+imperfect estimates of utility, we compared BUGSY against
+seven other algorithms on three different domains: grid-
+world path planning (12 different varieties), multiple se-
+quence alignment (used by Zhou and Hansen [2002] to evalu-
+ate Anytime A*), and temporal planning. All algorithms were
+coded in Objective Caml, compiled to native code, and run on
+one processor of a dual 2.6GHz Intel Xeon machine with 2Gb
+RAM, measuring CPU time used. The algorithms were:
+
+A* detecting duplicates using a closed list (hash table),
+
+breaking ties on f in favor of high g,
+
+weighted A* with w = 3,
+greedy like A* but preferring low h, breaking ties on low g,
+speedy like greedy but preferring low time to goal (t(n)),
+
+breaking ties on low h, then low g,
+
+Anytime A* weighted A* (w = 3) that continues, prun-
+ing the open list, until an optimal goal has been found
+[Hansen et al., 1997],
+
+ARA* performs a series of weighted A* searches (starting
+with w = 3), decrementing the weight (δ = 0.2, follow-
+ing Likhachev et al.) and reusing search effort,
+
+A∗
+
+ from among those nodes within a factor of  (3) of the
+lowest f value in the open list, expands the one esti-
+mated to be closest to the goal [Pearl and Kim, 1982].
+
+Note that greedy, speedy, and A* do not provide any inherent
+mechanism for adjusting their built-in trade-off of solution
+cost against search time; they are included only to provide a
+frame of reference for the other algorithms. The ﬁrst solu-
+tion found by Anytime A* and ARA* is the same one found
+by weighted A*, so those algorithms should do at least as
+well. We conﬁrmed this experimentally, and omit weighted
+A* from our presentation below. A∗
+ performed very poorly in
+our preliminary tests, taking a very long time per node expan-
+sion, so we omit its results as well. On domains with many
+solutions, Anytime A* often reported thousands of solutions;
+we therefore limited both anytime algorithms to only report-
+ing solutions that improve solution quality by at least 0.1%.
+
+3.1 Gridworld Planning
+We considered several classes of simple path planning prob-
+lems on a 2000 by 1200 grid, using either 4-way or 8-way
+movement, three different probabilities of blocked cells, and
+two different cost functions. The start state was in the lower
+left corner and the goal state was in the lower right corner. In
+addition to the standard unit cost function, under which every
+move is equally expensive, we tested a graduated cost func-
+tion in which moves along the upper row are free and the cost
+goes up by one for each lower row. We call this cost function
+‘life’ because it shares with everyday living the property that
+a short direct solution that can be found quickly (shallow in
+the search tree) is relatively expensive while a least-cost solu-
+tion plan involves many annoying economizing steps. Under
+both cost functions, simple analytical lower bounds (ignor-
+ing obstacles) are available for the cost (g(n)) and distance
+
+U () BUGSY ARA* AA*
+
+Sp
+
+Gr A*
+
+unit costs, 8-way movement, 40% blocked
+
+time only
+500 microsec
+1 msec
+5 msec
+10 msec
+50 msec
+0.1 sec
+cost only
+
+time only
+100 microsec
+500 microsec
+1 msec
+5 msec
+10 msec
+50 msec
+0.1 sec
+cost only
+
+time only
+1 microsec
+5 microsec
+10 microsec
+50 microsec
+100 microsec
+500 microsec
+1 msec
+5 msec
+10 msec
+50 msec
+cost only
+
+100
+100
+99
+99
+99
+97
+97
+98
+
+100
+99
+98
+91
+82
+25
+60
+98
+
+100
+99
+99
+93
+86
+54
+63
+98
+
+100
+99
+98
+90
+80
+19
+19
+19
+
+100
+99
+98
+90
+80
+19
+19
+19
+
+59
+59
+59
+59
+59
+65
+82
+98
+
+unit costs, 4-way movement, 20% blocked
+
+100
+100
+95
+85
+40
+36
+40
+44
+96
+
+100
+99
+92
+78
+10
+8
+8
+7
+7
+
+100
+99
+92
+78
+10
+8
+8
+7
+7
+
+10
+11
+12
+12
+58
+79
+94
+95
+96
+‘life’ costs, 4-way movement, 20% blocked
+10
+10
+11
+11
+83
+92
+99
+99
+99
+99
+99
+99
+
+99
+100
+95
+88
+85
+84
+83
+82
+81
+81
+81
+81
+
+100
+93
+59
+13
+5
+5
+5
+5
+5
+5
+5
+5
+
+99
+99
+95
+90
+92
+86
+91
+93
+96
+
+95
+95
+92
+86
+89
+93
+97
+98
+99
+99
+99
+99
+
+98
+97
+99
+97
+94
+91
+91
+93
+96
+
+100
+98
+97
+97
+99
+99
+98
+97
+96
+98
+99
+99
+
+Table 1: Results on three varieties of gridworld planning.
+
+(in search steps) to the cheapest goal and to the nearest goal.
+These quantities are then used to compute the f (n) and t(n)
+estimates. Due to the obstacles, the heuristics are not very
+accurate and the problems can be quite challenging.
+
+Table 1 shows typical results from three representative
+classes of gridworld problems. Anytime A* is notated AA*.
+Each row of the table corresponds to a different utility func-
+tion, including those in which speedy and A* are each de-
+signed to be optimal. Recall that each utility function spec-
+iﬁes the relative weighting of solution cost and CPU time
+taken to ﬁnd it. The relative size of the weights determines
+how important time is relative to cost. In other words, the
+utility function speciﬁes the maximum amount of time that
+should be spent to gain an improvement of 1 cost unit. This
+is the time that is listed under U() for each row in the table.
+For example, ”1 msec” in a unit cost problem means that the
+search algorithm can spend up to one millisecond in order
+to ﬁnd a solution one step shorter. In other words, it means
+that a solution that takes 0.001 seconds longer to ﬁnd than
+another must be at least 1 unit cheaper to be judged superior.
+The utility functions tested range over several orders of mag-
+nitude, from one in which only search time matters to one in
+
+IJCAI-07
+
+2381
+
+which only solution cost matters.
+
+Recall that, given a utility function at the start of its search,
+BUGSY returns a single solution representing the best trade-
+off between path cost and search time that it could ﬁnd based
+on the information available to it. We record the CPU time
+taken along with the solution cost. Greedy (notated Gr in
+the table), speedy (notated Sp), and A* also each return one
+solution. These solutions may score well according to utility
+functions with extreme emphasis on time or cost but may well
+score poorly in general. The two anytime algorithms, Any-
+time A* and ARA*, return a stream of solutions over time.
+For these experiments, we allowed them to run to optimality
+and then, for each utility function, post-processed the results
+to ﬁnd the optimal cut-off time to optimize each algorithm’s
+performance for that utility function. Note that this ‘clair-
+voyant termination policy’ gives Anytime A* and ARA* an
+unrealistic advantage in our tests. To compare more easily
+across different utility functions, all of the resulting solution
+utilities were linearly scaled to fall between 0 and 100. Each
+cell in the table is the mean across 20 instances.
+
+In the top group (unit costs, 8-way movement, 40%
+blocked), we see BUGSY performing very well, behaving like
+speedy and greedy when time is important, like A* when
+cost is important, and signiﬁcantly surpassing all the algo-
+rithms for the middle range of utility functions. In the next
+two groups BUGSY performs very well as long as time has
+some importance, again dominating in the middle range of
+utility functions where balancing time and cost is crucial.
+However, its inadmissible heuristic means that it ocassionally
+performs very slightly worse than A* or ARA* when time
+is of marginal importance and cost is critical. (Anytime A*
+performed extremely poorly on the last group, taking many
+hours per instance versus 6.2 seconds for A*, so its results are
+omitted.) Given that BUGSY does not require performance
+proﬁling to construct a termination policy, this is encourag-
+ing performance. As one might expect, greedy performs well
+when time is very important, however as cost becomes impor-
+tant the greedy solution is less useful. Compared to greedy,
+speedy offers little advantage.
+
+3.2 Multiple Sequence Alignment
+
+Alignment of multiple strings has recently been a popular do-
+main for heuristic search algorithms [Hohwald et al., 2003].
+The state representation is the number of characters con-
+sumed so far from each string; a goal is reached when all char-
+acters are consumed. Moves that consume from only some of
+the strings represent the insertion of a ‘gap’ character into
+the others. We computed alignments of ﬁve sequences at a
+time, using the standard ‘sum-of-pairs’ cost function in which
+a gap costs 2, a substitution (mismatched non-gap characters)
+costs 1, and costs are computed by summing all the pairwise
+alignments. We tested on a set of ﬁve biological sequence
+alignment problems used by Kobayashi and Imai [1998] and
+[Zhou and Hansen, 2002]. Each problem consists of ﬁve rela-
+tively dissimilar protein sequences. Each sequence is approx-
+imately 150 symbols long, over an alphabet of 20 symbols
+representing amino acids. The heuristic function h(n) was
+based on optimal pairwise alignments that were precomputed
+by dynamic programming. The lower bound on search nodes
+
+U () BUGSY ARA* AA*
+100
+98
+88
+79
+71
+74
+82
+
+100
+99
+92
+80
+75
+78
+82
+
+time only
+0.1 sec
+0.5 sec
+1 sec
+5 sec
+10 secs
+cost only
+
+100
+97
+83
+68
+68
+75
+82
+
+Sp
+100
+96
+76
+55
+27
+26
+26
+
+Gr A*
+54
+100
+96
+54
+52
+76
+51
+54
+73
+25
+25
+78
+24
+82
+
+Table 2: Results on protein sequence alignment.
+
+to go was simply the maximum number of characters remain-
+ing in any sequence.
+
+Table 2 shows the results, with each row representing a
+different utility function and all raw scores again normalized
+between 0 and 100. Each cell represents the mean over the
+5 instances (there was little variance in the scores in this do-
+main). Again we see BUGSY performing well over a variety
+of time/cost trade-offs, even holding its own against greedy
+and A* at the two ends of the spectrum. The anytime algo-
+rithms fail to match its performance, despite our clairvoyant
+termination policy.
+
+3.3 Temporal Planning
+
+There has been increasing interest over the last ten years in
+applying heuristic search algorithms to AI planning problems
+[Zhou and Hansen, 2006]. In these problems, the search al-
+gorithm must ﬁnd a sequence of actions that connects the ini-
+tial state SI and goal state SG. We tested our algorithms on
+temporal planning problems where actions take real-valued
+amounts of time (so-called ‘durative’ actions) and the objec-
+tive function is to minimize the plan duration (makespan).
+To ﬁnd the plan, we used the temporal regression planning
+framework in which the planner searches backwards from
+the goal state SG to reach the initial state SI [Bonet and
+Geffner, 2001]. To guide the search, we compute h(n) us-
+ing the admissible H 2 heuristic of the TP4 planner [Haslum
+and Geffner, 2001]. This heuristic estimates the shortest
+makespan within which each single predicate or pair of pred-
+icates can be reached from the initial state SI . This is com-
+puted once via dynamic programming before starting the
+search, taking into account the pairwise mutual exclusion re-
+lations between actions in the planning problem.
+
+For BUGSY, we also computed the expected number of
+steps to reach the shortest makespan solution, the expected
+makespan to the closest solution, and the expected number of
+steps to the closest solution. These three values are estimated
+by ﬁrst extracting two different relaxed plans [Hoffmann and
+Nebel, 2001] that approximate the closest solution in terms
+of steps and shortest solutions in terms of makespan from a
+given search node. The makespan and number of regression
+steps in those two plans are then used as the cost and time esti-
+mates to the closest and cheapest solutions in BUGSY. While
+both relaxed plans are extracted backward from the same re-
+laxed planning graph starting from the same set of goals, the
+heuristics to order the goals and the actions supporting them
+are different. One favors actions that are close to the intial
+state SI (as indicated by the H 2 heuristic) and the other fa-
+
+IJCAI-07
+
+2382
+
+vors actions that take fewer steps to reach the goal from SI .
+The second heuristic is based on another form of dynamic
+programming that is similar to H 2 but estimates the number
+of search steps to reach each predicate and action from SI
+instead of the minimum makespan.
+
+We tested the different search algorithms using 31 prob-
+lems from ﬁve benchmark domains taken from the 1998 and
+2002 International Planning Competitions: Blocksword, Lo-
+gistics, ZenoTravel, Rovers, and Satellite. Blocksworld in-
+volves building different block conﬁgurations using robot
+arms. Logistics and ZenoTravel involve moving people or
+packages between different connected locations using air-
+planes and/or trucks. In Rovers, different rovers travel, collect
+samples, take pictures, and communicate the data back to a
+lander. In Satellite, several satellites carrying different sets of
+equipment need to turn to different objects and take pictures
+in different modes and communicate the data back to Earth.
+
+Table 3 shows results from the largest problem in each of
+the ﬁve domains. As before, each row represents a different
+utility function. Due to the wide disparity in results for this
+domain, we took the logarithm of the raw utilities before nor-
+malizing them. Both Speedy and Greedy perform very badly
+for temporal planning so we only show the comparisons be-
+tween BUGSY, ARA*, Anytime A* and A*. All algorithms
+returned the same results when cost was the only criterion.
+BUGSY performs very well when time is important in all do-
+mains, signiﬁcantly outperforms all other algorithms. When
+time becomes less important, either ARA* (Satellite, Logis-
+tics, Rovers) or A* (ZenoTravel, Blocksworld) return solu-
+tions with better utility in all domains. In the instances where
+A* is the best (ZenoTravel and Blocksworld when cost is im-
+portant), then BUGSY return solutions with similar utility to
+ARA*. If one looks at the raw utility values, BUGSY is gener-
+ally one or two orders of magnitude better on those problems
+for which it outperforms the other search algorithms. And on
+the others, the utility achieved by BUGSY is never more than
+a factor of 3 worse than that achieved by the best algorithm,
+making it much more robust than ARA* or Anytime A*.
+
+4 Discussion
+
+We have presented empirical results from a variety of search
+problems, using utilities computed from actual CPU time
+measurements, demonstrating that BUGSY is competitive
+with state-of-the-art anytime algorithms without the need for
+a separate termination policy and its extensive training data.
+For utility functions with an emphasis on solution time, it of-
+ten performs signiﬁcantly better than any previous method.
+For utility functions based heavily on solution cost, it can
+sometimes perform slightly worse than A* due to its inad-
+missible heuristic. Overall, BUGSY appears remarkably ro-
+bust across different domains and utility functions consider-
+ing that it has no access to training data or any information
+other than the user’s utility function.
+
+Note that BUGSY solves a different problem than Real-
+Time A* [Korf, 1990] and its variants. Rather than perform-
+ing a time-limited search for the ﬁrst step in a plan, BUGSY
+tries to ﬁnd a complete plan to a goal in limited time. This
+is particularly useful in domains in which operators are not
+
+invertible or are otherwise costly to undo. Having a com-
+plete path to a goal ensures that execution does not become
+ensnared in a deadend. It is also a common requirement in
+applications where planning is but the ﬁrst step in a series of
+computations involving the action sequence.
+
+In some applications of best-ﬁrst search, memory use is a
+prominent concern. In a time-bounded setting this is less fre-
+quently a problem because the search doesn’t have time to ex-
+haust available memory. However, the simplicity of BUGSY
+means that it may well be possible to integrate some of the
+techniques that have been developed to reduce the memory
+consumption of best-ﬁrst search if necessary.
+
+We have done preliminary experiments incorporating sim-
+ple deadlines into BUGSY, with encouraging results. Because
+it estimates the search time-to-go, it can effectively prune so-
+lutions that lie beyond a search time deadline. Another simi-
+lar extension applies to temporal planning: one can specify a
+bound on the sum of the search time and the resulting plan’s
+execution time and let BUGSY determine how to allocate the
+time.
+
+5 Conclusions
+As Nilsson notes, “in most practical problems we are inter-
+ested in minimizing some combination of the cost of the path
+and the cost of the search required to obtain the path” yet
+“combination costs are never actually computed . . . because
+it is difﬁcult to decide on the way to combine path cost and
+search-effort cost” [1971, p. 54, emphasis his]. BUGSY ad-
+dresses this problem by letting the user specify how path cost
+and search cost should be combined.
+
+This new approach provides an alternative to anytime algo-
+rithms. Instead of returning a stream of solutions and relying
+on an external process to decide when additional search ef-
+fort is no longer justiﬁed, the search process itself makes such
+judgments based on the node evaluations available to it. Our
+empirical results demonstrate that BUGSY provides a simple
+and effective way to solve shortest-path problems when com-
+putation time matters. We would suggest that search proce-
+dures are usefully thought of not as black boxes to be con-
+trolled by an external termination policy but as complete in-
+telligent agents, informed of the user’s goals and acting ra-
+tionally on the basis of the information they collect so as to
+directly maximize the user’s utility.
+
+Acknowledgments
+Elisabeth Crawford assisted with this project during a sum-
+mer internship at PARC. The members of PARC’s Embedded
+Reasoning Area provided encouragement and many helpful
+suggestions.
+
+References
+[Bonet and Geffner, 2001] B. Bonet and H. Geffner. Plan-
+ning as heuristic search. Artiﬁcial Intelligence, 129(1–
+2):5–33, 2001.
+
+[Dechter and Pearl, 1988] Rina Dechter and Judea Pearl.
+The optimality of A*. In Laveen Kanal and Vipin Kumar,
+editors, Search in Artiﬁcial Intelligence, pages 166–199.
+Springer-Verlag, 1988.
+
+IJCAI-07
+
+2383
+
+[Hansen et al., 1997] Eric A. Hansen, Shlomo Zilberstein,
+and Victor A. Danilchenko. Anytime heuristic search:
+First results. CMPSCI 97-50, University of Massachusetts,
+Amherst, September 1997.
+
+[Hart et al., 1968] Peter E. Hart, Nils J. Nilsson, and Bertram
+Raphael. A formal basis for the heuristic determination of
+minimum cost paths. IEEE Transactions of Systems Sci-
+ence and Cybernetics, SSC-4(2):100–107, July 1968.
+
+[Haslum and Geffner, 2001] Patrik Haslum and H´ector
+Geffner. Heuristic planning with time and resources. In
+Proceedings of ECP-01, 2001.
+
+[Hoffmann and Nebel, 2001] J¨org Hoffmann and Bernhard
+Nebel. The FF planning system: Fast plan generation
+through heuristic search. Journal of Artiﬁcial Intelligence
+Research, 14:253–302, 2001.
+
+[Hohwald et al., 2003] Heath Hohwald, Ignacio Thayer, and
+Richard E. Korf. Comparing best-ﬁrst search and dynamic
+programming for optimal multiple sequence alignment. In
+Proceedings of IJCAI-03, pages 1239–1245, 2003.
+
+[Kobayashi and Imai, 1998] Hirotada Kobayashi and Hi-
+roshi Imai. Improvement of the A* algorithm for multiple
+sequence alignment. In Proceedings of the 9th Workshop
+on Genome Informatics, pages 120–130, 1998.
+
+[Korf, 1990] Richard E. Korf. Real-time heuristic search. Ar-
+
+tiﬁcial Intelligence, 42:189–211, 1990.
+
+[Likhachev et al., 2004] Maxim Likhachev, Geoff Gordon,
+and Sebastian Thrun. ARA*: Anytime A* with prov-
+able bounds on sub-optimality.
+In Proceedings of NIPS
+16, 2004.
+
+[Nilsson, 1971] Nils J. Nilsson. Problem-Solving Methods in
+
+Artiﬁcial Intelligence. McGraw-Hill, 1971.
+
+[Nilsson, 1980] Nils J. Nilsson. Principles of Artiﬁcial Intel-
+
+ligence. Tioga Publishing Co, 1980.
+
+[Pearl and Kim, 1982] Judea Pearl and Jin H. Kim. Studies
+in semi-admissible heuristics. IEEE Transactions on Pat-
+tern Analysis and Machine Intelligence, PAMI-4(4):391–
+399, July 1982.
+
+[Pohl, 1970] Ira Pohl. Heuristic search viewed as path ﬁnd-
+
+ing in a graph. Artiﬁcial Intelligence, 1:193–204, 1970.
+
+[Russell and Wefald, 1991] Stuart Russell and Eric Wefald.
+Do the Right Thing: Studies in Limited Rationality. MIT
+Press, 1991.
+
+[Zhou and Hansen, 2002] Rong Zhou and Eric A. Hansen.
+Multiple sequence alignment using Anytime A*. In Pro-
+ceedings of AAAI-02, pages 975–976, 2002.
+
+[Zhou and Hansen, 2006] Rong Zhou and Eric Hansen.
+Artiﬁcial Intelligence,
+
+Breadth-ﬁrst heuristic search.
+170(4–5):385–408, 2006.
+
+U () Bugsy ARA* AA*
+
+A*
+
+zenotravel-7
+
+1 microsec
+5 microsec
+10 microsec
+50 microsec
+100 microsec
+500 microsec
+1 msec
+5 msec
+10 msec
+50 msec
+0.5 sec
+5 sec
+
+10 microsec
+50 microsec
+100 microsec
+500 microsec
+1 msec
+5 msec
+10 msec
+50 msec
+0.5 sec
+5 sec
+50 secs
+
+5 msec
+10 msec
+50 msec
+0.1 sec
+0.5 sec
+1 sec
+5 sec
+10 secs
+
+5 microsec
+10 microsec
+50 microsec
+100 microsec
+500 microsec
+1 msec
+5 msec
+50 msec
+0.5 sec
+5 sec
+50 secs
+
+100 microsec
+500 microsec
+1 msec
+5 msec
+10 msec
+50 msec
+0.5 sec
+5 sec
+50 secs
+
+100
+100
+100
+100
+100
+100
+100
+100
+100
+91
+97
+99
+
+94
+100
+100
+100
+100
+100
+92
+78
+79
+88
+97
+
+100
+100
+76
+100
+91
+83
+80
+100
+
+100
+100
+100
+100
+80
+72
+63
+59
+77
+84
+94
+
+100
+100
+100
+100
+97
+73
+75
+85
+95
+
+51
+51
+57
+66
+72
+69
+71
+74
+84
+91
+97
+99
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+rovers-5
+100
+57
+56
+67
+72
+77
+100
+100
+100
+100
+100
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+blocksworld-10
+0
+0
+0
+0
+0
+0
+0
+0
+
+57
+56
+92
+90
+92
+93
+94
+88
+
+satellite-4
+
+61
+61
+66
+88
+100
+100
+100
+100
+100
+100
+100
+
+logistics-5
+
+96
+66
+64
+77
+100
+100
+100
+100
+100
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+
+59
+60
+67
+77
+84
+81
+83
+85
+96
+100
+100
+100
+
+93
+53
+52
+62
+66
+71
+93
+93
+94
+97
+99
+
+61
+61
+100
+98
+100
+100
+100
+93
+
+57
+57
+61
+82
+93
+93
+94
+94
+96
+99
+100
+
+91
+62
+60
+72
+94
+94
+95
+98
+99
+
+Table 3: Sample results on temporal planning.
+
+IJCAI-07
+
+2384
+
+

@@ -1,0 +1,730 @@
+Online Learning and Exploiting Relational Models in Reinforcement Learning
+
+Tom Croonenborghs, Jan Ramon, Hendrik Blockeel and Maurice Bruynooghe
+
+K.U.Leuven, Dept. of Computer Science
+
+{Tom.Croonenborghs, Jan.Ramon, Hendrik.Blockeel, Maurice.Bruynooghe}@cs.kuleuven.be
+
+Celestijnenlaan 200A, B-3001 Leuven
+
+Abstract
+
+In recent years, there has been a growing inter-
+est in using rich representations such as relational
+languages for reinforcement learning. However,
+while expressive languages have many advantages
+in terms of generalization and reasoning, extending
+existing approaches to such a relational setting is
+a non-trivial problem. In this paper, we present a
+ﬁrst step towards the online learning and exploita-
+tion of relational models. We propose a represen-
+tation for the transition and reward function that
+can be learned online and present a method that ex-
+ploits these models by augmenting Relational Rein-
+forcement Learning algorithms with planning tech-
+niques. The beneﬁts and robustness of our ap-
+proach are evaluated experimentally.
+
+1 Introduction
+
+In reinforcement learning, an agent can observe its world and
+perform actions in it. Its goal is to maximize the obtained
+reward. For small domains with a limited number of states,
+exact solution methods such as dynamic programming exist.
+However, these methods are unable to handle real-world do-
+mains with large state spaces. For such problems, structur-
+ing the world and generalization becomes essential. Recently,
+there is a strong interest in Relational Reinforcement Learn-
+ing [Tadepalli et al., 2004], a framework not only providing
+an expressive language for describing the world and for gen-
+eralization, but also able to handle “relational” state spaces
+which can not be easily represented using vector spaces.
+
+For example, consider a blocks world where there is a set
+of blocks {b1, b2, . . . bn}. Every block bi stands either on the
+ﬂoor (denoted on(bi, f l)) or on some other block bj (denoted
+on(bi, bj)) and on every block bi there is either exactly one
+other block or it is clear (denoted clear(bi)). Here, we de-
+scribe a state by the set of facts that are true in that state, e.g.
+{clear(b1), on(b1, b2), on(b2, f l), clear(b3), on(b3, f l)}.
+The agent can take a clear block bi and put it on another clear
+block bj or on the ﬂoor (denoted move(bi, bj)). Move actions
+with other arguments (e.g., move(f l, b1)) are possible but
+have no effect. As the number of blocks is not limited in this
+world, it is clear that such states can not be easily represented
+
+by vectors. In contrast, in a relational setting concepts such
+as “on” and “clear” are intuitive to work with.
+
+Several studies have shown that learning a model of the
+world (a transition function and the reward function) is of-
+ten beneﬁcial for the agent. Once a model has been learned,
+it can be used in several different ways. First, it can help
+to speed up the learning process by generating more training
+examples through simulation of actions in states, as happens
+in the Dyna architecture [Sutton, 1991]. Second, it allows
+the agent to reason about actions in a way similar to planning
+[Tesauro, 1995], which may allow it to achieve better rewards
+in exploitation mode and to make better estimates of Q-values
+in exploration mode by using lookahead (the TD-leaf method
+[Baxter et al., 1998] is an example of the latter). Note that
+both options are complementary and can be combined.
+
+Though in the relational setting most research so far has
+focused on a model-free setting, recently there is growing in-
+terest in extending methods for learning and exploiting mod-
+els of the world to a relational setting (see [van Otterlo, 2005]
+for a recent overview). This is a non-trivial task as the use of
+a more expressive relational language inevitably implies that
+models of the world are more complex and harder to learn
+and apply. For instance, with the Dyna strategy, it is fairly
+easy to learn a model by keeping a probability distribution on
+states. In the relational case however a probability distribu-
+tion on the large space of relational states is necessary, which
+is a lot harder, as shown in the ﬁeld of statistical relational
+learning.
+
+Our work investigates the feasibility and beneﬁt of using
+relational learned models for lookahead. Moreover, we study
+whether such a strategy is still beneﬁcial in complex worlds
+where it is not possible to learn a perfect model. We present
+MARLIE (Model-Assisted Reinforcement Learning in Expres-
+sive languages), the ﬁrst system to learn a relational transi-
+tion and reward function on-line. Our contribution is three-
+fold. (1) We propose a representation for the transition func-
+tion that facilitates its efﬁcient and incremental learning. (2)
+We propose a learning and exploitation method. In contrast
+to earlier approaches learning relational models off-line (e.g.
+[Zettlemoyer et al., 2005]), the partial model is exploited
+immediately (avoiding as much as possible an initial period
+where the agent gains poor rewards trying to learn a good
+model) and in contrast to work such as [Kersting et al., 2004]
+this model does not need to be complete. Also note that we
+
+IJCAI-07
+
+726
+
+are considering the full RL problem in that our technique does
+not require resets or generative models as e.g. in [Fern et al.,
+2006]. (3) We experimentally evaluate the efﬁciency and ben-
+eﬁts of our approach and examine the inﬂuence of the quality
+of the learned model on these results.
+
+Organization. Section 2 presents some background and
+Section 3 shows how the transition function of a Relational
+MDP can be represented and learned online. Section 4 de-
+scribes how using the model to look some steps ahead im-
+proves over standard Q-learning. The experimental evalua-
+tion is shown in Section 5. Section 6 discusses related work
+and we conclude in Section 7.
+
+2 Reinforcement Learning and MDPs
+
+Reinforcement Learning (RL) [Sutton and Barto, 1998] is of-
+ten formulated in the formalism of Markov Decision Pro-
+cesses (MDPs). The need to model relational domains has
+led to different formalizations of Relational MDPs (RMDPs),
+e.g. [Fern et al., 2006; Kersting and De Raedt, 2004; Kersting
+et al., 2004]1. We use the following simple form:
+
+Deﬁnition 1 A Relational MDP (RMDP) is deﬁned as the
+ﬁve-tuple M = (cid:2)PS, PA, C, T, R(cid:3), where PS is a set of state
+predicates, PA is a set of action predicates and C is a set
+of constants. A ground state (action) atom is of the form
+p(c1, . . . , cn) with p/n ∈ PS (p/n ∈ PA) and ∀i : ci ∈ C}.
+A state in the state space S is a set of ground state atoms; an
+action in the action state A is a ground action atom.
+
+The transition function T : S × A × S → [0, 1] de-
+ﬁnes a probability distribution over the possible next states:
+T (s, a, s(cid:2)) denotes the probability of landing in state s(cid:2) when
+executing action a in state s. The reward function R :
+S × A → R deﬁnes the reward for executing a certain ac-
+tion in a certain state.
+
+∞
+
+(cid:2)
+
+The task of reinforcement learning consists of ﬁnding an
+optimal policy for a certain MDP, which is (initially) un-
+known to the RL-agent. As usual, we deﬁne it as a func-
+tion of the discounted, cumulative reward, i.e. ﬁnd a policy
+π : S → A that maximizes the value function: V π(s) =
+t=0 γiR(st, π(st))|s0 = s, st+1 = π(st)], where 0 ≤
+Eπ[
+γ < 1 is the discount factor, which indicates the relative im-
+portance of future rewards with respect to immediate rewards.
+The RRL-system [Driessens, 2004] applies Q-Learning in
+relational domains, by using a relational regression algorithm
+to approximate the Q-function deﬁned as
+
+Q(s, a) ≡ R(s, a) + γ
+
+T (s, a, s(cid:2))maxa(cid:2) Q(s(cid:2), a(cid:2))
+
+(1)
+
+(cid:3)
+
+learned in an on-line setting. This module learns these func-
+tions in the form of probability distributions T (cid:2)(s(cid:2)|s, a) and
+R(cid:2)(r(s, a)|s, a), given PS, PA and C of the RMDP.
+
+3.1 Representation of the World Model
+
+As said above, a state is a set of ground state atoms; hence,
+using a binary random variable for every possible ground
+state atom at each time point t, a Dynamic Bayesian network
+(DBN) [Dean and Kanazawa, 1989] can represent the transi-
+tion function. The action taken at time point t is represented
+by a random variable at (one for every t) that ranges over all
+atoms from A that represent valid actions. The reward at time
+t is represented by a real-valued random variable rt.
+
+The reward in the current state depends on the random vari-
+ables representing the state and the action taken. The action
+taken depends on the current knowledge of the agent and the
+current state. Its conditional probability distribution (CPD) is
+not explicitly modeled as the chosen action is the result of the
+agent’s reasoning process. The current state in turn depends
+on the previous state and the action taken in that state. This
+speciﬁes a layered network structure which is a partial order
+over the random variables. There can still be dependencies
+between variables of the same state. We assume an expert
+provides an order on the random variables describing states
+such that a random variable only depends on those preceding
+it in this order. Hence we avoid the problem of learning the
+structure of the network, a problem that would be especially
+hard in the case of online learning because a revision of the
+structure would interfere with the learning of the conditional
+probability tables in uninvestigated ways.
+
+The CPDs of state random variables can be compactly rep-
+resented by relational probability trees [Neville et al., 2003;
+Fierens et al., 2005]. In our setting, the main idea is to have
+a single relational probability tree for every predicate symbol
+p ∈ PS. This tree is used to model the conditional proba-
+p(x|s, a) that gives for every ground atom
+bility distribution T (cid:2)
+x with predicate symbol p the probability that it will be true
+in the next state given the current state s and action a. This
+allows for maximal generalizations by using the same tree for
+all atoms of the same predicate symbol, but avoids the prob-
+lems arising when generalizing over predicates with a differ-
+ent number of arguments with different types and different
+semantics. As an example, Figure 1 shows a probability tree
+CPD for clear(X) in the blocks world. Another relational
+probability tree is used to represent the CPD of the reward
+random variable. Note that the learned relational probability
+tree does not necessarily use all preceding random variables
+of the network as splits in internal nodes.
+
+s(cid:2)∈S
+
+3.2 Learning the Model
+
+Knowing these Q-values, an optimal policy π∗ of the MDP
+can be constructed as π∗(s) = argmaxa Q(s, a).
+
+3 Online Learning of Relational Models
+
+In this section we propose a representation for the transition
+function and reward function that can be easily and efﬁciently
+
+1See [van Otterlo, 2005] for an overview.
+
+All the uninstantiated parts of the model are CPD’s repre-
+sented by relational probability trees. Therefore, learning the
+model reduces to the online learning of a set of decision trees.
+In our implementation, we use an improved2 version of the in-
+cremental relational tree learning algorithm TG [Driessens et
+al., 2001].
+
+2Which learns several trees in parallel and is much more space-
+
+efﬁcient while only slightly less time-efﬁcient.
+
+IJCAI-07
+
+727
+
+State, move(X, Y ), clear(A)
+
+clear(State, A)?
+
+yes
+
+no
+
+A == Y ?
+
+yes
+
+no
+
+on(State, X, A)?
+
+yesyes
+
+no
+
+0.0
+
+clear(State, X)?
+
+1.0
+
+clear(State, Y )?
+
+yes
+
+0.0
+
+no
+
+1.0
+
+clear(State, X)?
+
+no
+
+0.0
+
+yes
+
+no
+
+1.0
+
+0.0
+
+Figure 1: This probability tree shows the probability that
+block A will be clear when the action move(X, Y ) is exe-
+cuted in state State. The ﬁrst node in the tree checks if block
+A was already clear (essentially the frame assumption). If
+this is the case, it can only become not clear when some other
+block is moved on top of it. If the block was not clear in the
+original state, it can only become clear in the afterstate if the
+block directly on top of it got moved to another block.
+
+Learning examples can easily be created from the agents
+experience. Note that the number of possible facts in the next
+state may be very large, and therefore we do not generate all
+possible examples but apply a suitable sampling strategy.
+
+4 Online Exploitation of Relational Models
+The (partially correct) transition function T (cid:2)(s(cid:2)|s, a) that is
+being learned enables the agent to predict future states. In this
+paper, we investigate the use of Q-learning with lookahead
+trees to give the agent more informed Q-values by looking
+some steps into the future when selecting an action. These
+lookahead trees are similar to the sparse lookahead trees used
+in [Kearns et al., 2002] to obtain near-optimal policies for
+large MDPs.
+
+Since the transition function can be stochastic or there may
+be uncertainty on the effect of a particular action (due to in-
+complete learning), an action needs to be sampled several
+times to obtain an accurate value. This sampling width SW is
+a parameter of the algorithm. Starting from the current state
+in the root node, we generate for every possible action, SW
+(directed) edges using the action as a label for that edge. The
+node at the tail of this edge represents the state obtained from
+executing that action in the head node. This can be contin-
+ued until the tree reaches a certain depth. The Q-values of
+the deepest level can be estimated by the learned Q-function.
+By back-propagating these values to the top level, a policy
+can be constructed using these top level Q-values as in regu-
+lar Q-learning. When back-propagating, the Q-values for the
+different samples of a certain action in a certain state are av-
+eraged and the Q-value of a higher level is determined using
+the Bellman equation (Eq. 1).
+
+Several optimizations to this scheme are possible. Our im-
+plementation uses preconditions. This is especially useful in
+planning domains as, typically, the world remains unchanged
+if the agent tries an illegal action. While the transition func-
+
+tion only indirectly states the preconditions of an action, the
+introduction and the learning of an extra binary random vari-
+able lt (intended to be true if the state of the world changes)
+allows one to prune away actions predicted to be illegal.
+
+Besides the sampling width, also other parameters can in-
+ﬂuence a lookahead tree. Currently, we are investigating the
+use of beam-like and randomized searches.
+
+5 Empirical Evaluation
+
+In this section we will present an empirical evaluation of our
+approach. First, we want to evaluate whether our incremental
+relational decision tree learner is able to build a model of the
+world. Second, we want to investigate how much the perfor-
+mance and speed of the agent improves by adding lookahead.
+Third, we want to evaluate the robustness of the approach,
+i.e., evaluate whether the lookahead is still beneﬁcial when
+the learner is not able to build a complete model.
+
+5.1 Domains Experimental setup
+In all the following experiments, the RRL-TG[Driessens et
+al., 2001] system is used to estimate the Q-values. Since the
+transition function for these domains are still learned rather
+easily, a sampling width of two is used. The agent also learns
+the function modeling the preconditions to prune the looka-
+head tree. The exploration policy consists of performing a
+single step lookahead. To eliminate the inﬂuence of a speciﬁc
+ordering on the random variables, independence is assumed
+between random variables in the same state. The ﬁgures show
+the average over a 5-fold run where each test run consists of
+100 episodes and the average reward over this 100 episodes
+following a greedy policy, i.e., the percentage of episodes in
+which a reward is received, is used as a convergence measure.
+
+Blocks World In the following experiments, we use the
+blocks world as described in the introduction with the stack-
+goal and the on(A, B) goal (deﬁned in the same way as in
+[Driessens, 2004]3). In the on(A, B)-goal the agent only re-
+ceives a reward iff block A is directly on top of block B. The
+objective of the stack-goal is to put all blocks in one and the
+same stack, i.e., if there is only one block on the ﬂoor. The
+results for the unstack-goal where the agent is rewarded iff
+all blocks are on the ﬂoor are not included as the behavior
+was comparable to the stack-goal.
+
+During exploration, episodes have a maximum length of
+25 steps above the ones needed by the optimal policy, dur-
+ing testing only optimal episodes are allowed. In the stack-
+problem the blocks world has seven blocks, for the on(A, B)-
+goal the number of blocks was varied for each episode be-
+tween four and seven. The same language bias is used as
+in previous experiments with the RRL-TG algorithm in the
+Blocks World [Driessens, 2004].
+
+Logistics The second domain is a logistics domain contain-
+ing boxes, trucks and cities. The goal is to transport cer-
+
+3The main difference is that here the agent can execute every
+possible action in a certain state instead of only the legal ones. This
+makes the problem more difﬁcult.
+
+IJCAI-07
+
+728
+
+respectively and for the logistics domain the results are plot-
+ted in Figure 5.
+
+tain boxes to certain cities4. The possible actions in this
+domain are load box on truck/2, which loads the speciﬁed
+box on the speciﬁed truck if they are both in the same city,
+the unload box on truck/2 which takes the box of the truck
+and moves it in the depot of the city where the truck is located.
+The third possible action is the move/2-action, which moves
+the truck to the speciﬁed city. The state space PS consists
+of the following predicates: box on truck/2, box in city/2
+and truck in city/2. These predicates also make up the lan-
+guage bias used in these experiments, i.e., the tree learning
+algorithm can test if a certain box is on a certain truck etc.
+
+In the ﬁrst setting there are two boxes, two cities and three
+trucks and the goal is to bring the two boxes to two speciﬁc
+cities. During exploration, 150 steps are allowed, but during
+testing the maximum length of an episode is 20 steps. For
+the second setting the domain is extended to four boxes, two
+cities and two trucks and the goal is to bring three speciﬁc
+boxes to certain locations within 50 time steps.
+
+5.2 Experiments
+
+Figure 3: Blocks world with on(A, B) goal
+
+Figure 2: Errors made by the learned transition function
+
+First, we test the quality of the transition function. To
+achieve this, we apply the learned model as a classiﬁer. We
+randomly generate facts and predict if they will be true in the
+resulting next state, given some state and action. Figure 2
+shows the percentage of errors made per step, False Positives
+(FP) and False Negatives (FN) indicate the number of atoms
+that were incorrectly predicted as true and false respectively.
+For the blocks world with seven blocks the transition func-
+tion is learned rather rapidly and is optimal after about 200
+episodes. For the logistics domain with ﬁve boxes, trucks
+and cities, it appears that a reasonable transition function is
+learned rapidly, but it never reaches optimal performance.
+
+Next, we evaluate the improvement obtained by lookahead
+planning. Therefore, we ran both experiments with standard
+RRL-TG and experiments with different amounts of looka-
+head using the learned model. Figure 3 and Figure 4 show the
+results for the on(a, b) and stack goals of the blocks world
+
+4Speciﬁc instantiations vary from episode to episode.
+
+Figure 4: Blocks world with stack goal
+
+These experiments show that
+
+the number of episodes
+needed to obtain a good policy is much smaller when look-
+ing ahead. However, learning and lookahead takes additional
+computation time. Therefore, for worlds where performing
+actions is not expensive, it is also useful to evaluate how the
+total time needed to obtain a good policy compares with and
+without learning. Figure 6 shows the average reward in func-
+tion of the time needed to learn the policy for the on(a,b)
+goal (the other settings produce similar results, omitted due
+to lack of space). Due to the computational costs of learn-
+ing the model, using no lookahead performs better than sin-
+gle step lookahead. Indeed, in our current implementation,
+learning the model of the world is the computational bottle-
+neck for small levels of lookahead. This is mainly due to the
+sampling techniques to create the learning examples, some-
+thing we will improve in future work. However, performing
+two steps of lookahead still outperforms the standard version
+without lookahead.
+
+IJCAI-07
+
+729
+
+Figure 5: Logistics
+
+Figure 7: Reward versus the quality of the model
+
+and uses these approximations of the transition and reward
+function to perform hypothetical actions to generate extra up-
+dates for the Q- or value function. Algorithms such as prior-
+itized sweeping [Moore and Atkeson, 1993] (and extensions
+of these) focus the hypothetical actions on interesting parts of
+the state space. As mentioned earlier, these approaches are
+orthogonal to our approach and will be explored in our future
+work.
+
+Learning a model of the environment becomes a non-trivial
+task in the relational setting. One method that focuses speciﬁ-
+cally on learning transition functions with relational structure
+is [Zettlemoyer et al., 2005]. They present a method for learn-
+ing probabilistic relational rules when given a dataset about
+state transitions that are applicable in large noisy stochastic
+worlds. The main difference with (the learning part of) our
+approach is that this method is not directly applicable to Re-
+inforcement Learning, since it does not work incrementally
+and it is limited to domains where actions only have a small
+number of effects.
+
+The emerging ﬁeld of Statistical Relational Learning has
+seen a lot of work on relational upgrades of Bayesian net-
+works. More speciﬁcally, [Sanghai et al., 2005] deﬁnes Re-
+lational Dynamic Bayesian Networks (RDBNs) as a way to
+model relational stochastic processes that vary over time.
+
+Combining search and RL has shown to be successful in
+the past, for instance in the context of game playing [Baxter et
+al., 1998]. In [Davies et al., 1998], online search is used with
+a (very) approximate value function to improve performance
+in continuous-state domains. Our approach can be seen as an
+instance of the Learning Local Search (LLS) algorithm de-
+scribed there.
+
+Many new RRL algorithms have been proposed lately, but
+to our knowledge this is the ﬁrst indirect RRL approach.
+The most related is [Sanner, 2005], where a ground relational
+naive Bayes Net is learned as an estimation of the Value func-
+tion. The major difference however is that this work does not
+consider the aspects of time since they consider game playing
+and hence restrict themselves to undiscounted, ﬁnite-horizon
+domains that only have a single terminal reward for failure or
+success.
+
+Figure 6: Blocks world with the on(A, B) goal
+
+Finally, we evaluate the robustness of our approach. We set
+up this experiment by generating less training examples for
+the transition function per step, extending the time to learn
+a good transition function. Every 30 episodes, we test both
+the quality of the transition function (the number of classiﬁ-
+cation errors) and the average reward obtained by the learned
+policy using single step lookahead. In Figure 7 we plotted
+these points for two different learning rates, showing the ob-
+tained reward in function of the quality of the model. The
+horizontal line shows the performance of a learning agent af-
+ter 2000 episodes using no lookahead. The ﬁgure shows that
+even when the learned model is less accurate, it is still bene-
+ﬁcial to use lookahead. Only when the model performs very
+inaccurately, performance can drop.
+
+6 Related Work
+
+An important part of related work are the indirect or model-
+based approaches in the propositional setting. Most of these
+ﬁt the Dyna architecture [Sutton, 1991] as mentioned in the
+introduction. There the agent learns a model of the world
+
+IJCAI-07
+
+730
+
+7 Conclusions and Future Work
+
+In this paper we presented MARLIE, the ﬁrst reinforcement
+learning system learning and exploiting a relational model of
+the world on-line. We argued that this system has several ad-
+vantages when compared to earlier work. Compared to earlier
+on-line learning approaches, our approach is fully relational,
+allowing for a wider range of problems. Compared to ear-
+lier relational approaches, we argue that learning a complete
+model may be difﬁcult. MARLIE builds probabilistic models
+allowing for partial models and uncertainty about the dynam-
+ics of the world, while at the same time exploiting knowledge
+as soon as it is available.
+
+There are several directions for future work. First, one
+could improve the sampling strategies for looking ahead; e.g.
+by using iterative deepening strategies or sampling some ran-
+dom variables only lazily. Second, self-evaluation may be
+beneﬁcial.
+In this way once it is shown that (parts of) the
+learned transition function is correct or good enough, no more
+resources need to be invested in it (but it may stay useful to
+check it at regular times). On the other hand, if it is known
+that the learned model or certain parts of it are not satisfactory
+yet, this can be taken into account in the decision making pro-
+cess. Finally, it would also be interesting to investigate how
+to use poor or partial models in combination with traditional
+planning reasoning strategies.
+
+Acknowledgments
+
+Tom Croonenborghs is supported by the Flemish Institute for
+the Promotion of Science and Technological Research in In-
+dustry (IWT). Jan Ramon and Hendrik Blockeel are post-
+doctoral fellows of the Fund for Scientiﬁc Research of Flan-
+ders (FWO-Vlaanderen).
+
+References
+[Baxter et al., 1998] J. Baxter, A. Tridgell, and L. Weaver.
+Knightcap: A chess program that learns by combining
+td(λ) with game-tree search. In Proc. of the 15th Int. Conf.
+on Machine Learning, pages 28–36, 1998.
+
+[Davies et al., 1998] S. Davies, A. Ng, and A. Moore. Ap-
+plying online search techniques to continuous-state Rein-
+forcement Learning. In Proc. of the 15th National Conf.
+on Artiﬁcial Intelligence, pages 753–760, 1998.
+
+[Dean and Kanazawa, 1989] Thomas Dean
+
+and Keiji
+Kanazawa. A model for reasoning about persistence and
+causation. Computational Intelligence, 5(3):33–58, 1989.
+
+[Driessens et al., 2001] K. Driessens,
+
+and
+H. Blockeel.
+Speeding up relational reinforcement
+learning through the use of an incremental ﬁrst order
+decision tree learner. In Proc. of the 12th European Conf.
+on Machine Learning, volume 2167 of Lecture Notes in
+Artiﬁcial Intelligence, pages 97–108, 2001.
+
+J. Ramon,
+
+[Driessens, 2004] K. Driessens. Relational Reinforcement
+Learning. PhD thesis, Department of Computer Science,
+Katholieke Universiteit Leuven, 2004.
+
+[Fern et al., 2006] A. Fern, S. Yoon, and R. Givan. Approxi-
+mate policy iteration with a policy language bias: Solving
+
+relational Markov decision processes. Journal of Artiﬁcial
+Intelligence Research, 25:85–118, 2006.
+
+[Fierens et al., 2005] D. Fierens, J. Ramon, H. Blockeel, and
+M. Bruynooghe. A comparison of approaches for learning
+probability trees. In Proc. of 16th European Conf. on Ma-
+chine Learning, volume 3720 of Lecture Notes in Artiﬁcial
+Intelligence, pages 556–563, 2005.
+
+[Kearns et al., 2002] M. Kearns, Y. Mansour, and A. Ng.
+A sparse sampling algorithm for near-optimal planning
+in large Markov Decision Processes. Machine Learning,
+49(2-3):193–208, 2002.
+
+[Kersting and De Raedt, 2004] K. Kersting and L. De Raedt.
+Logical Markov Decision Programs and the convergence
+of logical TD(λ). In Proc. of the 14th International Conf.
+on Inductive Logic Programming, pages 180–197, 2004.
+
+[Kersting et al., 2004] K. Kersting, M. Van Otterlo, and
+L. De Raedt. Bellman goes relational. In Proc. of the 21th
+International Conf. on Machine Learning (ICML-2004),
+pages 465–472, Canada, 2004.
+
+[Moore and Atkeson, 1993] A. Moore and C. Atkeson. Pri-
+oritized sweeping: Reinforcement learning with less data
+and less real time. Machine Learning, 13:103–130, 1993.
+[Neville et al., 2003] J. Neville, D. Jensen, L. Friedland, and
+M. Hay. Learning relational probability trees. In Proc. of
+the 9th ACM SIGKDD International Conf. on Knowledge
+Discovery and Data Mining, 2003.
+
+[Sanghai et al., 2005] S. Sanghai,
+
+and
+Relational Dynamic Bayesian Networks.
+D. Weld.
+Journal of Artiﬁcial Intelligence Research, 24:759–797,
+2005.
+
+P. Domingos,
+
+[Sanner, 2005] S. Sanner. Simultaneous learning of structure
+In Proc.
+and value in relational reinforcement learning.
+of the ICML 2005 Workshop on Rich Representations for
+Reinforcement Learning, 2005.
+
+[Sutton and Barto, 1998] R. Sutton and A. Barto. Reinforce-
+ment Learning: An Introduction. The MIT Press, Cam-
+bridge, MA, 1998.
+
+[Sutton, 1991] R. Sutton. Dyna, an integrated architec-
+ture for learning, planning, and reacting. SIGART Bull.,
+2(4):160–163, 1991.
+
+[Tadepalli et al., 2004] P. Tadepalli,
+
+and
+K. Driessens. Relational reinforcement learning: An
+overview.
+In Proceedings of the ICML’04 Workshop on
+Relational Reinforcement Learning, 2004.
+
+R. Givan,
+
+[Tesauro, 1995] G. Tesauro.
+
+Temporal difference learn-
+ing and TD-Gammon. Communications of the ACM,
+38(3):58–67, March 1995.
+
+[van Otterlo, 2005] M. van Otterlo. A survey of reinforce-
+ment learning in relational domains. Technical Report
+TR-CTIT-05-31, University of Twente, 2005. ISBN=ISSN
+1381-3625.
+
+[Zettlemoyer et al., 2005] L. Zettlemoyer, H. Pasula, and
+L. Kaelbling. Learning planning rules in noisy stochas-
+tic worlds. In Proc. of the 20th National Conference on
+Artiﬁcial Intelligence (AAAI-05), pages 911–918, 2005.
+
+IJCAI-07
+
+731
+
+

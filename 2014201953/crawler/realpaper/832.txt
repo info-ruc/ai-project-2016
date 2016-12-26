@@ -1,0 +1,996 @@
+A Fully Connectionist Model Generator for Covered First-Order Logic Programs
+
+Sebastian Bader∗
+and Andreas Witzel‡
+∗
+International Center for Computational Logic, Technische Universit¨at Dresden, Germany
+
+and Steffen H¨olldobler∗
+
+and Pascal Hitzler†
+
+†
+
+AIFB, Universit¨at Karlsruhe, Germany
+
+‡
+
+Institute for Logic, Language and Computation, Universiteit van Amsterdam
+
+Abstract
+
+We present a fully connectionist system for the
+learning of ﬁrst-order logic programs and the gen-
+eration of corresponding models: Given a program
+and a set of training examples, we embed the asso-
+ciated semantic operator into a feed-forward net-
+work and train the network using the examples.
+This results in the learning of ﬁrst-order knowledge
+while damaged or noisy data is handled gracefully.
+
+1 Motivation
+Three long-standing open research problems in connection-
+ism are the questions of how to instantiate the power of
+symbolic computation within a fully connectionist system
+[Smolensky, 1987], how to represent and reason about struc-
+tured objects and structure sensitive processes [Fodor and
+Pylyshyn, 1988], and how to overcome the propositional ﬁx-
+ation [McCarthy, 1988], i.e. how to use connectionist sys-
+tems for symbolic learning and reasoning beyond proposi-
+tional logic. It has been shown that feed-forward networks are
+universal approximators and that artiﬁcial neural networks are
+Turing complete. Thus we know that symbolic computation
+is possible in principle, but at the same time the mentioned
+results are mainly theoretical.
+
+Here we are concerned with the model generation for ﬁrst-
+order logic programs, i.e. sets of rules which may contain
+variables ranging over inﬁnite domains. Our approach is
+based on the following ideas ﬁrst expressed in [H¨olldobler et
+al., 1999]: Various semantics of logic programs coincide with
+ﬁxed points of associated semantic operators. Given that the
+semantic operator is continuous on the reals, the operator can
+be approximated arbitrarily well by a feed-forward network.
+In addition, if the operator is a contraction, then its ﬁxed point
+can be computed by a recurrent extension of the feed-forward
+network.
+
+Until now this approach was also purely theoretical for the
+ﬁrst-order case. In this paper we show how feed-forward net-
+works approximating the semantic operator of a given ﬁrst-
+order logic program can be constructed, we show how these
+networks can be trained using input-output examples, and we
+demonstrate that the obtained connectionist system is robust
+against damage and noise.
+In particular, and after stating
+
+necessary preliminaries in Section 2, we make the follow-
+ing novel contributions in Section 3: We deﬁne a new multi-
+dimensional embedding of semantic operators into the reals,
+we construct a feed-forward network to approximate these
+operators and we present a new learning method using do-
+main knowledge. The resulting system is evaluated in Sec-
+tion 4. Finally, we draw some conclusions and point out what
+needs to be done in the future in Section 5. For an overview
+of related work we refer to [d’Avila Garcez et al., 2002] and
+[Bader and Hitzler, 2005].
+
+2 Preliminaries
+In this section, some preliminary notions from logic program-
+ming and connectionist systems are presented, along with the
+Core Method as one approach to integrate both paradigms.
+
+2.1 First-Order Logic Programs
+A logic program over some ﬁrst-order language L is a set of
+clauses of the form A ← L1 ∧ ··· ∧ Ln, A is an atom in L,
+and the Li are literals in L, that is, atoms or negated atoms.
+A is called the head of the clause, the Li are called body lit-
+erals, and their conjunction L1 ∧ ··· ∧ Ln is called the body
+of the clause. If n = 0, A is called a fact. A clause is ground
+if it does not contain any variables. Local variables are those
+variables occurring in some body but not in the correspond-
+ing head. A logic program is covered if none of the clauses
+contain local variables.
+Example 1. The following is a covered logic program which
+will serve as our running example.
+e(0).
+e(s(X)) ← o(X). % the successor s(X) of an odd X is even
+o(X) ← ¬e(X). % X is odd if it is not even
+The Herbrand universe UL is the set of all ground terms of
+L, the Herbrand base BL is the set of all ground atoms, which
+we assume to be inﬁnite – indeed the case of a ﬁnite BL can
+be reduced to a propositional setting. A ground instance of
+a literal or a clause is obtained by replacing all variables by
+terms from UL. For a logic program P , G(P ) denotes the set
+of all ground instances of clauses from P .
+A level mapping is a function assigning a natural number
+|A| ≥ 1 to each ground atom A. For negative ground literals
+we deﬁne |¬A| := |A|. A logic program P is called acyclic
+
+% 0 is even
+
+IJCAI-07
+
+666
+
+if there exists a level mapping | · | such that for all clauses
+A ← L1∧···∧Ln ∈ G(P ) we have |A| > |Li| for 1 ≤ i ≤ n.
+Example 2. Consider the program from Example 1 and let sn
+denote the n-fold application of s. With |e(sn(0))| := 2n + 1
+and |o(sn(0))| := 2n + 2, we ﬁnd that P is acyclic.
+A (Herbrand) interpretation I is a subset of BL. Those
+atoms A with A ∈ I are said to be true under I, those with
+A (cid:7)∈ I are said to be false under I. IL denotes the set of all
+interpretations. An interpretation I is a (Herbrand) model of
+a logic program P (in symbols: I |= P ) if I is a model for
+each clause in G(P ) in the usual sense.
+Example 3. For the program P from Example 1 we have
+M := {e(sn(0)) | n even} ∪ {o(sm(0)) | m odd} |= P .
+Given a logic program P , the single-step operator TP :
+IL → IL maps an interpretation I to the set of exactly those
+atoms A for which there is a clause A ← body ∈ G(P )
+such that the body is true under I. The operator TP captures
+the semantics of P as the Herbrand models of the latter are
+exactly the pre-ﬁxed points of the former, i.e. those interpre-
+tations I with TP (I) ⊆ I. For logic programming purposes it
+is usually preferable to consider ﬁxed points of TP , instead of
+pre-ﬁxed points, as the intended meaning of programs. These
+ﬁxed points are called supported models of the program [Apt
+et al., 1988]. In Example 1, the (obviously intended) model
+M is supported, while BL is a model but not supported.
+
+Logic programming is an established and mature paradigm
+for knowledge representation and reasoning (see e.g. [Lloyd,
+1988]) with recent applications in areas like rational agents or
+semantic web technologies (e.g. [Angele and Lausen, 2004]).
+
+2.2 Connectionist Systems
+
+A connectionist system is a network of simple computational
+units, which accumulate real numbers from their inputs and
+send a real number to their output. Each unit’s output is con-
+nected to other units’ inputs with a certain real-valued weight.
+Those units without incoming connections are called input
+units, those without outgoing ones are called output units.
+
+We will consider 3-layered feed-forward networks, i.e. net-
+works without cycles where the outputs of units in one layer
+are only connected to the inputs of units in the next layer. The
+ﬁrst and last layers contain the input and output units respec-
+tively, the intermediate layer is called the hidden layer.
+
+Each unit has an input function which uses the connections’
+function is ( (cid:2)w, (cid:2)x) (cid:11)→ (cid:2)(cid:3)n
+weights to merge its inputs into one single value, and an out-
+put function. An example for a so-called radial basis input
+i=1(xi − wi)2, where the xi are
+the inputs and the wi are the corresponding weights. Possible
+output functions are the sigmoidal function (x (cid:11)→ 1
+1+e−x , for
+the hidden layer) and the identity (x (cid:11)→ x, usually used in the
+output layer). If only one unit of a layer is allowed to output
+a value (cid:7)= 0, the layer implements a winner-take-all behavior.
+Connectionist systems are successfully used for the learn-
+ing of complex functions from raw data called training sam-
+ples. Desirable properties include robustness with respect to
+damage and noise; see e.g. [Rojas, 1996] for details.
+
+2.3 The Core Method
+In [H¨olldobler and Kalinke, 1994; Hitzler et al., 2004] a
+method was proposed to translate a propositional logic pro-
+gram P into a neural network, such that the network will set-
+tle down in a stable state corresponding to a model of the pro-
+gram. To achieve this goal, the single-step operator TP asso-
+ciated with P was implemented using a connectionist system.
+This general approach is nowadays called the Core Method
+[Bader and Hitzler, 2005].
+
+In [H¨olldobler et al., 1999], the idea was extended to ﬁrst-
+order logic programs: It was shown that the TP -operator of
+acyclic programs can be represented as a continuous function
+on the real numbers. Exploiting the universal approximation
+capabilities of 3-layered feed-forward networks, it was shown
+that those networks can approximate TP up to any given ac-
+curacy. However, no algorithms for the generation of the net-
+works from given programs were presented. This was ﬁnally
+done in [Bader et al., 2005] in a preliminary fashion.
+
+3 The FineBlend System
+In this section we will ﬁrst discuss a new embedding of in-
+terpretations into vectors of real numbers. This extends the
+approach presented in [H¨olldobler et al., 1999] by computing
+m-dimensional vectors instead of a single real number, thus
+allowing for a higher and scalable precision. Afterwards, we
+will show how to construct a connectionist system approxi-
+mating the TP -operator of a given program P up to a given
+accuracy ε. As mentioned above, in [Bader et al., 2005] ﬁrst
+algorithms were presented. However, the accuracy obtainable
+in practice was limited through the use of a single real num-
+ber for the embedding. The approach presented here allows
+for arbitrarily precise approximations. Additionally, we will
+present a novel training method, tailored for our speciﬁc set-
+ting. The system presented here is a ﬁne blend of techniques
+from the Supervised Growing Neural Gas (SGNG) [Fritzke,
+1998] and the approach presented in [Bader et al., 2005].
+
+3.1 Embedding
+Obviously, we need to link the space of interpretations and
+the space of real vectors in order to feed the former into a
+connectionist system. To this end, we will ﬁrst extend level
+mappings to a multi-dimensional setting, and then use them
+to represent interpretations as real vectors.
+Deﬁnition 4. An m-dimensional level mapping is a bijective
+function (cid:12) · (cid:12) : BL → (N
++,{1, . . . , m}). For A ∈ BL, if
+(cid:12)A(cid:12) = (l, d), then l and d are called level and dimension of
+A, respectively. Again, we deﬁne (cid:12)¬A(cid:12) := (cid:12)A(cid:12).
+Deﬁnition 5. Let b ≥ 3 and let A ∈ BL be an atom with
+(cid:12)A(cid:12) = (l, d). The m-dimensional embedding ι : BL →
+m and its extension ι : IL → R
+m are deﬁned as ι(A) :=
+(ι1(A), . . . , ιm(A)) where
+if j = d
+otherwise
+
+(cid:4)
+b−l
+0
+
+ιj(A) :=
+
+R
+
+and
+
+ι(I) :=
+
+ι(A).
+
+(cid:5)
+A∈I
+
+With Cm we denote the set of all embedded interpretations,
+i.e. Cm := {ι(I) | I ∈ IL} ⊂ R
+
+m.1
+
+1For b = 2, ι is not injective, as 0.0¯12 = 0.12. We use b = 4.
+
+IJCAI-07
+
+667
+
+y
+
+0.¯3
+
+x
+
+0.¯3
+
+ι(M )
+
+x
+
+0.¯3
+
+Figure 1: C1 (left) and C2 (right) for b = 4 and M from Ex. 6.
+
+y
+
+y
+
+;
+
+y
+
+;
+
+y
+
+;
+
+x
+
+x
+
+x
+
+x
+
+Figure 2: The ﬁrst steps while constructing the limit C2.
+
+Example 6. Using the 1-dimensional level mapping from
+Example 2, we obtain C1 as depicted in Figure 1 on the
+left. Using the 2-dimensional level mapping (cid:12)e(sn(0))(cid:12) :=
+(n + 1, 1) and (cid:12)o(sn(0))(cid:12) := (n + 1, 2), we obtain C2 as
+depicted on the right and ι(M) = (0.1010b, 0.0101b) ≈
+(0.2666667, 0.0666667) for the embedding of M.
+
+For readers familiar with fractal geometry, we note that C1
+is the classical Cantor set and C2 the 2-dimensional variant
+of it [Barnsley, 1993]. Obviously, ι is injective for a bijec-
+tive level mapping and it is bijective on Cm. Using the m-
+dimensional embedding, the TP -operator can be embedded
+into the real vectors to obtain a real-valued function fP .
+(cid:7)(cid:7)
+Deﬁnition 7. The m-dimensional embedding of TP , namely
+fP : Cm → Cm, is deﬁned as fP ((cid:2)x) := ι
+ι−1((cid:2)x)
+
+TP
+
+(cid:6)
+
+(cid:6)
+
+.
+
+The m-dimensional embedding of TP is preferable to the
+one introduced in [H¨olldobler et al., 1999] and used in [Bader
+et al., 2005], because it allows for scalable approximation
+precision on real computers. Otherwise, only 16 atoms could
+be represented with 32 bits.
+
+0, C2
+
+1, C2
+
+2 and C2
+
+Now we introduce hyper-squares which will play an im-
+portant role in the sequel. Without going into detail, Figure 2
+shows the ﬁrst 4 steps in the construction of C2. The big
+square is ﬁrst replaced by 2m shrunken copies of itself, the
+result is again replaced by 2m smaller copies and so on. The
+limit of this iterative replacement is C2. We will use Cm
+to
+i
+denote the result of the i-th replacement, i.e. Figure 2 de-
+picts C2
+3. Again, for readers with background
+in fractal geometry we note, that these are the ﬁrst 4 appli-
+cations of an iterated function system [Barnsley, 1993]. The
+squares occurring in the intermediate results of the construc-
+tions are referred to as hyper-squares in the sequel. Hl de-
+notes a hyper-square of level l, i.e. one of the squares occur-
+ring in Cm
+. An approximation of TP up to some level l will
+l
+yield a function constant on all hyper-squares of level l.
+Deﬁnition 8. The largest exclusive hyper-square of a vector
+0 and a set of vectors V = {(cid:2)v1, . . . , (cid:2)vk} ⊆ Cm
+(cid:2)u ∈ Cm
+0 , de-
+noted by Hex((cid:2)u, V ), either does not exist or is the hyper-
+square H of least level for which (cid:2)u ∈ H and V ∩ H = ∅. The
+smallest inclusive hyper-square of a non-empty set of vectors
+U = {(cid:2)u1, . . . , (cid:2)uk} ⊆ Cm
+0 , denoted by Hin(U), is the hyper-
+square H of greatest level for which U ⊆ H.
+
+fP (x)
+
+0.¯3
+
+0.25
+
+fQ(x)
+
+0.¯3
+
+0.25
+
+x
+
+0.¯3
+
+x
+
+0.¯3
+
+Figure 3: fP for the program from Example 1 and the embed-
+ding from Example 2 is shown on the left. A piecewise con-
+stant approximation fQ (level l = 2) is shown on the right.
+
+3.2 Construction
+In this section, we will show how to construct a connection-
+ist network N for a given covered program P and a given
+accuracy ε, such that the dimension-wise maximum distance
+d(fP , fN ) := maxx,j(|πj(fP (x)) − πj(fN (x))|) between
+the embedded TP -operator fP and the function fN computed
+by N is at most ε. We will use a 3-layered network with a
+winner-take-all hidden layer.
+
+(cid:9)
+(cid:8)
+−ln((b−1)ε)
+, we obtain a level l such that when-
+ever two interpretations I and J agree on all atoms up to level
+l in dimension j, we ﬁnd that |ιj(I) − ιj(J)| ≤ ε. For a cov-
+ered program P , we can construct a ﬁnite subset Q ⊆ G(P )
+such that for all I ∈ IL, TP (I) and TQ(I) agree on all atoms
+up to level l in all dimensions, hence d(fP , fQ) ≤ ε. Fur-
+thermore, we ﬁnd that the embedding fQ is constant on all
+hyper-squares of level l [Bader et al., 2005], i.e. we obtain a
+piecewise constant function fQ such that d(fP , fQ) ≤ ε.
+
+With l =
+
+ln(b)
+
+We can now construct the feed-forward network as follows:
+For each hyper-square H of level l, we add a unit to the hid-
+den layer, such that the input weights encode the position of
+the center of H. The unit shall output 1 if it is selected as
+winner, and 0 otherwise. The weight associated with the out-
+put connections of this unit is the value of fQ on that hyper-
+square. Thus, we obtain a connectionist network approximat-
+ing the semantic operator TP up to the given accuracy ε. To
+determine the winner for a given input, we designed a locally
+receptive activation function such that its outcome is smallest
+for the closest “responsible” unit. Responsible units here are
+deﬁned as follows: Given some hyper-square H, units which
+are positioned in H but not in any of its sub-hyper-squares are
+called default units of H, and they are responsible for inputs
+from H except for inputs from sub-hyper-squares containing
+other units. If H does not have any default units, the units po-
+sitioned in its sub-hyper-squares are responsible for all inputs
+from H as well. When all units’ activations have been (lo-
+cally) computed, the unit with the smallest value is selected
+as the winner.
+
+The following example is taken from [Witzel, 2006] and
+used to convey the underlying intuitions. All constructions
+work for m-dimensional embeddings in general, but for clar-
+ity the graphs here result from a 1-dimensional level mapping.
+Example 9. Using the program from Example 1 and the 1-
+dimensional level mapping from Example 2 we obtain fP and
+fQ for level l = 2 as depicted in Figure 3. The corresponding
+network consists of 1 input, 4 hidden and 1 output units.
+
+IJCAI-07
+
+668
+
+3.3 Training
+In this section, we will describe the adaptation of the sys-
+tem during training, i.e. how the weights and the structure
+of a network are changed, given training samples with input
+and desired output, in such a way that the distribution under-
+lying the training data is better represented by the network.
+This process can be used to reﬁne a network resulting from
+an incorrect program, or to train a network from scratch. The
+training samples in our case come from the original (non ap-
+proximated) program, but might also be observed in the real
+world or given by experts. First we discuss the adaptation of
+the weights and then the adaptation of the structure by adding
+and removing units. Some of the methods used here are adap-
+tations of ideas described in [Fritzke, 1998]. For a more de-
+tailed discussion of the training algorithms and modiﬁcations
+we refer to [Witzel, 2006].
+
+Adapting the weights Let (cid:2)x be the input, (cid:2)y be the desired
+output and u be the winner-unit from the hidden layer. To
+adapt the system, we change the output weights for u towards
+the desired output, i.e. (cid:2)wout ← η · (cid:2)y + (1 − η) · (cid:2)wout. Fur-
+thermore, we move u towards the center (cid:2)c of Hin({(cid:2)x, u}),
+i.e. (cid:2)win ← μ · (cid:2)c + (1 − μ) · (cid:2)win, where η and μ are prede-
+ﬁned learning rates. Note that the winner unit is not moved
+towards the input but towards the center of the smallest hyper-
+square including the unit and the input. The intention is that
+units should be positioned in the center of the hyper-square
+for which they are responsible.
+
+Adding new units The adjustment described above enables
+a certain kind of expansion of the network by allowing units
+to move to positions where they are responsible for larger ar-
+eas of the input space. A reﬁnement now should take care of
+densifying the network in areas where a great error is caused.
+Therefore, when a unit u is selected for reﬁnement,2 we try to
+ﬁgure out the area it is responsible for and a suitable position
+to add a new unit.
+
+If u occupies a hyper-square on its own, then the largest
+such hyper-square is considered to be u’s responsibility area.
+Otherwise, we take the smallest hyper-square containing u.
+Now u is moved to the center of this area, and some informa-
+tion gathered by u is used to determine a sub-hyper-square
+into whose center a new unit is placed, and to set up the out-
+put weights for the new unit.
+
+Removing inutile units Each unit maintains a utility value,
+initially set to 1, which decreases over time and increases only
+if the unit contributes to the network’s output.3
+If a unit’s
+utility drops below a threshold, the unit will be removed.
+3.4 Robustness
+The described system is able to handle noisy data and to cope
+with damage. Indeed, the effects of damage to the system are
+
+2The error for a given sample is ascribed to the winner unit. After
+a predeﬁned number of training cycles, the unit with the greatest
+accumulated error is reﬁned, if the error exceeds a given threshold.
+3The contribution of a unit is the expected increase of error if the
+
+unit would be removed [Fritzke, 1998].
+
+ 100
+
+ 10
+
+r
+o
+r
+r
+e
+
+ 1
+
+ 0.1
+
+ 0.01
+
+ 0
+
+ 80
+
+ 70
+
+ 60
+
+ 50
+
+ 40
+
+ 30
+
+ 20
+
+ 10
+
+s
+t
+i
+
+n
+u
+#
+
+ 0
+ 10000
+
+#units (FineBlend 1)
+error (FineBlend 1)
+#units (FineBlend 2)
+error (FineBlend 2)
+
+ 2000
+
+ 4000
+
+ 6000
+
+ 8000
+
+#examples
+
+Figure 4: FineBlend 1 versus FineBlend 2.
+
+quite obvious: If a hidden unit u fails, the receptive area is
+taken over by other units, thus only the speciﬁc results learned
+for u’s receptive area are lost. While a corruption of the input
+weights may cause no changes at all in the network function,
+generally it can alter the unit’s receptive area. If the output
+weights are corrupted, only certain inputs are effected. If the
+damage to the system occurs during training, it will be re-
+paired very quickly as indicated by the experiment reported
+in Section 4.3. Noise is generally handled gracefully, because
+wrong or unnecessary adjustments or reﬁnements can be un-
+done in the further training process.
+
+4 Evaluation
+In this section we will discuss some preliminary experiments.
+In the diagrams, we use a logarithmic scale for the error axis,
+and the error values are relative to ε, i.e. a value of 1 desig-
+nates an absolute error of ε. For incorrect network initializa-
+tion, we used the following wrong program:
+
+e(s(X)) ← ¬o(X).
+o(X) ← e(X).
+
+Training samples were created randomly using the semantic
+operator of the program from Example 1.
+
+4.1 Variants of Fine Blend
+To illustrate the effects of varying the parameters, we use two
+setups: One with softer utility criteria (FineBlend 1) and one
+with stricter ones (FineBlend 2). Figure 4 shows that, start-
+ing from the incorrect initialization, the former decreases the
+initial error, paying with an increasing number of units, while
+the latter signiﬁcantly decreases the number of units, paying
+with an increasing error. Hence, the performance of the net-
+work critically depends on the choice of the parameters. The
+optimal parameters obviously depend on the concrete setting,
+e.g. the kind and amount of noise present in the training data,
+and methods for ﬁnding them will be investigated in the fu-
+ture. For our further experiments we will use the FineBlend 1
+parameters, which resulted from a mixture of intuition and
+(non-exhaustive) comparative simulations.
+
+IJCAI-07
+
+669
+
+ 100
+
+ 10
+
+r
+o
+r
+r
+e
+
+ 1
+
+ 0.1
+
+ 0.01
+
+ 0
+
+ 140
+
+ 120
+
+ 100
+
+ 80
+
+ 60
+
+ 40
+
+ 20
+
+ 0
+ 14000
+
+ 100
+
+ 10
+
+s
+t
+i
+
+n
+u
+#
+
+r
+o
+r
+r
+e
+
+ 1
+
+ 0.1
+
+ 0.01
+
+ 0
+
+#units (FineBlend 1)
+error (FineBlend 1)
+#units (SGNG)
+error (SGNG)
+
+ 2000
+
+ 4000
+
+ 6000
+
+ 8000
+
+ 10000
+
+ 12000
+
+#examples
+
+ 80
+
+ 70
+
+ 60
+
+ 50
+
+ 40
+
+ 30
+
+ 20
+
+ 10
+
+s
+t
+i
+
+n
+u
+#
+
+ 2000
+
+ 4000
+
+ 6000
+
+ 8000
+
+ 10000
+
+ 12000
+
+ 14000
+
+#examples
+
+#units (FineBlend 1)
+error (FineBlend 1)
+
+ 0
+ 16000
+
+Figure 5: FineBlend 1 versus SGNG.
+
+Figure 6: The effects of unit failure.
+
+4.2 Fine Blend versus SGNG
+Figure 5 compares FineBlend 1 with SGNG [Fritzke, 1998].
+Both start off similarly, but soon SGNG fails to improve fur-
+ther. The increasing number of units is partly due to the fact
+that no error threshold is used to inhibit reﬁnement, but this
+should not be the cause for the constantly high error level.
+The choice of SGNG parameters is rather subjective, and even
+though some testing was done to ﬁnd them, they might be far
+from optimal. Finding the optimal parameters for SGNG is
+beyond the scope of this paper; however, it should be clear
+that it is not perfectly suited for our speciﬁc application. This
+comparison to an established generic architecture shows that
+our specialized architecture actually works, i.e. it is able to
+learn, and that it achieves the goal of specialization, i.e. it
+outperforms the generic architecture in our speciﬁc setting.
+
+4.3 Unit Failure
+Figure 6 shows the effects of unit failure. A FineBlend 1
+network is (correctly) initialized and reﬁned through train-
+ing with 5000 samples, then one third of its hidden units are
+removed randomly, and then training is continued as if noth-
+ing had happened. The network proves to handle the damage
+gracefully and to recover quickly. The relative error exceeds
+1 only slightly and drops back very soon; the number of units
+continues to increase to the previous level, recreating the re-
+dundancy necessary for robustness.
+
+Iterating Random Inputs
+
+4.4
+One of the original aims of the Core Method is to obtain con-
+nectionist systems for logic programs which, when iteratively
+feeding their output back as input, settle to a stable state cor-
+responding to an approximation of a ﬁxed point of the pro-
+gram’s single-step operator. In our running example, a unique
+ﬁxed point is known to exist. To check whether our system
+reﬂects this, we proceed as follows:
+
+1. Train a network from scratch until the relative error
+caused by the network is below 1, i.e. network outputs
+are in the ε-neighborhood of the desired output.
+
+2. Transform the obtained network into a recurrent one by
+
+connecting the outputs to the corresponding inputs.
+
+y
+
+0.¯3
+
+M
+
+x
+
+0.¯3
+
+Figure 7:
+Iterating random inputs. The two dimensions
+of the input vectors are plotted against each other. The ε-
+neighborhood of the ﬁxed point M is shown as a small box.
+3. Choose a random input vector ∈ Cm
+
+0 (which is not nec-
+essarily a valid embedded interpretation) and use it as
+initial input to the network.
+
+4. Iterate the network until it reaches a stable state, i.e. until
+
+the outputs stay inside an ε-neighborhood.
+
+For our example program, the unique ﬁxed point of TP is
+M as given in Example 3. Figure 7 shows the input space
+and the ε-neighborhood of M, along with all intermediate
+results of the iteration for 5 random initial inputs. The ex-
+ample computations converge, because the underlying pro-
+gram is acyclic [Witzel, 2006; H¨olldobler et al., 1999]. Af-
+ter at most 6 steps, the network is stable in all cases, in fact
+it is completely stable in the sense that all outputs stay ex-
+actly the same and not only within an ε-neighborhood. This
+corresponds roughly to the number of applications of our
+program’s TP operator required to ﬁx the signiﬁcant atoms,
+which conﬁrms that the training method really implements
+our intention of learning TP . The fact that even a network ob-
+tained through training from scratch converges in this sense
+further underlines the efﬁcacy of our training method.
+
+5 Conclusions and Further Work
+We have reported on new results for overcoming the propo-
+sitional ﬁxation of current neural-symbolic systems: To the
+best of our knowledge this is the ﬁrst constructive approach
+of approximating the semantic operators of ﬁrst-order logic
+programs as well as their least ﬁxed points in a fully connec-
+tionist setting. We also showed how the semantic operators
+
+IJCAI-07
+
+670
+
+can be learned from given training examples using a mod-
+iﬁed neural gas method which exploits domain knowledge.
+The resulting system degrades gracefully under damage and
+noise, and recovers using training.
+
+Whereas we deﬁne the embedding ι externally, in [Gust
+and K¨uhnberger, 2005] such embeddings are learned using
+ideas from category theory. In [Seda and Lane, 2005], con-
+nectionist systems for a covered program P are constructed
+by generating ﬁnite subsets of G(P ) and employing the con-
+structions presented in [H¨olldobler and Kalinke, 1994].
+
+Besides a thorough comparison of these approaches much
+remains to be done. The presented methods and procedures
+involve parameters, which are set manually; we would like
+to ﬁnd (preferably optimal) parameters automatically. We
+would like to extract ﬁrst-order logic programs after train-
+ing, but all the extraction methods that we are aware of are
+propositional. This is a prerequisite not only to compare our
+method of learning semantic operators of logic programs with
+that of inductive logic programming, but also to complete
+the neural-symbolic learning cycle [Bader and Hitzler, 2005].
+The investigation of realistic applications, e.g. to the learning
+of ontologies and other types of knowledge bases [Hitzler et
+al., 2005] will follow.
+
+Acknowledgments
+We would like to thank three anonymous referees for their
+valuable comments on the preliminary version of this pa-
+per. Sebastian Bader is supported by the GK334 of the Ger-
+man Research Foundation (DFG). Pascal Hitzler is supported
+by the German Federal Ministry of Education and Research
+(BMBF) under the SmartWeb project (grant 01 IMD01 B),
+and by the X-Media project (www.x-media-project.org) spon-
+sored by the European Commission as part of the Information
+Society Technologies (IST) programme under EC grant num-
+ber IST-FP6-026978. Andreas Witzel is supported by a Marie
+Curie Early Stage Research fellowship in the project GloRi-
+Class (MEST-CT-2005-020841).
+
+References
+[Angele and Lausen, 2004] J. Angele and G. Lausen. On-
+In S. Staab and R. Studer, editors,
+
+tologies in F-Logic.
+Handbook on Ontologies, pages 29–50. Springer, 2004.
+
+[Apt et al., 1988] K. R. Apt, H. A. Blair, and A. Walker. To-
+wards a theory of declarative knowledge. In J. Minker, ed-
+itor, Foundations of Deductive Databases and Logic Pro-
+gramming, pages 89–148. Morgan Kaufmann, 1988.
+
+[Bader and Hitzler, 2005] S. Bader and P. Hitzler. Dimen-
+sions of neural-symbolic integration — a structured sur-
+vey. In S. Artemov et al., editor, We Will Show Them: Es-
+says in Honour of Dov Gabbay, volume 1, pages 167–194.
+King’s College Publications, JUL 2005.
+
+[Bader et al., 2005] S. Bader, P. Hitzler, and A. Witzel. In-
+tegrating ﬁrst-order logic programs and connectionist sys-
+tems — a constructive approach. In A. S. d’Avila Garcez et
+al., editor, Proceedings of the IJCAI-05 Workshop on
+Neural-Symbolic Learning and Reasoning, NeSy’05, Ed-
+inburgh, UK, 2005.
+
+[Barnsley, 1993] M. Barnsley. Fractals Everywhere. Aca-
+
+demic Press, San Diego, CA, USA, 1993.
+
+[d’Avila Garcez et al., 2002] A. S. d’Avila Garcez, K. B.
+Broda, and D. M. Gabbay. Neural-Symbolic Learning Sys-
+tems — Foundations and Applications. Perspectives in
+Neural Computing. Springer, Berlin, 2002.
+
+[Fodor and Pylyshyn, 1988] J. A. Fodor and Z. W. Pylyshyn.
+Connectionism and cognitive architecture: A critical anal-
+ysis. In Pinker and Mehler, editors, Connections and Sym-
+bols, pages 3–71. MIT Press, 1988.
+
+[Fritzke, 1998] B. Fritzke. Vektorbasierte Neuronale Netze.
+
+Habilitation, Technische Universit¨at Dresden, 1998.
+
+[Gust and K¨uhnberger, 2005] H. Gust and K.-U. K¨uhnber-
+ger. Learning symbolic inferences with neural networks.
+In B. Bara, L. Barsalou, and M. Bucciarelli, editors,
+CogSci 2005: XXVII Annual Conference of the Cognitive
+Science Society, pages 875–880, 2005.
+
+[Hitzler et al., 2004] P. Hitzler, S. H¨olldobler, and A. K.
+Seda. Logic programs and connectionist networks. Jour-
+nal of Applied Logic, 3(2):245–272, 2004.
+
+[Hitzler et al., 2005] P. Hitzler, S. Bader, and A. d’Avila
+Garcez. Ontology leaning as a use case for neural-sym-
+bolic integration. In A. Garcez et al., editor, Proceedings
+of the IJCAI-05 Workshop on Neural-Symbolic Learning
+and Reasoning, NeSy, 2005.
+
+[H¨olldobler and Kalinke, 1994] S. H¨olldobler and Y. Kalin-
+ke. Towards a massively parallel computational model for
+logic programming. In Proceedings ECAI94 Workshop on
+Combining Symbolic and Connectionist Processing, pages
+68–77. ECCAI, 1994.
+
+[H¨olldobler et al., 1999] S. H¨olldobler, Y. Kalinke, and H.-P.
+St¨orr. Approximating the semantics of logic programs by
+recurrent neural networks. Applied Intelligence, 11:45–58,
+1999.
+
+[Lloyd, 1988] J. W. Lloyd. Foundations of Logic Program-
+
+ming. Springer, Berlin, 1988.
+
+[McCarthy, 1988] J. McCarthy. Epistemological challenges
+Behavioural and Brain Sciences,
+
+for connectionism.
+11:44, 1988.
+
+[Rojas, 1996] Raul Rojas. Neural Networks. Springer, 1996.
+[Seda and Lane, 2005] Anthony K. Seda and Maire Lane.
+On approximation in the integration of connectionist and
+logic-based systems. In Proceedings of the Third Interna-
+tional Conference on Information (Information’04), pages
+297–300, Tokyo, November 2005. International Informa-
+tion Institute.
+
+[Smolensky, 1987] P. Smolensky. On variable binding and
+the representation of symbolic structures in connectionist
+systems. Technical Report CU-CS-355-87, Department of
+Computer Science & Institute of Cognitive Science, Uni-
+versity of Colorado, Boulder, CO 80309-0430, 1987.
+
+[Witzel, 2006] A. Witzel. Neural-symbolic integration –
+constructive approaches. Master’s thesis, Department of
+Computer Science, Technische Universit¨at Dresden, Dres-
+den, Germany, 2006.
+
+IJCAI-07
+
+671
+
+

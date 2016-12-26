@@ -1,0 +1,1054 @@
+Training Conditional Random Fields using Virtual Evidence Boosting
+
+Lin Liao
+
+Tanzeem Choudhury†
+
+University of Washington
+
+Department of Computer Science & Engineering
+
+Seattle, WA 98195
+
+Dieter Fox
+
+Henry Kautz
+
+† Intel Research
+1100 NE 45th St.
+Seattle, WA 98105
+
+Abstract
+
+While conditional random ﬁelds (CRFs) have been
+applied successfully in a variety of domains, their
+training remains a challenging task. In this paper,
+we introduce a novel training method for CRFs,
+called virtual evidence boosting, which simulta-
+neously performs feature selection and parameter
+estimation. To achieve this, we extend standard
+boosting to handle virtual evidence, where an ob-
+servation can be speciﬁed as a distribution rather
+than a single number. This extension allows us to
+develop a uniﬁed framework for learning both local
+and compatibility features in CRFs. In experiments
+on synthetic data as well as real activity classiﬁ-
+cation problems, our new training algorithm out-
+performs other training approaches including max-
+imum likelihood, maximum pseudo-likelihood, and
+the most recent boosted random ﬁelds.
+
+Introduction
+
+1
+Conditional random ﬁelds (CRFs) are undirected graphical
+models that were developed for labeling relational data [Laf-
+ferty et al., 2001]. By directly modeling the conditional
+distribution over hidden states given the observations, CRFs
+make no assumptions on the dependency structure between
+observations. CRFs are thus especially suitable for classiﬁca-
+tion tasks with complex and overlapped observations. How-
+ever, training CRFs with very large numbers of features, espe-
+cially continuous features, is still very challenging. Standard
+training algorithms based on maximum likelihood (ML) re-
+quire running inference at each iteration of the optimization,
+which can be very expensive. Moreover, since exact inference
+can easily become intractable in large and dense networks,
+people often have to resort to approximate inference tech-
+niques such as loopy belief propagation and Markov Chain
+Monte Carlo. As a consequence, the ML learning procedure
+could converge to suboptimal results or even diverge.
+
+An alternative is to maximize the pseudo-likelihood of the
+training data (MPL) [Besag, 1975]. The essential idea of
+MPL is to convert a CRF into a set of independent patches;
+each patch consists of a hidden node and the true values of its
+direct neighbors. By applying ML on this simpliﬁed model,
+MPL is usually very efﬁcient and has been successful in sev-
+
+eral domains. However, no general guidance has been given
+on when MPL can be safely used, and indeed MPL has been
+observed to over-estimate the dependency parameters in some
+experiments [Geyer and Thompson, 1992].
+
+In addition, neither ML nor MPL performs feature selec-
+tion explicitly, and neither of them is able to adequately han-
+dle continuous observations. These limitations make them
+unsuitable for some tasks, such as activity recognition based
+on real sensor data and identifying the set of features that
+are most useful for classiﬁcation. Alternatively, boosting has
+been successfully used for feature selection in the context of
+classiﬁcation problems [Viola and Jones, 2002]. However, its
+application to relational data remains an unsolved problem
+since it assumes the independence of hidden labels.
+
+In this paper, we show how to seamlessly integrate boost-
+ing and CRF training, thereby combining the capabilities of
+both paradigms. The integration is achieved by cutting a
+CRF into individual patches, as done in MPL, and using these
+patches as training instances for boosting. The key difference
+to MPL, however, is that in our framework the neighbor labels
+are not treated as observed, but as virtual evidences or beliefs.
+Therefore, our approach can be seen as a “soft” version of
+MPL, and is able to avoid over-estimating the neighborhood
+dependencies, as often happens in MPL.
+
+This paper has three main contributions. First, we extend
+the standard boosting algorithm to handle input features that
+are either virtual evidences in the form of likelihood values
+or deterministic quantities. Second, based on the extended
+boosting algorithm, we present a general approach to training
+CRFs. This approach is able to
+• perform feature selection and parameter estimation in a
+• select compatibility features and thus learn dependency
+• handle both discrete and continuous observations.
+
+structures in the relational data, and
+
+uniﬁed and efﬁcient manner,
+
+Third, we perform experimental validation of our algorithm
+on real world activity classiﬁcation tasks as well as synthetic
+data using CRFs with different degrees of complexity.
+In
+the comparison, our approach consistently outperforms other
+training techniques.
+
+The rest of this paper is organized as follows. We discuss
+related work in the next section.
+In Section 3, we extend
+boosting with virtual evidence. Then, in Section 4, we apply
+
+IJCAI-07
+
+2530
+
+this extension to training CRFs. Finally, we show experimen-
+tal results and conclude.
+
+2 Related Work
+Several techniques have been presented that perform feature
+selection during CRF training.
+
+For discrete features, McCallum [2003] suggested an ef-
+ﬁcient method of feature induction by iteratively increasing
+conditional log-likelihood. Dietterich et al. [2004] applied
+gradient tree boosting to select features for CRFs; their al-
+gorithm combines boosting with parameter estimation for 1D
+linear-chain models.
+The work closest
+
+to ours is boosted random ﬁelds
+(BRFs) [Torralba et al., 2004], developed speciﬁcally for vi-
+sion tasks in which graphs are often very densely connected.
+Both BRFs and our approach combine boosting and belief
+propagation, and both can select compatibility dependencies
+as well as local features. However, there are a few key differ-
+ences. First, for learning compatibility dependencies, BRFs
+use linear combinations of beliefs as weak learners instead of
+combinations of CRF features. So their models are not com-
+patible with standard inference techniques. Second, BRFs as-
+sume densely-connected graphs with weak pairwise connec-
+tions. As we will show in our experiments, when the depen-
+dencies are strong, BRFs could perform poorly. Third, since
+BRFs formulate the inductions of local and compatibility fea-
+tures differently, they have to specify the number of each type
+of features separately. In contrast, our approach treats both
+types of features in a consistent manner and thus the algo-
+rithm can determine which type is better at a given iteration.
+In our experiments, our algorithm automatically picks reli-
+able local features at the beginning and starts selecting com-
+patibility features after accumulating enough local evidence.
+
+3 Boosting with Virtual Evidence
+Boosting is a general approach for supervised learning [Fre-
+und and Schapire, 1997]. Given the training data (x1, y1),
+. . ., (xN , yN ), where xi is a feature vector and yi is the la-
+bel, boosting works by sequentially learning a set of weak
+classiﬁers and combining them for ﬁnal decisions. While
+traditional boosting algorithms assume feature values be de-
+terministic, in this section we extend them with virtual ev-
+idence [Pearl, 1988], i.e., a feature could be a distribution
+over its domain rather than a single, observed value. Specif-
+ically, we generalize the LogitBoost algorithm [Friedman et
+al., 2000], which directly handles probabilities and is closely
+related to random ﬁeld models. For simplicity, we will ex-
+plain LogitBoost and our extension only for the binary classi-
+ﬁcation case, i.e., yi ∈ {0, 1}, but both can be easily extended
+to multi-class problems [Friedman et al., 2000].
+3.1 LogitBoost Algorithm
+LogitBoost minimizes the negative log-likelihood
+
+−log p(y1, . . . , yN | x1, . . . , xN ) = − N(cid:2)
+
+log p(yi | xi) , (1)
+
+i=1
+
+N(cid:2)
+
+i=1
+
+(cid:3)
+
+computed as
+
+p(yi | xi) =
+
+eF (xi)
+e−F (xi)
+
+eF (xi)+e−F (xi)
+eF (xi)+e−F (xi)
+
+if yi = 1;
+if yi = 0.
+
+(2)
+
+(cid:4)M
+
+where eF (xi) and e−F (xi) represent the potentials for yi = 1
+m=1 fm(xi) refers to the
+and 0, respectively, and F =
+sum of feature functions or ensemble of weak learners. Log-
+itBoost minimizes the objective function (1) with respect to F
+in a stepwise way. Speciﬁcally, given the current ensemble F ,
+LogitBoost selects the next weak learner fm(x) using a New-
+ton step and adds fm(x) to the ensemble. It has been shown
+that computing the Newton step is equivalent to solving the
+following weighted least-square-error (WLSE) problem:
+
+fm(x) = argmin
+
+f
+
+wi (f(xi) − zi)2 ,
+
+(3)
+
+p(yi|xi) are
+
+where wi = p(yi | xi)(1 − p(yi | xi)) and zi = yi−0.5
+the weight and working response for sample i.
+3.2 Extension with Virtual Evidence
+In this section we extend LogitBoost to handle virtual ev-
+idences or beliefs. That is, for each feature in the fea-
+ture vector xi,
+the input to boosting could be a proba-
+bilistic distribution over that feature’s domain, as opposed
+to a single, observed value 1. We denote a distribution
+over the cross-product of feature values as ve(xi) with do-
+main {1, . . . , Xi}. We again aim to minimize the negative
+i=1 log p(yi|ve(xi)), where p(yi|ve(xi))
+represents the posterior probability of a true label conditioned
+on its virtual evidence. We can compute this term as follows:
+
+PXi
+
+xi=1 ve(xi)eF (xi)
+
+(4)
+
+xi=1 ve(xi)e−F (xi)
+
+xi=1 ve(xi)(eF (xi)+e−F (xi)) if yi = 1;
+PXi
+PXi
+xi=1 ve(xi)(eF (xi)+e−F (xi)) if yi = 0.
+PXi
+
+(cid:4)Xi
+xi=1 ve(xi)e±F (xi) computes the expected poten-
+Here
+tials, which replace the potentials in (2). It is also helpful
+to think of ve(xi) as a message in random ﬁeld models; thus
+(4) is consistent with the belief update in belief propagation.
+To determine the next weak learner fm(x), we modify
+the LogitBoost error criterion (3) by taking the expectation
+w.r.t. the virtual evidence:
+
+log-likelihood, −(cid:4)N
+⎧⎪⎪⎨
+⎪⎪⎩
+
+p(yi|ve(xi)) =
+
+N(cid:2)
+N(cid:2)
+
+i=1
+
+i=1
+
+xi=1
+
+fm(x) = argmin
+
+f
+
+= argmin
+
+f
+
+wiE (f(xi) − zi)2
+Xi(cid:2)
+
+wi ve(xi) (f(xi) − zi)2 , (5)
+
+where wi and zi can be computed as in LogitBoost, using
+p(yi|ve(xi)) obtained from (4).
+The algorithm is described in Alg. 1, which constructs F
+in M iterations. Within each iteration, the algorithm ﬁrst for-
+mulates the WLSE problem (line 2 to 6), and then solves it to
+
+where the right term follows from the independence between
+labels. Using a logistic regression model, p(yi | xi) can be
+
+1In this paper virtual evidence is always a discrete distribution,
+
+which is enough for training CRFs with discrete hidden states.
+
+IJCAI-07
+
+2531
+
+1 ≤ i ≤ N, and F = 0
+
+inputs : training data (ve(xi), yi), with yi ∈ {0, 1},
+output: F that approximately minimizes Eq. (1)
+for m = 1, 2,··· , M do
+for i = 1, 2,··· , N do
+Compute likelihood p(yi|ve(xi)) using Eq. (4);
+Compute weight wi = p(yi|ve(xi))(1 − p(yi|ve(xi));
+Compute working response zi = yi−0.5
+end
+Obtain “best” fm(x) by solving Eq. (5);
+Update F (x) = F (x) + fm(x) ;
+end
+Algorithm 1: Extending LogitBoost with virtual evidence
+
+p(yi|ve(xi)) ;
+
+1
+2
+3
+4
+
+5
+6
+7
+8
+9
+
+obtain the next weak learner (line 7). When ve(xi) is a deter-
+ministic value, Eq. (4) becomes (2) and Eq. (5) becomes (3);
+thus we get exactly the original LogitBoost algorithm. So our
+extension is a generalization of the original LogitBoost and
+is able to handle deterministic evidence as well.
+It can be
+shown to have the same property as standard LogitBoost, i.e.,
+it minimizes the objective function using Newton steps,
+
+4 Virtual Evidence Boosting for Training
+
+Conditional Random Fields
+
+The boosting algorithm in previous section assumes indepen-
+dence between training examples. How can they be applied
+to CRFs in which the labels are dependent? Similar to the
+MPL algorithm, we ﬁrst convert a CRF into a set of individual
+patches; each patch consists of a hidden node, its direct neigh-
+bors, and the observations. The key difference with MPL
+is that, instead of using the true labels of neighbors, we use
+the messages from the neighbors as virtual evidences. Then
+we apply extended boosting to these independent patches for
+feature selection and parameter estimation. Based on these
+ideas, we develop a new training algorithm for CRFs, called
+virtual evidence boosting (VEB). VEB is a very general tech-
+nique: It can handle both continuous and discrete observa-
+tions, and can be used in CRFs with arbitrary structures. We
+will explain VEB in the context of binary classiﬁcation; the
+algorithm can be readily extended to multi-class labeling, and
+we have done that for our experiments.
+4.1 The VEB Algorithm
+The VEB algorithm is described in Alg. 2. The crucial dif-
+ference between the VEB and extended LogitBoost algorithm
+lies in the way virtual evidences are handled. The VEB con-
+siders two types of evidences for a node yi. The ﬁrst type is
+the hard evidence given as input to the algorithm, which cor-
+responds to the observations xi in the training data. The sec-
+ond type is the soft evidence, corresponding to the messages
+from neighboring nodes n(yi); these messages are obtained
+by running belief propagation with the current ensemble (i.e.,
+linear combination of feature functions) F . Our extension to
+boosting allows us to treat both types as virtual evidence, de-
+noted as ve(xi, n(yi)), so that we can learn the CRF’s local
+features and compatibility features in a uniﬁed framework.
+
+inputs : structure of CRF and training data (xi, yi), with
+
+yi ∈ {0, 1}, 1 ≤ i ≤ N, and F = 0
+
+output: Learned F
+for m = 1, 2,··· , M do
+Run BP using F to get virtual evidences ve(xi, n(yi));
+for i = 1, 2,··· , N do
+Compute likelihood p(yi|ve(xi, n(yi))) using Eq. (8);
+Compute weight
+wi = p(yi|ve(xi, n(yi)))(1 − p(yi|ve(xi, n(yi)));
+Compute working response zi =
+p(yi|ve(xi,n(yi))) ;
+end
+Obtain “best” fm by solving Eq. (5);
+Update F = F + fm ;
+end
+
+yi−0.5
+
+1
+2
+3
+4
+5
+
+6
+7
+8
+9
+10
+
+Algorithm 2: Training CRFs using VEB
+
+Note that while virtual evidences are provided as inputs
+to Alg. 1, VEB must update ve(xi, n(yi)) at each iteration,
+because the messages from n(yi) keep changing as VEB up-
+dates F . Speciﬁcally, to compute the virtual evidence of yi
+from a neighbor yk, vei(yk), we distinguish messages before
+and after multiplying the compatibility potentials eF (yk,yi).
+We denote these messages as λk→i(yk) and μk→i(yi), re-
+spectively. These messages are computed iteratively during
+belief propagation [Pearl, 1988]:
+λk→i(yk) = αeF (yk,xk)
+
+μj→k(yk)
+
+(cid:9)
+
+(6)
+
+j∈n(yk),j(cid:4)=i
+
+(cid:2)
+
+yk
+
+and
+
+μk→i(yi) = β
+
+eF (yk,yi)λk→i(yk),
+
+(7)
+
+where α and β are used for normalization. As can be seen,
+λ–messages contain information about the distribution of the
+sending node yk, and μ–messages contain information about
+which values the recipient node yi should prefer. While the
+μ–messages correspond exactly to the messages sent in reg-
+ular belief propagation, we use each λk→i(yk) message as
+virtual evidence vei(yk). At the end of belief propagation,
+we generate the combined virtual evidence ve(xi, n(yi)) for
+node yi by “stacking” the observations, xi, and the received
+virtual evidence messages vei(yk). The combined virtual ev-
+idence can then be used to compute the posterior distribution
+p(yi|ve(xi, n(yi))) using (4). Equivalently, from belief prop-
+agation we have
+
+(cid:9)
+
+p(yi|ve(xi, n(yi))) = γeF (yi,xi)
+
+μk→i(yi) (8)
+
+k∈n(yi)
+
+where γ is used for normalization.
+
+To summarize, at each iteration, VEB updates the vir-
+tual evidences via belief propagation using only those lo-
+cal features and compatibility potentials already contained
+in F .
+Initially, when F = 0, all posterior distributions
+p(yi|ve(xi, n(yi))) are uniform. It then proceeds exactly as
+the extended LogitBoost algorithm in order to add one more
+weak learner fm. In our experiments we found it sufﬁcient
+to run belief propagation for only one iteration per learning
+cycle, which greatly increases the efﬁciency of the approach.
+
+IJCAI-07
+
+2532
+
+4.2 Feature Selection in VEB
+A key step in Alg. 2 is step 8, which ﬁnds the “best” weak
+learner fm by solving the WLSE problem. Note that since
+a weak learner in CRFs is a certain kind of combination of
+features, the algorithm is essentially performing feature se-
+lection and parameter estimation. In this paper we only con-
+sider weak learners that are linear combinations of features
+and involve one single type of local attribute or neighbor 2.
+In a nutshell, to determine the “best” weak learner, our ap-
+proach enumerates all types of local attributes and neighbor
+relations. For each type, it computes the optimal parameters
+of the weak learner and the least square error. Then it picks
+the one with the overall least square error as well as its opti-
+mal parameters. In this section, we discuss how to formulate
+weak learners for CRFs with binary labels and how to esti-
+mate the optimal parameters efﬁciently. Speciﬁcally, we con-
+sider three different cases: when the weak learner involves
+a continuous attribute, a discrete attribute, or a neighbor re-
+lationship. While the ﬁrst two cases can be treated just like
+in regular LogitBoost, we apply extended boosting for the
+neighbor relationships to handle virtual evidences, with the
+evidences provided by belief propagation.
+
+First, for a continuous attribute x(k), the weak learner is
+
+a linear combination of decision stumps:
+
+f(x(k)) = α1δ(x(k) ≥ h) + α2δ(x(k) < h),
+
+where h is the threshold, and α1 and α2 are the feature
+weights. We get their (approximately) optimal values by solv-
+ing the WLSE problem in (3). Speciﬁcally, h is determined
+using some heuristic, e.g., to maximize the information gain.
+Then we compute the optimal α1 and α2 analytically by set-
+ting the ﬁrst-order partial derivative of the square error equal
+to zero. Thus we get
+PN
+i=1 wiziδ(x(k)
+PN
+i=1 wiδ(x(k)
+
+i < h)
+α1 =
+i < h)
+Second, given a discrete attribute x(k) ∈ {1,··· , D}, the
+weak learner is expressed as
+
+PN
+i=1 wiziδ(x(k)
+PN
+i=1 wiδ(x(k)
+
+i ≥ h)
+i ≥ h)
+
+and α2 =
+
+f(x(k)) =
+
+αdδ(x(k) = d) ,
+
+D(cid:2)
+
+d=1
+
+where αd is the weight for feature δ(x(k) = d), an indicator
+function which is 1 if x(k) = d and 0 otherwise. The optimal
+weights can be calculated similarly as:
+
+αd =
+
+PN
+i=1 wiziδ(x(k)
+PN
+i=1 wiδ(x(k)
+
+i = d)
+i = d)
+
+Third, given a certain type of neighbor and correspond-
+ing virtual evidence vei(yk), the weak learner is the weighted
+sum of two indicator functions (compatibility features):
+
+f (yk) =
+
+αdδ(yk = d).
+
+Solving the WLSE problem with virtual evidence, as in (5),
+
+we get the optimal weights:
+
+αd =
+
+i=1 wizivei(yk = d)
+i=1 wivei(yk = d)
+
+2Complex weak learners, such as decision trees involving differ-
+
+ent attributes, can also be learned in similar ways.
+
+1X
+
+d=0
+
+(cid:4)N
+(cid:4)N
+
+(cid:4)N
+(cid:4)N
+
+i=1 wizicdi
+i=1 wicdi
+
+We can unify the three cases for computing optimal feature
+
+weights as follows:
+
+αd =
+
+(9)
+
+Here cdi is the count of feature d in data instance i (assume
+we have cut CRFs into individual patches). cdi can be 0 and 1
+for local features, or a real number between 0 and 1 for com-
+patibility features. It can also be greater than 1 if we allow
+parameter sharing within an instance, for example, when a
+node is connected with more than one neighbor of the same
+type. Thus in our approach parameter estimation is solved by
+simply performing feature counting, which makes the whole
+algorithm very efﬁcient.
+
+It is important to notice that the algorithm typically ﬁrst
+picks reliable local attributes since messages from neighbors
+are close to uniform at the beginning. Then, after some iter-
+ations, it starts picking compatibility features as those mes-
+sages provide more information.
+
+5 Experiments
+We evaluate the performance of VEB and compare it with
+other alternatives: boosted random ﬁelds (BRF), maximum
+likelihood (ML), and maximum pseudo-likelihood (MPL).
+We perform experiments using both synthetic data and two
+different activity recognition datasets.
+In all these experi-
+ments, we run VEB as well as BRF for 50 iterations, and
+in each iteration we run one iteration of belief propagation.
+In ML and MPL learning, we use a shrinkage prior with
+zero mean and unit variance. ML and MPL optimization are
+implemented using a quasi-Newton procedure. For ML we
+evaluate the likelihood using the Bethe method [Yedidia et
+al., 2005] and its gradient using belief propagation. All the
+learned models are tested using the MAP belief propagation,
+except that we have to use a speciﬁc inference algorithm for
+BRF, as described in [Torralba et al., 2004]. All accuracies
+are calculated based on the MAP labels. All experiments
+were run on a standard desktop PC with 3.4GHz CPU and
+1GB of memory.
+5.1 Synthetic Data
+VEB versus BRF
+VEB and BRF are similar. However, BRF assumes the graphs
+are densely connected and thereby each individual message
+is not very informative, while VEB does not make any as-
+sumption about the connectivity structure. This difference is
+signiﬁcant because although their assumption is often true for
+the vision applications discussed in [Torralba et al., 2004], it
+may be invalid for many other applications. In this experi-
+ment, we examine the performance of VEB and BRF as the
+dependencies between nodes get stronger.
+
+The synthetic data is generated using a ﬁrst-order Markov
+chain with binary labels. To emphasize the difference on
+learning compatibility features, we intentionally use weak ob-
+servation models: each label is connected to 50 binary obser-
+vations and the conditional probabilities in the observation
+models are uniformly sampled from the range [0.45, 0.55].
+We adjust the transition probabilities (from label 0 to 0 and
+
+IJCAI-07
+
+2533
+
+VEB
+BRF
+
+1
+
+0.9
+
+0.8
+
+0.7
+
+0.6
+
+0.5
+
+y
+c
+a
+r
+u
+c
+c
+A
+
+0.7
+
+0.65
+
+0.6
+
+0.55
+
+y
+c
+a
+r
+u
+c
+c
+A
+
+0.5
+
+0.7
+
+0.8
+
+0.9
+
+0.5
+
+0.6
+
+(a)
+
+Transition Prob
+
+VEB BRF MPL ML
+
+(b)
+Figure 1: Classiﬁcation accuracies in experiments using synthetic
+data, where the error bars indicate 95% conﬁdence intervals.
+(a)
+VEB vs. BRF when the transition probabilities (pairwise dependen-
+cies) turn from weak to strong. (b) Comparison of different learning
+algorithms for feature selection.
+from label 1 to 1) from 0.5 to 0.99. For each given transition
+and observation model, we generate ten 2,000-labels chains
+and perform leave-one-out cross-validation using a linear-
+chain CRF. We additionally run the experiments several times
+by randomly generating different observation models.
+
+The running durations of both algorithms are very similar,
+so we only compare the accuracies. The average accuracies
+using VEB and BRF and their conﬁdence intervals are shown
+in Fig. 1(a). It is clear that when the compatibility dependen-
+cies are not strong (transition probabilities range from 0.5 to
+0.8), both methods give very similar accuracies. However, as
+the dependencies get stronger (from 0.9 to 0.99), VEB dra-
+matically outperforms BRF, mainly because the weak inter-
+action assumption underlying BRF does not hold any more.
+Feature Selection in Complex Models
+Many real sequential estimation problems have long-range
+dependencies, which can be modeled using high-order
+Markov models. However in practice it is often impossible
+to know the exact order, so people may have to use Markov
+models that have longer dependencies than the actual data.
+In this experiment, we simulate this scenario by generating
+synthetic data using a high-order Markov model, whose tran-
+sition probability p(yn | y1:n−1) = p(yn | yn−k), where k
+is a constant (the observation model is similar as the one in
+the previous experiment). That is, a label yn only depends
+on one past label yn−k, but the value of k is unknown to the
+CRF model. Speciﬁcally, we pick k from 1 to 5, and we set
+the transition probability p(yn | yn−k) as 0.9 if yn = yn−k
+and 0.1 otherwise. For a given k, we generate ten 2,000-long
+chains and perform leave-one-out cross-validation. We repeat
+the experiment for different k’s and compute the average.
+
+Since the exact value of k is unknown to the CRF model,
+we generate a densely-connected CRF that has connections
+between each pair of nodes whose distance is less than or
+equal to 5; then the CRF was trained using different algo-
+rithms.
+In our experiments, VEB can reliably identify the
+correct values of k, i.e., picking only pairwise features whose
+distance is k or multiples of k. Although BRF also performs
+feature selection and structure learning, it does not perform as
+well as VEB. The average classiﬁcation accuracies are shown
+in Fig. 1(b). Because VEB can robustly extract the sparse
+structures, it signiﬁcantly outperforms other approaches. As
+to the running time, VEB, BRF, and MPL are all quite efﬁ-
+cient; each training takes only tens of seconds. In contrast,
+the training using ML takes about 20 minutes.
+
+Training algorithm
+
+Average accuracy
+
+VEB
+BRF
+
+94.1%
+88.0%
+87.7%
+88.5%
+87.9%
+88.5%
+
+ML + all observations
+
+ML + boosting
+
+MPL + all observations
+
+MPL + boosting
+
+Table 1: Average accuracy for indoor activities
+
+5.2 Real Activity Recognition Data
+
+CRFs are well-suited for the tasks of activity recognition us-
+ing real sensor data, because of the overlaps between mea-
+surements and the strong relationships between activities. In
+this section, we compare different training approaches on
+such CRFs. Although VEB and BRF can handle continuous
+sensor measurements directly, doing that in ML and MPL is
+not straightforward. The performance of ML and MPL is ter-
+rible if we simply use the continuous measurements as fea-
+ture values. This is due to the fact that such features cor-
+respond to a zero-mean Gaussian assumption, which could
+be far from the truth. We try two tricks to circumvent this
+difﬁculty. One is to learn decision stumps for all observa-
+tions, using the heuristics as in VEB and BRF. The other is to
+use boosting (e.g., LogitBoost in our experiment) to select a
+set of decision stump features and these decision stumps are
+then fed into ML and MPL for weight estimation (as done in
+[Friedman et al., 2007]).
+
+Indoor Activity Recognition
+In the ﬁrst experiment, one person collected audio, accelera-
+tion, and light sensor data as he stayed indoors using a small
+wearable device. The total length of the data set is about
+1,100 minutes, recorded over a period of 12 days. The goal
+is to recognize the person’s major indoor activities including
+computer usage, meal, meeting, TV watching and sleeping.
+We segmented the data into one-minute chunks and manually
+labeled the activity at each minute for the purpose of super-
+vised learning and testing. For each chunk of data, we com-
+puted 315 feature values, which included energy in various
+frequency bands (log and linear) of the signal, autocorrela-
+tion, different entropy measures, etc. These features are fed
+into the CRF as observations, and one linear chain CRF is cre-
+ated per day. We evaluate our algorithm using leave-one-out
+cross-validation. Because the person performs different ac-
+tivities in different days, the accuracies can vary signiﬁcantly
+from day to day. Some activities, such as meals, are hard
+to recognize, while other activities, such as sleeping, are rela-
+tively easy to recognize. As a result, in the leave-one-day-out-
+cross-validation, the accuracies for different days vary signif-
+icantly and the standard deviation is rather large. The overall
+average accuracies using the different methods are shown in
+Table 1, in which VEB is about 5% to 6% better than ML and
+MPL, no matter how they incorporate the continuous obser-
+vations. Even though the error bars of the different techniques
+overlap, our approach is signiﬁcantly (0.05 level) better than
+its competitors when we evaluate the combination of the dif-
+ferent experiments reported in the paper.
+
+IJCAI-07
+
+2534
+
+c T−2
+
+c T−1
+
+c T
+
+Context sequence
+
+ASSIST and CALO Programs (contract numbers: NBCH-C-
+05-0137, SRI subcontract 27-000968).
+
+c 1
+
+s 1
+
+c 2
+
+s 2
+
+c 3
+
+s 3
+
+...
+
+...
+
+s T−2
+
+s T−1
+
+s T
+
+State sequence
+
+Figure 2: The CRF model for simultaneously inferring motion
+states and spatial contexts (observations are omitted for simplicity).
+
+Training algorithm
+
+Average overall accuracy
+
+VEB
+
+MPL + all observations
+
+MPL + boosting
+HMM + AdaBoost
+Table 2: Accuracy for inferring states and contexts
+
+88.8 ± 4.4%
+72.1 ± 3.9%
+70.9 ± 6.5%
+85.8 ± 2.7%
+
+Recognizing Motions and Spatial Contexts
+Subramanya et al. [2006] proposed a model for simultane-
+ously recognizing motion states (e.g., stationary, walking,
+running, driving, and going up/down stairs) and spatial con-
+texts (e.g., indoors, outdoors, vehicle) from wearable sensors.
+They train local features using AdaBoost and incorporate the
+boosted classiﬁers as observation into an HMM that infers
+jointly the states and contexts. Their data set consists of 12
+episodes and about 100,000 labels.
+In our experiment, we
+perform the same task with the same data set, but using a
+CRF instead of an HMM. As shown in Fig. 2, the CRF cap-
+tures the pairwise relations between states and contexts. We
+perform leave-one-out cross-validation using different learn-
+ing approaches. In such large and loopy CRFs, ML becomes
+completely intractable and does not ﬁnish in two days. MPL
+and VEB take about 2 hours for training 3. The overall aver-
+age accuracies and conﬁdence intervals are shown in Table 2.
+Our VEB clearly outperforms MPL, as well as the result in
+the original paper.
+
+6 Conclusions and Future Work
+We presented a novel and uniﬁed training algorithm for
+CRFs, called virtual evidence boosting, which can simultane-
+ously select informative features (both discrete and/or contin-
+uous) and estimate optimal parameters. As part of this train-
+ing algorithm, we generalized the LogitBoost algorithm to
+handle virtual evidence. By treating neighborhood relations
+as features, our approach also learns the connectivity struc-
+ture of CRFs.
+
+Our experimental results demonstrate that virtual evidence
+boosting signiﬁcantly outperforms other training approaches
+in both synthetic data and real world applications such as ac-
+tivity recognition. In future work, we want to compare our
+approach with max-margin techniques [Taskar et al., 2004]
+and explore the possibility of learning feature conjunctions.
+
+Acknowledgments
+We thank Benson Limketkai for the help on preparing the last
+dataset. This work was supported by the NSF under grant
+numbers IIS 0433637 and IIS-0093406, and the UW CSE Ed-
+ucator’s Fellowship. It has also been supported by DARPA’s
+
+3We did not implement BRF for this task because extending BRF
+
+to different types of hidden nodes is not straightforward.
+
+References
+[Besag, 1975] J. Besag. Statistical analysis of non-lattice
+
+data. The Statistician, 24, 1975.
+
+[Dietterich et al., 2004] T. Dietterich, A. Ashenfelter, and
+Y. Bulatov. Training conditional random ﬁelds via gradi-
+ent tree boosting. In Proc. of the International Conference
+on Machine Learning (ICML), 2004.
+
+[Freund and Schapire, 1997] Y. Freund and R. E. Schapire.
+A decision-theoretic generalization of on-line learning and
+an application to boosting. Journal of Computer and Sys-
+tem Sciences, 55(1):119–139, 1997.
+
+[Friedman et al., 2000] Jerome Friedman, Trevor Hastie,
+and Robert Tibshirani. Additive logistic regression: a
+statistical view of boosting.
+The Annals of Statistics,
+38(2):337–374, 2000.
+
+[Friedman et al., 2007] S. Friedman, D. Fox, and H. Pasula.
+Voronoi random ﬁelds: Extracting the topological struc-
+ture of indoor environments via place labeling. In Proc. of
+the International Joint Conference on Artiﬁcial Intelli-
+gence (IJCAI), 2007.
+
+[Lafferty et al., 2001] J. Lafferty, A. McCallum,
+
+[Geyer and Thompson, 1992] C. J. Geyer and E. A. Thomp-
+son. Constrained Monte Carlo Maximum Likelihood for
+dependent data. Journal of Royal Statistical Society, 1992.
+and
+F. Pereira.
+Conditional random ﬁelds: Probabilistic
+models for segmenting and labeling sequence data.
+In Proc. of
+the International Conference on Machine
+Learning (ICML), 2001.
+
+[McCallum, 2003] Andrew McCallum. Efﬁciently inducing
+features or conditional random ﬁelds. In Proc. of the Con-
+ference on Uncertainty in Artiﬁcial Intelligence, 2003.
+
+[Pearl, 1988] Judea Pearl. Probabilistic Reasoning in Intel-
+ligent Systems: Networks of Plausible Inference. Morgan
+Kaufmann, 1988.
+
+A.
+
+[Subramanya et al., 2006] A.
+Subramanya,
+Raj,
+Recognizing activities and
+J. Bilmes, and D. Fox.
+spatial context using wearable sensors.
+In Proc. of the
+Conference on Uncertainty in Artiﬁcial Intelligence, 2006.
+[Taskar et al., 2004] B. Taskar, C. Guestrin, V. Chatalbashev,
+and D. Koller. Max-margin Markov networks.
+In Ad-
+vances in Neural Information Processing Systems (NIPS),
+2004.
+
+[Torralba et al., 2004] A. Torralba, K. P. Murphy, and W. T.
+Freeman. Contextual models for object detection using
+boosted random ﬁelds. In Advances in Neural Information
+Processing Systems (NIPS), 2004.
+
+[Viola and Jones, 2002] P. Viola and M. Jones. Robust real-
+time object detection. International Journal of Computer
+Vision, 2002.
+
+[Yedidia et al., 2005] J.S. Yedidia, W.T. Freeman,
+
+and
+Y. Weiss. Constructing free-energy approximations and
+generalized belief propagation algorithms. IEEE Transac-
+tions on Information Theory, 51(7):2282–2312, 2005.
+
+IJCAI-07
+
+2535
+
+
